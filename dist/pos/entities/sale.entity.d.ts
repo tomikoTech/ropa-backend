@@ -1,0 +1,30 @@
+import { Client } from '../../clients/entities/client.entity.js';
+import { User } from '../../users/entities/user.entity.js';
+import { Warehouse } from '../../inventory/entities/warehouse.entity.js';
+import { SaleItem } from './sale-item.entity.js';
+import { Payment } from './payment.entity.js';
+import { AccountsReceivable } from './accounts-receivable.entity.js';
+import { SaleStatus } from '../../common/enums/sale-status.enum.js';
+import { TenantAwareEntity } from '../../common/entities/tenant-aware.entity.js';
+export declare class Sale extends TenantAwareEntity {
+    id: string;
+    saleNumber: string;
+    invoiceNumber: string;
+    client: Client;
+    clientId: string;
+    user: User;
+    userId: string;
+    warehouse: Warehouse;
+    warehouseId: string;
+    subtotal: number;
+    discountAmount: number;
+    taxAmount: number;
+    total: number;
+    status: SaleStatus;
+    notes: string;
+    items: SaleItem[];
+    payments: Payment[];
+    accountsReceivable: AccountsReceivable[];
+    createdAt: Date;
+    updatedAt: Date;
+}
