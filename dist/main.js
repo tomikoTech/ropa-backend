@@ -12,7 +12,13 @@ async function bootstrap() {
     app.useStaticAssets((0, path_1.join)(process.cwd(), 'uploads'), { prefix: '/uploads/' });
     app.setGlobalPrefix('api');
     app.enableCors({
-        origin: ['http://localhost:3001', 'http://localhost:3000', 'http://localhost:3002'],
+        origin: [
+            'http://localhost:3000',
+            'http://localhost:3001',
+            'http://localhost:3002',
+            'https://ecommerce-frontend-production-964f.up.railway.app',
+            'https://ropa-frontend-production.up.railway.app',
+        ],
         credentials: true,
     });
     app.useGlobalPipes(new common_1.ValidationPipe({
