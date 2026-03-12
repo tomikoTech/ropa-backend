@@ -55,7 +55,7 @@ export class AuthService {
 
     const user = await this.usersService.create({
       ...registerDto,
-      role: Role.VENTAS,
+      role: Role.COLABORADOR,
     });
 
     return this.generateTokens(user);

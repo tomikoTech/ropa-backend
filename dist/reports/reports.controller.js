@@ -150,7 +150,7 @@ __decorate([
 ], ReportsController.prototype, "getInventoryValuation", null);
 __decorate([
     (0, common_1.Get)('sales/export'),
-    (0, roles_decorator_js_1.Roles)(role_enum_js_1.Role.ADMIN, role_enum_js_1.Role.CONTABILIDAD),
+    (0, roles_decorator_js_1.Roles)(role_enum_js_1.Role.ADMIN),
     (0, swagger_1.ApiOperation)({ summary: 'Exportar reporte ventas a Excel' }),
     __param(0, (0, tenant_id_decorator_js_1.TenantId)()),
     __param(1, (0, common_1.Query)('from')),

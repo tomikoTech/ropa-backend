@@ -42,7 +42,7 @@ let ReturnsController = class ReturnsController {
 exports.ReturnsController = ReturnsController;
 __decorate([
     (0, common_1.Post)(),
-    (0, roles_decorator_js_1.Roles)(role_enum_js_1.Role.ADMIN, role_enum_js_1.Role.VENTAS),
+    (0, roles_decorator_js_1.Roles)(role_enum_js_1.Role.ADMIN, role_enum_js_1.Role.COLABORADOR),
     (0, swagger_1.ApiOperation)({ summary: 'Crear devolución' }),
     __param(0, (0, common_1.Body)()),
     __param(1, (0, current_user_decorator_js_1.CurrentUser)()),

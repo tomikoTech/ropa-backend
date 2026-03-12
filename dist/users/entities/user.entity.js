@@ -48,7 +48,7 @@ __decorate([
     __metadata("design:type", String)
 ], User.prototype, "lastName", void 0);
 __decorate([
-    (0, typeorm_1.Column)({ type: 'enum', enum: role_enum_js_1.Role, default: role_enum_js_1.Role.VENTAS }),
+    (0, typeorm_1.Column)({ type: 'enum', enum: role_enum_js_1.Role, default: role_enum_js_1.Role.COLABORADOR }),
     __metadata("design:type", String)
 ], User.prototype, "role", void 0);
 __decorate([

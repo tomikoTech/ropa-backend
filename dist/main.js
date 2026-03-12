@@ -12,7 +12,7 @@ async function bootstrap() {
     app.useStaticAssets((0, path_1.join)(process.cwd(), 'uploads'), { prefix: '/uploads/' });
     app.setGlobalPrefix('api');
     app.enableCors({
-        origin: ['http://localhost:3001', 'http://localhost:3000'],
+        origin: ['http://localhost:3001', 'http://localhost:3000', 'http://localhost:3002'],
         credentials: true,
     });
     app.useGlobalPipes(new common_1.ValidationPipe({
@@ -23,8 +23,8 @@ async function bootstrap() {
     app.useGlobalFilters(new http_exception_filter_js_1.HttpExceptionFilter());
     app.useGlobalInterceptors(new transform_response_interceptor_js_1.TransformResponseInterceptor());
     const config = new swagger_1.DocumentBuilder()
-        .setTitle('Tomiko Ropa POS API')
-        .setDescription('Sistema POS para tiendas de ropa - Colombia')
+        .setTitle('MiPinta API')
+        .setDescription('Sistema POS + E-commerce para tiendas de ropa - Colombia')
         .setVersion('1.0')
         .addBearerAuth()
         .build();

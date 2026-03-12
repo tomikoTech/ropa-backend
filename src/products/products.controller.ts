@@ -56,6 +56,18 @@ export class ProductsController {
     return this.productsService.update(id, dto, tenantId);
   }
 
+  @Patch(':id/publish')
+  @ApiOperation({ summary: 'Publicar producto en e-commerce' })
+  publish(@Param('id', ParseUUIDPipe) id: string, @TenantId() tenantId: string) {
+    return this.productsService.publish(id, tenantId);
+  }
+
+  @Patch(':id/unpublish')
+  @ApiOperation({ summary: 'Despublicar producto del e-commerce' })
+  unpublish(@Param('id', ParseUUIDPipe) id: string, @TenantId() tenantId: string) {
+    return this.productsService.unpublish(id, tenantId);
+  }
+
   @Delete(':id')
   @ApiOperation({ summary: 'Eliminar producto' })
   remove(@Param('id', ParseUUIDPipe) id: string, @TenantId() tenantId: string) {

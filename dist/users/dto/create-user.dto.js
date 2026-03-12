@@ -45,7 +45,7 @@ __decorate([
     __metadata("design:type", String)
 ], CreateUserDto.prototype, "lastName", void 0);
 __decorate([
-    (0, swagger_1.ApiPropertyOptional)({ enum: role_enum_js_1.Role, default: role_enum_js_1.Role.VENTAS }),
+    (0, swagger_1.ApiPropertyOptional)({ enum: role_enum_js_1.Role, default: role_enum_js_1.Role.COLABORADOR }),
     (0, class_validator_1.IsOptional)(),
     (0, class_validator_1.IsEnum)(role_enum_js_1.Role),
     __metadata("design:type", String)

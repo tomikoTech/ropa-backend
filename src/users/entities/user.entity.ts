@@ -29,7 +29,7 @@ export class User extends TenantAwareEntity {
   @Column({ name: 'last_name' })
   lastName: string;
 
-  @Column({ type: 'enum', enum: Role, default: Role.VENTAS })
+  @Column({ type: 'enum', enum: Role, default: Role.COLABORADOR })
   role: Role;
 
   @Column({ name: 'is_active', default: true })

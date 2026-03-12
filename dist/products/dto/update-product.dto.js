@@ -63,6 +63,8 @@ class UpdateProductDto {
     status;
     taxRate;
     imageUrl;
+    imageUrls;
+    isPublished;
     variants;
 }
 exports.UpdateProductDto = UpdateProductDto;
@@ -122,6 +124,19 @@ __decorate([
     (0, class_validator_1.IsString)(),
     __metadata("design:type", String)
 ], UpdateProductDto.prototype, "imageUrl", void 0);
+__decorate([
+    (0, swagger_1.ApiPropertyOptional)({ type: [String] }),
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsArray)(),
+    (0, class_validator_1.IsString)({ each: true }),
+    __metadata("design:type", Array)
+], UpdateProductDto.prototype, "imageUrls", void 0);
+__decorate([
+    (0, swagger_1.ApiPropertyOptional)(),
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsBoolean)(),
+    __metadata("design:type", Boolean)
+], UpdateProductDto.prototype, "isPublished", void 0);
 __decorate([
     (0, swagger_1.ApiPropertyOptional)({ type: [UpdateVariantDto] }),
     (0, class_validator_1.IsOptional)(),

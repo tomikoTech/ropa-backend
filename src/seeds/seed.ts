@@ -24,9 +24,12 @@ import { ReturnItem } from '../returns/entities/return-item.entity.js';
 import { CreditNote } from '../returns/entities/credit-note.entity.js';
 import { AuditLog } from '../audit/entities/audit-log.entity.js';
 import { Tenant } from '../tenants/entities/tenant.entity.js';
+import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
+import { EcommerceOrder } from '../storefront/entities/ecommerce-order.entity.js';
+import { EcommerceOrderItem } from '../storefront/entities/ecommerce-order-item.entity.js';
 import { Role } from '../common/enums/role.enum.js';
-import { DiscountType } from '../common/enums/discount-type.enum.js';
 import { Gender } from '../common/enums/gender.enum.js';
+import { MovementType } from '../common/enums/movement-type.enum.js';
 import { DocumentType } from '../common/enums/document-type.enum.js';
 import * as dotenv from 'dotenv';
 
@@ -64,81 +67,107 @@ const dataSource = new DataSource({
     ReturnItem,
     CreditNote,
     AuditLog,
+    StoreSettings,
+    EcommerceOrder,
+    EcommerceOrderItem,
   ],
   synchronize: true,
 });
+
+function generateSlug(name: string): string {
+  return name
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
 
 async function seed() {
   await dataSource.initialize();
   console.log('Database connected');
 
-  // ─── Default Tenant ───
   const tenantRepo = dataSource.getRepository(Tenant);
-  let tenant = await tenantRepo.findOne({ where: { slug: 'tomiko-default' } });
-  if (!tenant) {
-    tenant = await tenantRepo.save(
-      tenantRepo.create({ name: 'Tomiko Default', slug: 'tomiko-default' }),
-    );
-    console.log('Default tenant created: Tomiko Default');
-  } else {
-    console.log('Default tenant already exists');
-  }
-  const tenantId = tenant.id;
-
   const userRepo = dataSource.getRepository(User);
   const categoryRepo = dataSource.getRepository(Category);
   const productRepo = dataSource.getRepository(Product);
   const variantRepo = dataSource.getRepository(ProductVariant);
   const warehouseRepo = dataSource.getRepository(Warehouse);
   const stockRepo = dataSource.getRepository(Stock);
+  const stockMovementRepo = dataSource.getRepository(StockMovement);
+  const clientRepo = dataSource.getRepository(Client);
+  const settingsRepo = dataSource.getRepository(StoreSettings);
 
-  // ─── Users ───
-  let adminUser: User;
-  const existingAdmin = await userRepo.findOne({
-    where: { email: 'admin@tomiko.co' },
-  });
-  if (!existingAdmin) {
-    const passwordHash = await bcrypt.hash('admin123', 10);
-    adminUser = await userRepo.save(
+  // ═══════════════════════════════════════════
+  // 1. Platform Tenant (for Super Admin)
+  // ═══════════════════════════════════════════
+  let platformTenant = await tenantRepo.findOne({ where: { slug: 'mipinta-platform' } });
+  if (!platformTenant) {
+    platformTenant = await tenantRepo.save(
+      tenantRepo.create({ name: 'MiPinta Platform', slug: 'mipinta-platform' }),
+    );
+    console.log('Platform tenant created: MiPinta Platform');
+  } else {
+    console.log('Platform tenant already exists');
+  }
+
+  // ═══════════════════════════════════════════
+  // 2. Super Admin User
+  // ═══════════════════════════════════════════
+  let superAdmin = await userRepo.findOne({ where: { email: 'dyez1110@gmail.com' } });
+  if (!superAdmin) {
+    const passwordHash = await bcrypt.hash('supermario123', 10);
+    superAdmin = await userRepo.save(
       userRepo.create({
-        email: 'admin@tomiko.co',
+        email: 'dyez1110@gmail.com',
+        passwordHash,
+        firstName: 'Dylan',
+        lastName: 'Admin',
+        role: Role.SUPER_ADMIN,
+        isActive: true,
+        tenantId: platformTenant.id,
+      }),
+    );
+    console.log('Super Admin created: dyez1110@gmail.com');
+  } else {
+    console.log('Super Admin already exists');
+  }
+
+  // ═══════════════════════════════════════════
+  // 3. Tu Chapato Store
+  // ═══════════════════════════════════════════
+  let storeTenant = await tenantRepo.findOne({ where: { slug: 'tuchapato' } });
+  if (!storeTenant) {
+    storeTenant = await tenantRepo.save(
+      tenantRepo.create({ name: 'Tu Chapato', slug: 'tuchapato' }),
+    );
+    console.log('Tenant created: Tu Chapato');
+  } else {
+    console.log('Tenant already exists: Tu Chapato');
+  }
+  const tenantId = storeTenant.id;
+
+  // ── Store Admin ──
+  let storeAdmin = await userRepo.findOne({ where: { email: 'tuchapato@gmail.com' } });
+  if (!storeAdmin) {
+    const passwordHash = await bcrypt.hash('tuchapato123', 10);
+    storeAdmin = await userRepo.save(
+      userRepo.create({
+        email: 'tuchapato@gmail.com',
         passwordHash,
         firstName: 'Admin',
-        lastName: 'Tomiko',
+        lastName: 'Tu Chapato',
         role: Role.ADMIN,
         isActive: true,
         tenantId,
       }),
     );
-    console.log('Admin user created: admin@tomiko.co / admin123');
+    console.log('Store Admin created: tuchapato@gmail.com');
   } else {
-    adminUser = existingAdmin;
-    console.log('Admin user already exists');
+    console.log('Store Admin already exists');
   }
 
-  const existingVendedor = await userRepo.findOne({
-    where: { email: 'vendedor@tomiko.co' },
-  });
-  if (!existingVendedor) {
-    const passwordHash = await bcrypt.hash('vendedor123', 10);
-    await userRepo.save(
-      userRepo.create({
-        email: 'vendedor@tomiko.co',
-        passwordHash,
-        firstName: 'Vendedor',
-        lastName: 'Demo',
-        role: Role.VENTAS,
-        isActive: true,
-        tenantId,
-      }),
-    );
-    console.log('Vendedor user created: vendedor@tomiko.co / vendedor123');
-  } else {
-    console.log('Vendedor user already exists');
-  }
-
-  // ─── Clients ───
-  const clientRepo = dataSource.getRepository(Client);
+  // ── Generic Client ──
   const existingGeneric = await clientRepo.findOne({
     where: { isGeneric: true, tenantId },
   });
@@ -155,74 +184,30 @@ async function seed() {
       }),
     );
     console.log('Generic client created: Consumidor Final');
-  } else {
-    console.log('Generic client already exists');
   }
 
-  // Sample clients
-  const sampleClients = [
-    {
-      firstName: 'María',
-      lastName: 'González',
-      documentType: DocumentType.CC,
-      documentNumber: '1098765432',
-      email: 'maria@email.com',
-      phone: '3001234567',
-    },
-    {
-      firstName: 'Carlos',
-      lastName: 'Rodríguez',
-      documentType: DocumentType.CC,
-      documentNumber: '1087654321',
-      email: 'carlos@email.com',
-      phone: '3109876543',
-    },
-    {
-      firstName: 'Almacenes ABC',
-      lastName: 'S.A.S',
-      documentType: DocumentType.NIT,
-      documentNumber: '900123456-7',
-      email: 'ventas@abc.com',
-      phone: '6012345678',
-      address: 'Calle 100 #15-20, Bogotá',
-    },
-  ];
-
-  for (const cData of sampleClients) {
-    const existing = await clientRepo.findOne({
-      where: { documentNumber: cData.documentNumber, tenantId },
-    });
-    if (!existing) {
-      await clientRepo.save(clientRepo.create({ ...cData, tenantId }));
-      console.log(`Client created: ${cData.firstName} ${cData.lastName}`);
-    }
+  // ── Warehouse ──
+  let warehouse = await warehouseRepo.findOne({ where: { code: 'TCH-01', tenantId } });
+  if (!warehouse) {
+    warehouse = await warehouseRepo.save(
+      warehouseRepo.create({
+        name: 'Tu Chapato Principal',
+        code: 'TCH-01',
+        address: '',
+        isPosLocation: true,
+        tenantId,
+      }),
+    );
+    console.log('Warehouse created: Tu Chapato Principal');
   }
 
-  // ─── Warehouses ───
-  const warehousesData = [
-    { name: 'Bodega Principal', code: 'BOD-01', address: 'Bodega central', isPosLocation: false },
-    { name: 'Tienda Centro', code: 'TDA-01', address: 'Local centro comercial', isPosLocation: true },
-    { name: 'Tienda Norte', code: 'TDA-02', address: 'Local zona norte', isPosLocation: true },
-  ];
-
-  const warehouses: Warehouse[] = [];
-  for (const wData of warehousesData) {
-    let w = await warehouseRepo.findOne({ where: { code: wData.code, tenantId } });
-    if (!w) {
-      w = await warehouseRepo.save(warehouseRepo.create({ ...wData, tenantId }));
-      console.log(`Warehouse created: ${w.name}`);
-    }
-    warehouses.push(w);
-  }
-
-  // ─── Categories ───
+  // ── Categories ──
   const categoriesData = [
-    { name: 'Camisetas', slug: 'camisetas', sortOrder: 1 },
-    { name: 'Pantalones', slug: 'pantalones', sortOrder: 2 },
-    { name: 'Zapatos', slug: 'zapatos', sortOrder: 3 },
-    { name: 'Accesorios', slug: 'accesorios', sortOrder: 4 },
-    { name: 'Vestidos', slug: 'vestidos', sortOrder: 5 },
-    { name: 'Chaquetas', slug: 'chaquetas', sortOrder: 6 },
+    { name: 'Tenis', slug: 'tenis', sortOrder: 1 },
+    { name: 'Botas', slug: 'botas', sortOrder: 2 },
+    { name: 'Sandalias', slug: 'sandalias', sortOrder: 3 },
+    { name: 'Zapatos Formales', slug: 'zapatos-formales', sortOrder: 4 },
+    { name: 'Accesorios', slug: 'accesorios', sortOrder: 5 },
   ];
 
   const categories: Category[] = [];
@@ -235,102 +220,22 @@ async function seed() {
     categories.push(c);
   }
 
-  // Subcategories
-  const subCategoriesData = [
-    { name: 'Camisetas Polo', slug: 'camisetas-polo', parentSlug: 'camisetas', sortOrder: 1 },
-    { name: 'Camisetas Básicas', slug: 'camisetas-basicas', parentSlug: 'camisetas', sortOrder: 2 },
-    { name: 'Jeans', slug: 'jeans', parentSlug: 'pantalones', sortOrder: 1 },
-    { name: 'Pantalones Formales', slug: 'pantalones-formales', parentSlug: 'pantalones', sortOrder: 2 },
-    { name: 'Tenis', slug: 'tenis', parentSlug: 'zapatos', sortOrder: 1 },
-    { name: 'Botas', slug: 'botas', parentSlug: 'zapatos', sortOrder: 2 },
-    { name: 'Sandalias', slug: 'sandalias', parentSlug: 'zapatos', sortOrder: 3 },
-  ];
-
-  for (const scData of subCategoriesData) {
-    let sc = await categoryRepo.findOne({ where: { slug: scData.slug, tenantId } });
-    if (!sc) {
-      const parent = categories.find(
-        (c) => c.slug === scData.parentSlug,
-      );
-      sc = await categoryRepo.save(
-        categoryRepo.create({
-          name: scData.name,
-          slug: scData.slug,
-          sortOrder: scData.sortOrder,
-          parentId: parent?.id,
-          tenantId,
-        }),
-      );
-      console.log(`Subcategory created: ${sc.name}`);
-    }
-  }
-
-  // ─── Sample Products ───
-  const camisetasCat = categories.find((c) => c.slug === 'camisetas')!;
-  const jeansCat = await categoryRepo.findOne({ where: { slug: 'jeans', tenantId } });
-  const tenisCat = await categoryRepo.findOne({ where: { slug: 'tenis', tenantId } });
+  // ── Products ──
+  const tenisCat = categories.find((c) => c.slug === 'tenis')!;
+  const botasCat = categories.find((c) => c.slug === 'botas')!;
+  const sandaliasCat = categories.find((c) => c.slug === 'sandalias')!;
+  const formalesCat = categories.find((c) => c.slug === 'zapatos-formales')!;
 
   const productsData = [
-    {
-      name: 'Camiseta Polo Classic',
-      skuPrefix: 'POLCLS',
-      basePrice: 49900,
-      costPrice: 25000,
-      gender: Gender.HOMBRE,
-      categoryId: camisetasCat.id,
-      taxRate: 19,
-      variants: [
-        { size: 'S', color: 'Negro' },
-        { size: 'M', color: 'Negro' },
-        { size: 'L', color: 'Negro' },
-        { size: 'S', color: 'Blanco' },
-        { size: 'M', color: 'Blanco' },
-        { size: 'L', color: 'Blanco' },
-        { size: 'M', color: 'Azul' },
-        { size: 'L', color: 'Azul' },
-      ],
-    },
-    {
-      name: 'Camiseta Básica Mujer',
-      skuPrefix: 'BSCMUJ',
-      basePrice: 29900,
-      costPrice: 12000,
-      gender: Gender.MUJER,
-      categoryId: camisetasCat.id,
-      taxRate: 19,
-      variants: [
-        { size: 'XS', color: 'Rosa' },
-        { size: 'S', color: 'Rosa' },
-        { size: 'M', color: 'Rosa' },
-        { size: 'S', color: 'Negro' },
-        { size: 'M', color: 'Negro' },
-      ],
-    },
-    {
-      name: 'Jean Slim Fit',
-      skuPrefix: 'JNSLIM',
-      basePrice: 89900,
-      costPrice: 45000,
-      gender: Gender.HOMBRE,
-      categoryId: jeansCat?.id,
-      taxRate: 19,
-      variants: [
-        { size: '28', color: 'Azul Oscuro' },
-        { size: '30', color: 'Azul Oscuro' },
-        { size: '32', color: 'Azul Oscuro' },
-        { size: '34', color: 'Azul Oscuro' },
-        { size: '30', color: 'Negro' },
-        { size: '32', color: 'Negro' },
-      ],
-    },
     {
       name: 'Tenis Running Pro',
       skuPrefix: 'TNRPRO',
       basePrice: 159900,
       costPrice: 80000,
       gender: Gender.UNISEX,
-      categoryId: tenisCat?.id,
+      categoryId: tenisCat.id,
       taxRate: 19,
+      isPublished: true,
       variants: [
         { size: '38', color: 'Blanco' },
         { size: '39', color: 'Blanco' },
@@ -342,19 +247,93 @@ async function seed() {
         { size: '42', color: 'Negro' },
       ],
     },
+    {
+      name: 'Tenis Casual Urban',
+      skuPrefix: 'TNCURB',
+      basePrice: 129900,
+      costPrice: 55000,
+      gender: Gender.UNISEX,
+      categoryId: tenisCat.id,
+      taxRate: 19,
+      isPublished: true,
+      variants: [
+        { size: '38', color: 'Negro' },
+        { size: '39', color: 'Negro' },
+        { size: '40', color: 'Negro' },
+        { size: '41', color: 'Gris' },
+        { size: '42', color: 'Gris' },
+      ],
+    },
+    {
+      name: 'Bota Chelsea Classic',
+      skuPrefix: 'BTCHLS',
+      basePrice: 219900,
+      costPrice: 95000,
+      gender: Gender.HOMBRE,
+      categoryId: botasCat.id,
+      taxRate: 19,
+      isPublished: true,
+      variants: [
+        { size: '40', color: 'Café' },
+        { size: '41', color: 'Café' },
+        { size: '42', color: 'Café' },
+        { size: '40', color: 'Negro' },
+        { size: '41', color: 'Negro' },
+      ],
+    },
+    {
+      name: 'Sandalia Plataforma',
+      skuPrefix: 'SNDPLT',
+      basePrice: 89900,
+      costPrice: 35000,
+      gender: Gender.MUJER,
+      categoryId: sandaliasCat.id,
+      taxRate: 19,
+      isPublished: true,
+      variants: [
+        { size: '35', color: 'Negro' },
+        { size: '36', color: 'Negro' },
+        { size: '37', color: 'Negro' },
+        { size: '36', color: 'Beige' },
+        { size: '37', color: 'Beige' },
+      ],
+    },
+    {
+      name: 'Zapato Oxford Ejecutivo',
+      skuPrefix: 'ZPOXEJ',
+      basePrice: 289900,
+      costPrice: 120000,
+      gender: Gender.HOMBRE,
+      categoryId: formalesCat.id,
+      taxRate: 19,
+      isPublished: true,
+      variants: [
+        { size: '40', color: 'Negro' },
+        { size: '41', color: 'Negro' },
+        { size: '42', color: 'Negro' },
+        { size: '41', color: 'Café' },
+        { size: '42', color: 'Café' },
+      ],
+    },
   ];
 
+  let barcodeCounter = 0;
   for (const pData of productsData) {
     let product = await productRepo.findOne({
       where: { skuPrefix: pData.skuPrefix, tenantId },
     });
     if (!product) {
-      const { variants, ...productFields } = pData;
-      product = await productRepo.save(productRepo.create({ ...productFields, tenantId }));
+      const { variants, isPublished, ...productFields } = pData;
+      product = await productRepo.save(productRepo.create({
+        ...productFields,
+        slug: generateSlug(pData.name),
+        isPublished,
+        publishedAt: isPublished ? new Date() : undefined,
+        tenantId,
+      }));
       console.log(`Product created: ${product.name}`);
 
       const timestamp = Date.now().toString().slice(-6);
-      let variantIndex = 0;
       for (const v of variants) {
         const sizeCode = v.size.toUpperCase().slice(0, 3);
         const colorCode = v.color
@@ -363,7 +342,8 @@ async function seed() {
           .replace(/[\u0300-\u036f]/g, '')
           .slice(0, 3);
         const sku = `${pData.skuPrefix}-${sizeCode}-${colorCode}`;
-        const barcode = `78${timestamp}${String(variantIndex).padStart(4, '0')}`;
+        const barcode = `78${timestamp}${String(barcodeCounter).padStart(4, '0')}`;
+        barcodeCounter++;
 
         const variant = await variantRepo.save(
           variantRepo.create({
@@ -376,20 +356,28 @@ async function seed() {
           }),
         );
 
-        // Add stock to warehouses
-        for (const w of warehouses) {
-          const qty = Math.floor(Math.random() * 20) + 5;
-          await stockRepo.save(
-            stockRepo.create({
-              variantId: variant.id,
-              warehouseId: w.id,
-              quantity: qty,
-              minStock: 3,
-              tenantId,
-            }),
-          );
-        }
-        variantIndex++;
+        const qty = Math.floor(Math.random() * 20) + 5;
+        await stockRepo.save(
+          stockRepo.create({
+            variantId: variant.id,
+            warehouseId: warehouse.id,
+            quantity: qty,
+            minStock: 3,
+            tenantId,
+          }),
+        );
+
+        await stockMovementRepo.save(
+          stockMovementRepo.create({
+            variantId: variant.id,
+            warehouseId: warehouse.id,
+            movementType: MovementType.IN,
+            quantity: qty,
+            referenceType: 'SEED',
+            notes: 'Stock inicial',
+            tenantId,
+          }),
+        );
       }
       console.log(`  -> ${variants.length} variants with stock created`);
     } else {
@@ -397,98 +385,26 @@ async function seed() {
     }
   }
 
-  // ─── Suppliers ───
-  const supplierRepo = dataSource.getRepository(Supplier);
-  const sampleSuppliers = [
-    {
-      name: 'Textiles Colombia S.A.S',
-      nit: '900456789-1',
-      contactName: 'Juan Pérez',
-      email: 'ventas@textilescol.co',
-      phone: '6044567890',
-      address: 'Calle 50 #30-20, Medellín',
-    },
-    {
-      name: 'Calzado Nacional Ltda',
-      nit: '800123456-2',
-      contactName: 'Ana Martínez',
-      email: 'pedidos@calzadonacional.co',
-      phone: '6012345678',
-      address: 'Carrera 10 #15-30, Bogotá',
-    },
-    {
-      name: 'Distribuidora Fashion',
-      nit: '901234567-3',
-      contactName: 'Pedro López',
-      email: 'pedro@distrifashion.co',
-      phone: '3159876543',
-      address: 'Av. 6N #25-10, Cali',
-    },
-  ];
-
-  for (const sData of sampleSuppliers) {
-    const existing = await supplierRepo.findOne({
-      where: { nit: sData.nit, tenantId },
-    });
-    if (!existing) {
-      await supplierRepo.save(supplierRepo.create({ ...sData, tenantId }));
-      console.log(`Supplier created: ${sData.name}`);
-    }
-  }
-
-  // ─── Promotions ───
-  const promoRepo = dataSource.getRepository(Promotion);
-  const samplePromos = [
-    {
-      name: 'Descuento de Temporada 15%',
-      description: 'Descuento general de temporada en todos los productos',
-      discountType: DiscountType.PERCENTAGE,
-      discountValue: 15,
-      applicableTo: 'ALL',
-      startDate: new Date('2026-03-01'),
-      endDate: new Date('2026-03-31'),
-      maxUses: 500,
-    },
-    {
-      name: 'Promo Camisetas $10,000 OFF',
-      description: 'Descuento fijo en camisetas',
-      discountType: DiscountType.FIXED,
-      discountValue: 10000,
-      applicableTo: 'CATEGORY',
-      applicableId: camisetasCat.id,
-      startDate: new Date('2026-03-01'),
-      endDate: new Date('2026-04-30'),
-    },
-  ];
-
-  for (const pData of samplePromos) {
-    const existing = await promoRepo.findOne({
-      where: { name: pData.name, tenantId },
-    });
-    if (!existing) {
-      await promoRepo.save(promoRepo.create({ ...pData, tenantId }));
-      console.log(`Promotion created: ${pData.name}`);
-    }
-  }
-
-  // ─── Backfill existing data with tenant_id ───
-  const tables = [
-    'users', 'categories', 'products', 'product_variants', 'warehouses',
-    'stock', 'stock_movements', 'clients', 'sales', 'sale_items',
-    'payments', 'accounts_receivable', 'accounts_receivable_payments',
-    'suppliers', 'purchase_orders', 'purchase_order_items',
-    'accounts_payable', 'promotions', 'returns', 'return_items',
-    'credit_notes', 'audit_logs',
-  ];
-
-  for (const table of tables) {
-    const result = await dataSource.query(
-      `UPDATE "${table}" SET tenant_id = $1 WHERE tenant_id IS NULL`,
-      [tenantId],
+  // ── Store Settings ──
+  let storeSettings = await settingsRepo.findOne({ where: { tenantId } });
+  if (!storeSettings) {
+    storeSettings = await settingsRepo.save(
+      settingsRepo.create({
+        storeName: 'Tu Chapato',
+        storeSlug: 'tuchapato',
+        heroTitle: 'TU ESTILO.',
+        heroSubtitle: 'DESDE LOS PIES.',
+        accentColor: '#2563eb',
+        whatsappNumber: '',
+        aboutText: 'Tu Chapato: encuentra el calzado perfecto para cada ocasión.',
+        isStorefrontActive: true,
+        defaultWarehouseId: warehouse.id,
+        tenantId,
+      }),
     );
-    if (result[1] > 0) {
-      console.log(`Backfilled ${result[1]} rows in ${table}`);
-    }
+    console.log('Store settings created: Tu Chapato');
+  } else {
+    console.log('Store settings already exist');
   }
 
   await dataSource.destroy();

@@ -1,0 +1,56 @@
+import {
+  IsString,
+  IsOptional,
+  IsArray,
+  IsNumber,
+  IsUUID,
+  Min,
+  ValidateNested,
+  IsEmail,
+  ArrayMinSize,
+} from 'class-validator';
+import { Type } from 'class-transformer';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+
+export class CreateOrderItemDto {
+  @ApiProperty()
+  @IsUUID()
+  variantId: string;
+
+  @ApiProperty({ example: 1 })
+  @IsNumber()
+  @Min(1)
+  quantity: number;
+}
+
+export class CreateOrderDto {
+  @ApiProperty({ example: 'Juan Pérez' })
+  @IsString()
+  customerName: string;
+
+  @ApiProperty({ example: '3001234567' })
+  @IsString()
+  customerPhone: string;
+
+  @ApiPropertyOptional({ example: 'juan@email.com' })
+  @IsOptional()
+  @IsEmail()
+  customerEmail?: string;
+
+  @ApiPropertyOptional({ example: 'Por favor enviar bien empacado' })
+  @IsOptional()
+  @IsString()
+  customerNotes?: string;
+
+  @ApiPropertyOptional({ example: 'https://mipinta.com' })
+  @IsOptional()
+  @IsString()
+  ecommerceBaseUrl?: string;
+
+  @ApiProperty({ type: [CreateOrderItemDto] })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => CreateOrderItemDto)
+  items: CreateOrderItemDto[];
+}

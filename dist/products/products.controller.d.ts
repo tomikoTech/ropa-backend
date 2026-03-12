@@ -9,6 +9,8 @@ export declare class ProductsController {
     searchVariants(query: string, tenantId: string): Promise<import("./entities/product-variant.entity.js").ProductVariant[]>;
     findOne(id: string, tenantId: string): Promise<import("./entities/product.entity.js").Product>;
     update(id: string, dto: UpdateProductDto, tenantId: string): Promise<import("./entities/product.entity.js").Product>;
+    publish(id: string, tenantId: string): Promise<import("./entities/product.entity.js").Product>;
+    unpublish(id: string, tenantId: string): Promise<import("./entities/product.entity.js").Product>;
     remove(id: string, tenantId: string): Promise<void>;
     findVariant(variantId: string, tenantId: string): Promise<import("./entities/product-variant.entity.js").ProductVariant>;
 }

@@ -39,6 +39,12 @@ let ProductsController = class ProductsController {
     update(id, dto, tenantId) {
         return this.productsService.update(id, dto, tenantId);
     }
+    publish(id, tenantId) {
+        return this.productsService.publish(id, tenantId);
+    }
+    unpublish(id, tenantId) {
+        return this.productsService.unpublish(id, tenantId);
+    }
     remove(id, tenantId) {
         return this.productsService.remove(id, tenantId);
     }
@@ -93,6 +99,24 @@ __decorate([
     __metadata("design:paramtypes", [String, update_product_dto_js_1.UpdateProductDto, String]),
     __metadata("design:returntype", void 0)
 ], ProductsController.prototype, "update", null);
+__decorate([
+    (0, common_1.Patch)(':id/publish'),
+    (0, swagger_1.ApiOperation)({ summary: 'Publicar producto en e-commerce' }),
+    __param(0, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
+    __param(1, (0, tenant_id_decorator_js_1.TenantId)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String]),
+    __metadata("design:returntype", void 0)
+], ProductsController.prototype, "publish", null);
+__decorate([
+    (0, common_1.Patch)(':id/unpublish'),
+    (0, swagger_1.ApiOperation)({ summary: 'Despublicar producto del e-commerce' }),
+    __param(0, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
+    __param(1, (0, tenant_id_decorator_js_1.TenantId)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String]),
+    __metadata("design:returntype", void 0)
+], ProductsController.prototype, "unpublish", null);
 __decorate([
     (0, common_1.Delete)(':id'),
     (0, swagger_1.ApiOperation)({ summary: 'Eliminar producto' }),

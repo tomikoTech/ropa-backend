@@ -89,6 +89,17 @@ export class UpdateProductDto {
   @IsString()
   imageUrl?: string;
 
+  @ApiPropertyOptional({ type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  imageUrls?: string[];
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  isPublished?: boolean;
+
   @ApiPropertyOptional({ type: [UpdateVariantDto] })
   @IsOptional()
   @IsArray()

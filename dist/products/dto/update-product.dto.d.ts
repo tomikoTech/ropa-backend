@@ -17,5 +17,7 @@ export declare class UpdateProductDto {
     status?: ProductStatus;
     taxRate?: number;
     imageUrl?: string;
+    imageUrls?: string[];
+    isPublished?: boolean;
     variants?: UpdateVariantDto[];
 }

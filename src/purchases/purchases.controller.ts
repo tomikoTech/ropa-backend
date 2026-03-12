@@ -24,7 +24,7 @@ export class PurchasesController {
   constructor(private readonly purchasesService: PurchasesService) {}
 
   @Post()
-  @Roles(Role.ADMIN, Role.BODEGA)
+  @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Crear orden de compra' })
   create(
     @Body() dto: CreatePurchaseOrderDto,
@@ -45,7 +45,7 @@ export class PurchasesController {
   }
 
   @Get('accounts-payable')
-  @Roles(Role.ADMIN, Role.CONTABILIDAD)
+  @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Listar cuentas por pagar' })
   findAllAccountsPayable(
     @TenantId() tenantId: string,
@@ -66,7 +66,7 @@ export class PurchasesController {
   }
 
   @Post(':id/send')
-  @Roles(Role.ADMIN, Role.BODEGA)
+  @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Enviar orden de compra al proveedor' })
   send(
     @Param('id', ParseUUIDPipe) id: string,
@@ -76,7 +76,7 @@ export class PurchasesController {
   }
 
   @Post(':id/receive')
-  @Roles(Role.ADMIN, Role.BODEGA)
+  @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Recibir items de orden de compra' })
   receive(
     @Param('id', ParseUUIDPipe) id: string,
@@ -98,7 +98,7 @@ export class PurchasesController {
   }
 
   @Post('accounts-payable/:id/pay')
-  @Roles(Role.ADMIN, Role.CONTABILIDAD)
+  @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Marcar cuenta como pagada' })
   markAsPaid(
     @Param('id', ParseUUIDPipe) id: string,

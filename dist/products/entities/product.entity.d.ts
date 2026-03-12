@@ -7,6 +7,7 @@ export declare class Product extends TenantAwareEntity {
     id: string;
     name: string;
     skuPrefix: string;
+    slug: string;
     description: string;
     basePrice: number;
     costPrice: number;
@@ -16,6 +17,9 @@ export declare class Product extends TenantAwareEntity {
     status: ProductStatus;
     taxRate: number;
     imageUrl: string;
+    imageUrls: string[];
+    isPublished: boolean;
+    publishedAt: Date;
     variants: ProductVariant[];
     createdAt: Date;
     updatedAt: Date;

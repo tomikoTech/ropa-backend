@@ -10,11 +10,15 @@ export declare class ProductsService {
     private generateSkuPrefix;
     private generateSku;
     private generateBarcode;
+    generateSlug(name: string): string;
+    private ensureUniqueSlug;
     create(dto: CreateProductDto, tenantId: string): Promise<Product>;
     findAll(tenantId: string): Promise<Product[]>;
     findOne(id: string, tenantId: string): Promise<Product>;
     update(id: string, dto: UpdateProductDto, tenantId: string): Promise<Product>;
     remove(id: string, tenantId: string): Promise<void>;
+    publish(id: string, tenantId: string): Promise<Product>;
+    unpublish(id: string, tenantId: string): Promise<Product>;
     findVariant(variantId: string, tenantId: string): Promise<ProductVariant>;
     searchVariants(query: string, tenantId: string): Promise<ProductVariant[]>;
 }

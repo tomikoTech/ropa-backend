@@ -21,7 +21,7 @@ export class ReturnsController {
   constructor(private readonly returnsService: ReturnsService) {}
 
   @Post()
-  @Roles(Role.ADMIN, Role.VENTAS)
+  @Roles(Role.ADMIN, Role.COLABORADOR)
   @ApiOperation({ summary: 'Crear devolución' })
   create(
     @Body() dto: CreateReturnDto,

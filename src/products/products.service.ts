@@ -46,6 +46,30 @@ export class ProductsService {
     return `78${timestamp}${random}`;
   }
 
+  generateSlug(name: string): string {
+    return name
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+  }
+
+  private async ensureUniqueSlug(slug: string, tenantId: string, excludeId?: string): Promise<string> {
+    let candidate = slug;
+    let counter = 2;
+    while (true) {
+      const existing = await this.productRepository.findOne({
+        where: { slug: candidate, tenantId },
+      });
+      if (!existing || (excludeId && existing.id === excludeId)) {
+        return candidate;
+      }
+      candidate = `${slug}-${counter}`;
+      counter++;
+    }
+  }
+
   async create(dto: CreateProductDto, tenantId: string): Promise<Product> {
     let skuPrefix = this.generateSkuPrefix(dto.name);
 
@@ -58,9 +82,12 @@ export class ProductsService {
       skuPrefix = `${skuPrefix}${count}`;
     }
 
+    const slug = await this.ensureUniqueSlug(this.generateSlug(dto.name), tenantId);
+
     const product = this.productRepository.create({
       name: dto.name,
       skuPrefix,
+      slug,
       description: dto.description,
       basePrice: dto.basePrice,
       costPrice: dto.costPrice,
@@ -115,7 +142,11 @@ export class ProductsService {
   async update(id: string, dto: UpdateProductDto, tenantId: string): Promise<Product> {
     const product = await this.findOne(id, tenantId);
 
-    if (dto.name !== undefined) product.name = dto.name;
+    if (dto.name !== undefined) {
+      product.name = dto.name;
+      // Regenerate slug when name changes
+      product.slug = await this.ensureUniqueSlug(this.generateSlug(dto.name), tenantId, id);
+    }
     if (dto.description !== undefined) product.description = dto.description;
     if (dto.basePrice !== undefined) product.basePrice = dto.basePrice;
     if (dto.costPrice !== undefined) product.costPrice = dto.costPrice;
@@ -124,6 +155,11 @@ export class ProductsService {
     if (dto.status !== undefined) product.status = dto.status;
     if (dto.taxRate !== undefined) product.taxRate = dto.taxRate;
     if (dto.imageUrl !== undefined) product.imageUrl = dto.imageUrl;
+    if (dto.imageUrls !== undefined) product.imageUrls = dto.imageUrls;
+    if (dto.isPublished !== undefined) {
+      product.isPublished = dto.isPublished;
+      product.publishedAt = dto.isPublished ? new Date() : null!;
+    }
 
     await this.productRepository.save(product);
 
@@ -177,6 +213,22 @@ export class ProductsService {
   async remove(id: string, tenantId: string): Promise<void> {
     const product = await this.findOne(id, tenantId);
     await this.productRepository.remove(product);
+  }
+
+  async publish(id: string, tenantId: string): Promise<Product> {
+    const product = await this.findOne(id, tenantId);
+    product.isPublished = true;
+    product.publishedAt = new Date();
+    await this.productRepository.save(product);
+    return this.findOne(id, tenantId);
+  }
+
+  async unpublish(id: string, tenantId: string): Promise<Product> {
+    const product = await this.findOne(id, tenantId);
+    product.isPublished = false;
+    product.publishedAt = null!;
+    await this.productRepository.save(product);
+    return this.findOne(id, tenantId);
   }
 
   async findVariant(variantId: string, tenantId: string): Promise<ProductVariant> {

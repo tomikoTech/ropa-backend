@@ -17,6 +17,7 @@ import { TenantAwareEntity } from '../../common/entities/tenant-aware.entity.js'
 
 @Entity('products')
 @Unique(['tenantId', 'skuPrefix'])
+@Unique(['tenantId', 'slug'])
 export class Product extends TenantAwareEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -26,6 +27,9 @@ export class Product extends TenantAwareEntity {
 
   @Column({ name: 'sku_prefix' })
   skuPrefix: string;
+
+  @Column({ nullable: true })
+  slug: string;
 
   @Column({ type: 'text', nullable: true })
   description: string;
@@ -64,6 +68,15 @@ export class Product extends TenantAwareEntity {
 
   @Column({ name: 'image_url', nullable: true })
   imageUrl: string;
+
+  @Column({ name: 'image_urls', type: 'text', array: true, default: '{}' })
+  imageUrls: string[];
+
+  @Column({ name: 'is_published', default: false })
+  isPublished: boolean;
+
+  @Column({ name: 'published_at', type: 'timestamptz', nullable: true })
+  publishedAt: Date;
 
   @OneToMany(() => ProductVariant, (v) => v.product, {
     cascade: true,

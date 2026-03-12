@@ -24,7 +24,7 @@ export class SuppliersController {
   constructor(private readonly suppliersService: SuppliersService) {}
 
   @Post()
-  @Roles(Role.ADMIN, Role.BODEGA)
+  @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Crear proveedor' })
   create(@Body() dto: CreateSupplierDto, @TenantId() tenantId: string) {
     return this.suppliersService.create(dto, tenantId);
@@ -49,7 +49,7 @@ export class SuppliersController {
   }
 
   @Put(':id')
-  @Roles(Role.ADMIN, Role.BODEGA)
+  @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Actualizar proveedor' })
   update(
     @Param('id', ParseUUIDPipe) id: string,

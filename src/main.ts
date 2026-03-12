@@ -15,7 +15,7 @@ async function bootstrap() {
 
   app.setGlobalPrefix('api');
   app.enableCors({
-    origin: ['http://localhost:3001', 'http://localhost:3000'],
+    origin: ['http://localhost:3001', 'http://localhost:3000', 'http://localhost:3002'],
     credentials: true,
   });
 
@@ -32,8 +32,8 @@ async function bootstrap() {
 
   // Swagger
   const config = new DocumentBuilder()
-    .setTitle('Tomiko Ropa POS API')
-    .setDescription('Sistema POS para tiendas de ropa - Colombia')
+    .setTitle('MiPinta API')
+    .setDescription('Sistema POS + E-commerce para tiendas de ropa - Colombia')
     .setVersion('1.0')
     .addBearerAuth()
     .build();

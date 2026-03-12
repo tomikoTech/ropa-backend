@@ -88,7 +88,7 @@ let AuthService = class AuthService {
         }
         const user = await this.usersService.create({
             ...registerDto,
-            role: role_enum_js_1.Role.VENTAS,
+            role: role_enum_js_1.Role.COLABORADOR,
         });
         return this.generateTokens(user);
     }

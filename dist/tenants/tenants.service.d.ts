@@ -1,8 +1,10 @@
-import { Repository } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { Tenant } from './entities/tenant.entity.js';
+import { OnboardStoreDto } from './dto/onboard-store.dto.js';
 export declare class TenantsService {
     private readonly tenantRepo;
-    constructor(tenantRepo: Repository<Tenant>);
+    private readonly dataSource;
+    constructor(tenantRepo: Repository<Tenant>, dataSource: DataSource);
     create(data: {
         name: string;
         slug: string;
@@ -15,4 +17,19 @@ export declare class TenantsService {
         isActive: boolean;
     }>): Promise<Tenant>;
     remove(id: string): Promise<void>;
+    onboardStore(dto: OnboardStoreDto): Promise<{
+        tenant: {
+            id: string;
+            name: string;
+            slug: string;
+        };
+        admin: {
+            email: string;
+        };
+        storeSlug: string;
+        warehouse: {
+            id: string;
+            name: string;
+        };
+    }>;
 }

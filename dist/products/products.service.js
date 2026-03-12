@@ -49,6 +49,28 @@ let ProductsService = class ProductsService {
             .padStart(4, '0');
         return `78${timestamp}${random}`;
     }
+    generateSlug(name) {
+        return name
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+    }
+    async ensureUniqueSlug(slug, tenantId, excludeId) {
+        let candidate = slug;
+        let counter = 2;
+        while (true) {
+            const existing = await this.productRepository.findOne({
+                where: { slug: candidate, tenantId },
+            });
+            if (!existing || (excludeId && existing.id === excludeId)) {
+                return candidate;
+            }
+            candidate = `${slug}-${counter}`;
+            counter++;
+        }
+    }
     async create(dto, tenantId) {
         let skuPrefix = this.generateSkuPrefix(dto.name);
         const existingPrefix = await this.productRepository.findOne({
@@ -58,9 +80,11 @@ let ProductsService = class ProductsService {
             const count = await this.productRepository.count({ where: { tenantId } });
             skuPrefix = `${skuPrefix}${count}`;
         }
+        const slug = await this.ensureUniqueSlug(this.generateSlug(dto.name), tenantId);
         const product = this.productRepository.create({
             name: dto.name,
             skuPrefix,
+            slug,
             description: dto.description,
             basePrice: dto.basePrice,
             costPrice: dto.costPrice,
@@ -106,8 +130,10 @@ let ProductsService = class ProductsService {
     }
     async update(id, dto, tenantId) {
         const product = await this.findOne(id, tenantId);
-        if (dto.name !== undefined)
+        if (dto.name !== undefined) {
             product.name = dto.name;
+            product.slug = await this.ensureUniqueSlug(this.generateSlug(dto.name), tenantId, id);
+        }
         if (dto.description !== undefined)
             product.description = dto.description;
         if (dto.basePrice !== undefined)
@@ -124,6 +150,12 @@ let ProductsService = class ProductsService {
             product.taxRate = dto.taxRate;
         if (dto.imageUrl !== undefined)
             product.imageUrl = dto.imageUrl;
+        if (dto.imageUrls !== undefined)
+            product.imageUrls = dto.imageUrls;
+        if (dto.isPublished !== undefined) {
+            product.isPublished = dto.isPublished;
+            product.publishedAt = dto.isPublished ? new Date() : null;
+        }
         await this.productRepository.save(product);
         if (dto.variants) {
             for (const v of dto.variants) {
@@ -165,6 +197,20 @@ let ProductsService = class ProductsService {
     async remove(id, tenantId) {
         const product = await this.findOne(id, tenantId);
         await this.productRepository.remove(product);
+    }
+    async publish(id, tenantId) {
+        const product = await this.findOne(id, tenantId);
+        product.isPublished = true;
+        product.publishedAt = new Date();
+        await this.productRepository.save(product);
+        return this.findOne(id, tenantId);
+    }
+    async unpublish(id, tenantId) {
+        const product = await this.findOne(id, tenantId);
+        product.isPublished = false;
+        product.publishedAt = null;
+        await this.productRepository.save(product);
+        return this.findOne(id, tenantId);
     }
     async findVariant(variantId, tenantId) {
         const variant = await this.variantRepository.findOne({

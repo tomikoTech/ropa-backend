@@ -57,7 +57,7 @@ let PurchasesController = class PurchasesController {
 exports.PurchasesController = PurchasesController;
 __decorate([
     (0, common_1.Post)(),
-    (0, roles_decorator_js_1.Roles)(role_enum_js_1.Role.ADMIN, role_enum_js_1.Role.BODEGA),
+    (0, roles_decorator_js_1.Roles)(role_enum_js_1.Role.ADMIN),
     (0, swagger_1.ApiOperation)({ summary: 'Crear orden de compra' }),
     __param(0, (0, common_1.Body)()),
     __param(1, (0, current_user_decorator_js_1.CurrentUser)()),
@@ -78,7 +78,7 @@ __decorate([
 ], PurchasesController.prototype, "findAll", null);
 __decorate([
     (0, common_1.Get)('accounts-payable'),
-    (0, roles_decorator_js_1.Roles)(role_enum_js_1.Role.ADMIN, role_enum_js_1.Role.CONTABILIDAD),
+    (0, roles_decorator_js_1.Roles)(role_enum_js_1.Role.ADMIN),
     (0, swagger_1.ApiOperation)({ summary: 'Listar cuentas por pagar' }),
     __param(0, (0, tenant_id_decorator_js_1.TenantId)()),
     __param(1, (0, common_1.Query)('isPaid')),
@@ -97,7 +97,7 @@ __decorate([
 ], PurchasesController.prototype, "findOne", null);
 __decorate([
     (0, common_1.Post)(':id/send'),
-    (0, roles_decorator_js_1.Roles)(role_enum_js_1.Role.ADMIN, role_enum_js_1.Role.BODEGA),
+    (0, roles_decorator_js_1.Roles)(role_enum_js_1.Role.ADMIN),
     (0, swagger_1.ApiOperation)({ summary: 'Enviar orden de compra al proveedor' }),
     __param(0, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
     __param(1, (0, tenant_id_decorator_js_1.TenantId)()),
@@ -107,7 +107,7 @@ __decorate([
 ], PurchasesController.prototype, "send", null);
 __decorate([
     (0, common_1.Post)(':id/receive'),
-    (0, roles_decorator_js_1.Roles)(role_enum_js_1.Role.ADMIN, role_enum_js_1.Role.BODEGA),
+    (0, roles_decorator_js_1.Roles)(role_enum_js_1.Role.ADMIN),
     (0, swagger_1.ApiOperation)({ summary: 'Recibir items de orden de compra' }),
     __param(0, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
     __param(1, (0, common_1.Body)()),
@@ -129,7 +129,7 @@ __decorate([
 ], PurchasesController.prototype, "cancel", null);
 __decorate([
     (0, common_1.Post)('accounts-payable/:id/pay'),
-    (0, roles_decorator_js_1.Roles)(role_enum_js_1.Role.ADMIN, role_enum_js_1.Role.CONTABILIDAD),
+    (0, roles_decorator_js_1.Roles)(role_enum_js_1.Role.ADMIN),
     (0, swagger_1.ApiOperation)({ summary: 'Marcar cuenta como pagada' }),
     __param(0, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
     __param(1, (0, common_1.Body)()),

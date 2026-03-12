@@ -48,7 +48,7 @@ let SuppliersController = class SuppliersController {
 exports.SuppliersController = SuppliersController;
 __decorate([
     (0, common_1.Post)(),
-    (0, roles_decorator_js_1.Roles)(role_enum_js_1.Role.ADMIN, role_enum_js_1.Role.BODEGA),
+    (0, roles_decorator_js_1.Roles)(role_enum_js_1.Role.ADMIN),
     (0, swagger_1.ApiOperation)({ summary: 'Crear proveedor' }),
     __param(0, (0, common_1.Body)()),
     __param(1, (0, tenant_id_decorator_js_1.TenantId)()),
@@ -84,7 +84,7 @@ __decorate([
 ], SuppliersController.prototype, "findOne", null);
 __decorate([
     (0, common_1.Put)(':id'),
-    (0, roles_decorator_js_1.Roles)(role_enum_js_1.Role.ADMIN, role_enum_js_1.Role.BODEGA),
+    (0, roles_decorator_js_1.Roles)(role_enum_js_1.Role.ADMIN),
     (0, swagger_1.ApiOperation)({ summary: 'Actualizar proveedor' }),
     __param(0, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
     __param(1, (0, common_1.Body)()),

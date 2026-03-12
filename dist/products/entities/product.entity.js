@@ -20,6 +20,7 @@ let Product = class Product extends tenant_aware_entity_js_1.TenantAwareEntity {
     id;
     name;
     skuPrefix;
+    slug;
     description;
     basePrice;
     costPrice;
@@ -29,6 +30,9 @@ let Product = class Product extends tenant_aware_entity_js_1.TenantAwareEntity {
     status;
     taxRate;
     imageUrl;
+    imageUrls;
+    isPublished;
+    publishedAt;
     variants;
     createdAt;
     updatedAt;
@@ -46,6 +50,10 @@ __decorate([
     (0, typeorm_1.Column)({ name: 'sku_prefix' }),
     __metadata("design:type", String)
 ], Product.prototype, "skuPrefix", void 0);
+__decorate([
+    (0, typeorm_1.Column)({ nullable: true }),
+    __metadata("design:type", String)
+], Product.prototype, "slug", void 0);
 __decorate([
     (0, typeorm_1.Column)({ type: 'text', nullable: true }),
     __metadata("design:type", String)
@@ -94,6 +102,18 @@ __decorate([
     __metadata("design:type", String)
 ], Product.prototype, "imageUrl", void 0);
 __decorate([
+    (0, typeorm_1.Column)({ name: 'image_urls', type: 'text', array: true, default: '{}' }),
+    __metadata("design:type", Array)
+], Product.prototype, "imageUrls", void 0);
+__decorate([
+    (0, typeorm_1.Column)({ name: 'is_published', default: false }),
+    __metadata("design:type", Boolean)
+], Product.prototype, "isPublished", void 0);
+__decorate([
+    (0, typeorm_1.Column)({ name: 'published_at', type: 'timestamptz', nullable: true }),
+    __metadata("design:type", Date)
+], Product.prototype, "publishedAt", void 0);
+__decorate([
     (0, typeorm_1.OneToMany)(() => product_variant_entity_js_1.ProductVariant, (v) => v.product, {
         cascade: true,
         eager: false,
@@ -110,6 +130,7 @@ __decorate([
 ], Product.prototype, "updatedAt", void 0);
 exports.Product = Product = __decorate([
     (0, typeorm_1.Entity)('products'),
-    (0, typeorm_1.Unique)(['tenantId', 'skuPrefix'])
+    (0, typeorm_1.Unique)(['tenantId', 'skuPrefix']),
+    (0, typeorm_1.Unique)(['tenantId', 'slug'])
 ], Product);
 //# sourceMappingURL=product.entity.js.map

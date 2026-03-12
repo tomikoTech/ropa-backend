@@ -68,7 +68,7 @@ export class ReportsController {
   }
 
   @Get('sales/export')
-  @Roles(Role.ADMIN, Role.CONTABILIDAD)
+  @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Exportar reporte ventas a Excel' })
   async exportSalesExcel(
     @TenantId() tenantId: string,
