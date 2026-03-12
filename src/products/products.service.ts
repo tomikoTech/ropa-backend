@@ -28,14 +28,12 @@ export class ProductsService {
       .slice(0, 6);
   }
 
-  private generateSku(prefix: string, size: string, color: string): string {
-    const sizeCode = size.toUpperCase().slice(0, 3);
-    const colorCode = color
-      .toUpperCase()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .slice(0, 3);
-    return `${prefix}-${sizeCode}-${colorCode}`;
+  private generateSku(prefix: string, size?: string, color?: string): string {
+    const parts = [prefix];
+    if (size) parts.push(size.toUpperCase().slice(0, 3));
+    if (color) parts.push(color.toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').slice(0, 3));
+    if (parts.length === 1) parts.push(this.generateBarcode().slice(-4));
+    return parts.join('-');
   }
 
   private generateBarcode(): string {
@@ -86,11 +84,12 @@ export class ProductsService {
 
     const product = this.productRepository.create({
       name: dto.name,
+      displayName: dto.displayName,
       skuPrefix,
       slug,
       description: dto.description,
       basePrice: dto.basePrice,
-      costPrice: dto.costPrice,
+      costPrice: dto.costPrice ?? 0,
       gender: dto.gender,
       categoryId: dto.categoryId,
       taxRate: dto.taxRate ?? 19,
@@ -106,8 +105,8 @@ export class ProductsService {
         return this.variantRepository.create({
           productId: saved.id,
           sku: this.generateSku(skuPrefix, v.size, v.color),
-          size: v.size,
-          color: v.color,
+          size: v.size || '',
+          color: v.color || '',
           barcode: this.generateBarcode(),
           priceOverride: v.priceOverride || null,
           tenantId,
@@ -154,6 +153,7 @@ export class ProductsService {
     if (dto.categoryId !== undefined) product.categoryId = dto.categoryId;
     if (dto.status !== undefined) product.status = dto.status;
     if (dto.taxRate !== undefined) product.taxRate = dto.taxRate;
+    if (dto.displayName !== undefined) product.displayName = dto.displayName;
     if (dto.imageUrl !== undefined) product.imageUrl = dto.imageUrl;
     if (dto.imageUrls !== undefined) product.imageUrls = dto.imageUrls;
     if (dto.isPublished !== undefined) {
@@ -193,11 +193,11 @@ export class ProductsService {
             productId: id,
             sku: this.generateSku(
               product.skuPrefix,
-              v.size!,
-              v.color!,
+              v.size,
+              v.color,
             ),
-            size: v.size!,
-            color: v.color!,
+            size: v.size || '',
+            color: v.color || '',
             barcode: this.generateBarcode(),
             priceOverride: v.priceOverride || null,
             tenantId,

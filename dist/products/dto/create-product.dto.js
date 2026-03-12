@@ -21,15 +21,15 @@ class CreateVariantDto {
 }
 exports.CreateVariantDto = CreateVariantDto;
 __decorate([
-    (0, swagger_1.ApiProperty)({ example: 'M' }),
+    (0, swagger_1.ApiPropertyOptional)({ example: 'M' }),
+    (0, class_validator_1.IsOptional)(),
     (0, class_validator_1.IsString)(),
-    (0, class_validator_1.IsNotEmpty)(),
     __metadata("design:type", String)
 ], CreateVariantDto.prototype, "size", void 0);
 __decorate([
-    (0, swagger_1.ApiProperty)({ example: 'Negro' }),
+    (0, swagger_1.ApiPropertyOptional)({ example: 'Negro' }),
+    (0, class_validator_1.IsOptional)(),
     (0, class_validator_1.IsString)(),
-    (0, class_validator_1.IsNotEmpty)(),
     __metadata("design:type", String)
 ], CreateVariantDto.prototype, "color", void 0);
 __decorate([
@@ -46,6 +46,7 @@ class CreateProductDto {
     gender;
     categoryId;
     taxRate;
+    displayName;
     imageUrl;
     variants;
 }
@@ -69,7 +70,8 @@ __decorate([
     __metadata("design:type", Number)
 ], CreateProductDto.prototype, "basePrice", void 0);
 __decorate([
-    (0, swagger_1.ApiProperty)({ example: 25000 }),
+    (0, swagger_1.ApiPropertyOptional)({ example: 25000 }),
+    (0, class_validator_1.IsOptional)(),
     (0, class_validator_1.IsNumber)(),
     (0, class_validator_1.Min)(0),
     __metadata("design:type", Number)
@@ -92,6 +94,12 @@ __decorate([
     (0, class_validator_1.IsNumber)(),
     __metadata("design:type", Number)
 ], CreateProductDto.prototype, "taxRate", void 0);
+__decorate([
+    (0, swagger_1.ApiPropertyOptional)({ example: 'Nombre para la web' }),
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], CreateProductDto.prototype, "displayName", void 0);
 __decorate([
     (0, swagger_1.ApiPropertyOptional)({ example: 'https://example.com/image.jpg' }),
     (0, class_validator_1.IsOptional)(),

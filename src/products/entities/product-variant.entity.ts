@@ -28,10 +28,10 @@ export class ProductVariant extends TenantAwareEntity {
   @Column()
   sku: string;
 
-  @Column()
+  @Column({ nullable: true, default: '' })
   size: string;
 
-  @Column()
+  @Column({ nullable: true, default: '' })
   color: string;
 
   @Column({ nullable: true })

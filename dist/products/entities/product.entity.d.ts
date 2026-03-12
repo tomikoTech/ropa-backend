@@ -16,6 +16,7 @@ export declare class Product extends TenantAwareEntity {
     categoryId: string;
     status: ProductStatus;
     taxRate: number;
+    displayName: string;
     imageUrl: string;
     imageUrls: string[];
     isPublished: boolean;

@@ -34,13 +34,14 @@ let ProductsService = class ProductsService {
             .slice(0, 6);
     }
     generateSku(prefix, size, color) {
-        const sizeCode = size.toUpperCase().slice(0, 3);
-        const colorCode = color
-            .toUpperCase()
-            .normalize('NFD')
-            .replace(/[\u0300-\u036f]/g, '')
-            .slice(0, 3);
-        return `${prefix}-${sizeCode}-${colorCode}`;
+        const parts = [prefix];
+        if (size)
+            parts.push(size.toUpperCase().slice(0, 3));
+        if (color)
+            parts.push(color.toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').slice(0, 3));
+        if (parts.length === 1)
+            parts.push(this.generateBarcode().slice(-4));
+        return parts.join('-');
     }
     generateBarcode() {
         const timestamp = Date.now().toString().slice(-8);
@@ -83,11 +84,12 @@ let ProductsService = class ProductsService {
         const slug = await this.ensureUniqueSlug(this.generateSlug(dto.name), tenantId);
         const product = this.productRepository.create({
             name: dto.name,
+            displayName: dto.displayName,
             skuPrefix,
             slug,
             description: dto.description,
             basePrice: dto.basePrice,
-            costPrice: dto.costPrice,
+            costPrice: dto.costPrice ?? 0,
             gender: dto.gender,
             categoryId: dto.categoryId,
             taxRate: dto.taxRate ?? 19,
@@ -100,8 +102,8 @@ let ProductsService = class ProductsService {
                 return this.variantRepository.create({
                     productId: saved.id,
                     sku: this.generateSku(skuPrefix, v.size, v.color),
-                    size: v.size,
-                    color: v.color,
+                    size: v.size || '',
+                    color: v.color || '',
                     barcode: this.generateBarcode(),
                     priceOverride: v.priceOverride || null,
                     tenantId,
@@ -148,6 +150,8 @@ let ProductsService = class ProductsService {
             product.status = dto.status;
         if (dto.taxRate !== undefined)
             product.taxRate = dto.taxRate;
+        if (dto.displayName !== undefined)
+            product.displayName = dto.displayName;
         if (dto.imageUrl !== undefined)
             product.imageUrl = dto.imageUrl;
         if (dto.imageUrls !== undefined)
@@ -182,8 +186,8 @@ let ProductsService = class ProductsService {
                     const newVariant = this.variantRepository.create({
                         productId: id,
                         sku: this.generateSku(product.skuPrefix, v.size, v.color),
-                        size: v.size,
-                        color: v.color,
+                        size: v.size || '',
+                        color: v.color || '',
                         barcode: this.generateBarcode(),
                         priceOverride: v.priceOverride || null,
                         tenantId,

@@ -29,6 +29,7 @@ let Product = class Product extends tenant_aware_entity_js_1.TenantAwareEntity {
     categoryId;
     status;
     taxRate;
+    displayName;
     imageUrl;
     imageUrls;
     isPublished;
@@ -63,7 +64,7 @@ __decorate([
     __metadata("design:type", Number)
 ], Product.prototype, "basePrice", void 0);
 __decorate([
-    (0, typeorm_1.Column)({ name: 'cost_price', type: 'decimal', precision: 12, scale: 2 }),
+    (0, typeorm_1.Column)({ name: 'cost_price', type: 'decimal', precision: 12, scale: 2, default: 0 }),
     __metadata("design:type", Number)
 ], Product.prototype, "costPrice", void 0);
 __decorate([
@@ -97,6 +98,10 @@ __decorate([
     }),
     __metadata("design:type", Number)
 ], Product.prototype, "taxRate", void 0);
+__decorate([
+    (0, typeorm_1.Column)({ name: 'display_name', nullable: true }),
+    __metadata("design:type", String)
+], Product.prototype, "displayName", void 0);
 __decorate([
     (0, typeorm_1.Column)({ name: 'image_url', nullable: true }),
     __metadata("design:type", String)

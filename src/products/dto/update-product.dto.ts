@@ -84,6 +84,11 @@ export class UpdateProductDto {
   @IsNumber()
   taxRate?: number;
 
+  @ApiPropertyOptional({ example: 'Nombre para la web' })
+  @IsOptional()
+  @IsString()
+  displayName?: string;
+
   @ApiPropertyOptional({ example: 'https://example.com/image.jpg' })
   @IsOptional()
   @IsString()

@@ -310,7 +310,7 @@ export class StorefrontService {
       }
       if (!variant.isActive || variant.product.status !== ProductStatus.ACTIVE || !variant.product.isPublished) {
         throw new BadRequestException(
-          `Producto "${variant.product.name}" (${variant.sku}) no está disponible`,
+          `Producto "${variant.product.displayName || variant.product.name}" (${variant.sku}) no está disponible`,
         );
       }
 
@@ -355,7 +355,7 @@ export class StorefrontService {
       const orderItem = this.orderItemRepo.create({
         orderId: savedOrder.id,
         variantId: data.variant.id,
-        productName: data.variant.product.name,
+        productName: data.variant.product.displayName || data.variant.product.name,
         productSlug: data.variant.product.slug,
         productImageUrl: data.variant.product.imageUrl,
         variantSku: data.variant.sku,
@@ -374,7 +374,7 @@ export class StorefrontService {
     // Build WhatsApp message with product links
     const baseUrl = dto.ecommerceBaseUrl || '';
     const productLines = variantData.map(
-      (d) => `${d.variant.product.name} (${d.variant.size}, ${d.variant.color}) x${d.quantity}` +
+      (d) => `${d.variant.product.displayName || d.variant.product.name} (${d.variant.size}, ${d.variant.color}) x${d.quantity}` +
         (baseUrl ? `\n  ${baseUrl}/${settings.storeSlug}/products/${d.variant.product.slug}` : ''),
     );
 

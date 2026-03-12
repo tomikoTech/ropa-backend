@@ -14,15 +14,15 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Gender } from '../../common/enums/gender.enum.js';
 
 export class CreateVariantDto {
-  @ApiProperty({ example: 'M' })
+  @ApiPropertyOptional({ example: 'M' })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  size: string;
+  size?: string;
 
-  @ApiProperty({ example: 'Negro' })
+  @ApiPropertyOptional({ example: 'Negro' })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  color: string;
+  color?: string;
 
   @ApiPropertyOptional({ example: 55000 })
   @IsOptional()
@@ -46,10 +46,11 @@ export class CreateProductDto {
   @Min(0)
   basePrice: number;
 
-  @ApiProperty({ example: 25000 })
+  @ApiPropertyOptional({ example: 25000 })
+  @IsOptional()
   @IsNumber()
   @Min(0)
-  costPrice: number;
+  costPrice?: number;
 
   @ApiPropertyOptional({ enum: Gender, default: Gender.UNISEX })
   @IsOptional()
@@ -65,6 +66,11 @@ export class CreateProductDto {
   @IsOptional()
   @IsNumber()
   taxRate?: number;
+
+  @ApiPropertyOptional({ example: 'Nombre para la web' })
+  @IsOptional()
+  @IsString()
+  displayName?: string;
 
   @ApiPropertyOptional({ example: 'https://example.com/image.jpg' })
   @IsOptional()

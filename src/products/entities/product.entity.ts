@@ -37,7 +37,7 @@ export class Product extends TenantAwareEntity {
   @Column({ name: 'base_price', type: 'decimal', precision: 12, scale: 2 })
   basePrice: number;
 
-  @Column({ name: 'cost_price', type: 'decimal', precision: 12, scale: 2 })
+  @Column({ name: 'cost_price', type: 'decimal', precision: 12, scale: 2, default: 0 })
   costPrice: number;
 
   @Column({ type: 'enum', enum: Gender, default: Gender.UNISEX })
@@ -65,6 +65,9 @@ export class Product extends TenantAwareEntity {
     default: 19,
   })
   taxRate: number;
+
+  @Column({ name: 'display_name', nullable: true })
+  displayName: string;
 
   @Column({ name: 'image_url', nullable: true })
   imageUrl: string;

@@ -62,6 +62,7 @@ class UpdateProductDto {
     categoryId;
     status;
     taxRate;
+    displayName;
     imageUrl;
     imageUrls;
     isPublished;
@@ -118,6 +119,12 @@ __decorate([
     (0, class_validator_1.IsNumber)(),
     __metadata("design:type", Number)
 ], UpdateProductDto.prototype, "taxRate", void 0);
+__decorate([
+    (0, swagger_1.ApiPropertyOptional)({ example: 'Nombre para la web' }),
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], UpdateProductDto.prototype, "displayName", void 0);
 __decorate([
     (0, swagger_1.ApiPropertyOptional)({ example: 'https://example.com/image.jpg' }),
     (0, class_validator_1.IsOptional)(),

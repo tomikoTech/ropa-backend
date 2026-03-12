@@ -45,11 +45,11 @@ __decorate([
     __metadata("design:type", String)
 ], ProductVariant.prototype, "sku", void 0);
 __decorate([
-    (0, typeorm_1.Column)(),
+    (0, typeorm_1.Column)({ nullable: true, default: '' }),
     __metadata("design:type", String)
 ], ProductVariant.prototype, "size", void 0);
 __decorate([
-    (0, typeorm_1.Column)(),
+    (0, typeorm_1.Column)({ nullable: true, default: '' }),
     __metadata("design:type", String)
 ], ProductVariant.prototype, "color", void 0);
 __decorate([
