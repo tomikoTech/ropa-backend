@@ -62,6 +62,11 @@ export class UpdateStoreSettingsDto {
   @IsString()
   accentColor?: string;
 
+  @ApiPropertyOptional({ example: '#2563eb' })
+  @IsOptional()
+  @IsString()
+  posAccentColor?: string;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsBoolean()

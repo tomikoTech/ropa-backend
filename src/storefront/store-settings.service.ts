@@ -62,6 +62,8 @@ export class StoreSettingsService {
     if (dto.heroSubtitle !== undefined)
       settings.heroSubtitle = dto.heroSubtitle;
     if (dto.accentColor !== undefined) settings.accentColor = dto.accentColor;
+    if (dto.posAccentColor !== undefined)
+      settings.posAccentColor = dto.posAccentColor;
     if (dto.isStorefrontActive !== undefined)
       settings.isStorefrontActive = dto.isStorefrontActive;
     if (dto.defaultWarehouseId !== undefined)

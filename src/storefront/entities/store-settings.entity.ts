@@ -53,6 +53,9 @@ export class StoreSettings extends TenantAwareEntity {
   @Column({ name: 'accent_color', default: '#2563eb' })
   accentColor: string;
 
+  @Column({ name: 'pos_accent_color', default: '#2563eb' })
+  posAccentColor: string;
+
   @Column({ name: 'is_storefront_active', default: false })
   isStorefrontActive: boolean;
 
