@@ -48,7 +48,10 @@ __decorate([
     __metadata("design:type", Number)
 ], CreatePromotionDto.prototype, "discountValue", void 0);
 __decorate([
-    (0, swagger_1.ApiPropertyOptional)({ example: 'ALL', description: 'ALL | CATEGORY | PRODUCT' }),
+    (0, swagger_1.ApiPropertyOptional)({
+        example: 'ALL',
+        description: 'ALL | CATEGORY | PRODUCT',
+    }),
     (0, class_validator_1.IsOptional)(),
     (0, class_validator_1.IsString)(),
     __metadata("design:type", String)

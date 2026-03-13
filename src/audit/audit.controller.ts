@@ -23,13 +23,16 @@ export class AuditController {
     @Query('to') to?: string,
     @Query('limit') limit?: string,
   ) {
-    return this.auditService.findAll({
-      entityType,
-      userId,
-      action,
-      from,
-      to,
-      limit: limit ? parseInt(limit, 10) : undefined,
-    }, tenantId);
+    return this.auditService.findAll(
+      {
+        entityType,
+        userId,
+        action,
+        from,
+        to,
+        limit: limit ? parseInt(limit, 10) : undefined,
+      },
+      tenantId,
+    );
   }
 }

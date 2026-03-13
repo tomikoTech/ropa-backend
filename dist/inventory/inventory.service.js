@@ -125,7 +125,11 @@ let InventoryService = class InventoryService {
             const stockRepo = manager.getRepository(stock_entity_js_1.Stock);
             const movementRepo = manager.getRepository(stock_movement_entity_js_1.StockMovement);
             let stock = await stockRepo.findOne({
-                where: { variantId: dto.variantId, warehouseId: dto.warehouseId, tenantId },
+                where: {
+                    variantId: dto.variantId,
+                    warehouseId: dto.warehouseId,
+                    tenantId,
+                },
             });
             if (!stock) {
                 stock = stockRepo.create({
@@ -174,14 +178,22 @@ let InventoryService = class InventoryService {
         return this.dataSource.transaction(async (manager) => {
             const stockRepo = manager.getRepository(stock_entity_js_1.Stock);
             const movementRepo = manager.getRepository(stock_movement_entity_js_1.StockMovement);
-            let fromStock = await stockRepo.findOne({
-                where: { variantId: dto.variantId, warehouseId: dto.fromWarehouseId, tenantId },
+            const fromStock = await stockRepo.findOne({
+                where: {
+                    variantId: dto.variantId,
+                    warehouseId: dto.fromWarehouseId,
+                    tenantId,
+                },
             });
             if (!fromStock || fromStock.quantity < dto.quantity) {
                 throw new common_1.BadRequestException(`Stock insuficiente en bodega origen. Disponible: ${fromStock?.quantity ?? 0}`);
             }
             let toStock = await stockRepo.findOne({
-                where: { variantId: dto.variantId, warehouseId: dto.toWarehouseId, tenantId },
+                where: {
+                    variantId: dto.variantId,
+                    warehouseId: dto.toWarehouseId,
+                    tenantId,
+                },
             });
             if (!toStock) {
                 toStock = stockRepo.create({

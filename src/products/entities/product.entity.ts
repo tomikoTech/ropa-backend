@@ -37,7 +37,13 @@ export class Product extends TenantAwareEntity {
   @Column({ name: 'base_price', type: 'decimal', precision: 12, scale: 2 })
   basePrice: number;
 
-  @Column({ name: 'cost_price', type: 'decimal', precision: 12, scale: 2, default: 0 })
+  @Column({
+    name: 'cost_price',
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+    default: 0,
+  })
   costPrice: number;
 
   @Column({ type: 'enum', enum: Gender, default: Gender.UNISEX })

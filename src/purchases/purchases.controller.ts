@@ -68,10 +68,7 @@ export class PurchasesController {
   @Post(':id/send')
   @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Enviar orden de compra al proveedor' })
-  send(
-    @Param('id', ParseUUIDPipe) id: string,
-    @TenantId() tenantId: string,
-  ) {
+  send(@Param('id', ParseUUIDPipe) id: string, @TenantId() tenantId: string) {
     return this.purchasesService.send(id, tenantId);
   }
 
@@ -90,10 +87,7 @@ export class PurchasesController {
   @Post(':id/cancel')
   @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Cancelar orden de compra' })
-  cancel(
-    @Param('id', ParseUUIDPipe) id: string,
-    @TenantId() tenantId: string,
-  ) {
+  cancel(@Param('id', ParseUUIDPipe) id: string, @TenantId() tenantId: string) {
     return this.purchasesService.cancel(id, tenantId);
   }
 
@@ -105,6 +99,10 @@ export class PurchasesController {
     @Body() body: { receiptImageUrl?: string },
     @TenantId() tenantId: string,
   ) {
-    return this.purchasesService.markAsPaid(id, body?.receiptImageUrl, tenantId);
+    return this.purchasesService.markAsPaid(
+      id,
+      body?.receiptImageUrl,
+      tenantId,
+    );
   }
 }

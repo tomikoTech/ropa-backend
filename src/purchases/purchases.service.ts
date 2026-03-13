@@ -54,9 +54,7 @@ export class PurchasesService {
         where: { id: item.variantId, tenantId },
       });
       if (!variant) {
-        throw new NotFoundException(
-          `Variante ${item.variantId} no encontrada`,
-        );
+        throw new NotFoundException(`Variante ${item.variantId} no encontrada`);
       }
     }
 
@@ -104,17 +102,29 @@ export class PurchasesService {
     return this.findOne(savedPo.id, tenantId);
   }
 
-  async findAll(filters: {
-    status?: PurchaseOrderStatus;
-    supplierId?: string;
-  } | undefined, tenantId: string): Promise<PurchaseOrder[]> {
+  async findAll(
+    filters:
+      | {
+          status?: PurchaseOrderStatus;
+          supplierId?: string;
+        }
+      | undefined,
+    tenantId: string,
+  ): Promise<PurchaseOrder[]> {
     const where: Record<string, unknown> = { tenantId };
     if (filters?.status) where.status = filters.status;
     if (filters?.supplierId) where.supplierId = filters.supplierId;
 
     return this.poRepository.find({
       where,
-      relations: ['supplier', 'warehouse', 'createdBy', 'items', 'items.variant', 'accountsPayable'],
+      relations: [
+        'supplier',
+        'warehouse',
+        'createdBy',
+        'items',
+        'items.variant',
+        'accountsPayable',
+      ],
       order: { createdAt: 'DESC' },
     });
   }
@@ -285,9 +295,14 @@ export class PurchasesService {
 
   // ─── Accounts Payable ───
 
-  async findAllAccountsPayable(filters: {
-    isPaid?: boolean;
-  } | undefined, tenantId: string): Promise<AccountsPayable[]> {
+  async findAllAccountsPayable(
+    filters:
+      | {
+          isPaid?: boolean;
+        }
+      | undefined,
+    tenantId: string,
+  ): Promise<AccountsPayable[]> {
     const where: Record<string, unknown> = { tenantId };
     if (filters?.isPaid !== undefined) where.isPaid = filters.isPaid;
 

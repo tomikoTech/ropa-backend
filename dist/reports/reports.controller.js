@@ -64,11 +64,23 @@ let ReportsController = class ReportsController {
         ];
         summary.addRows([
             { metric: 'Total Ventas', value: report.totalSales },
-            { metric: 'Monto Total', value: `$${report.totalAmount.toLocaleString('es-CO')}` },
+            {
+                metric: 'Monto Total',
+                value: `$${report.totalAmount.toLocaleString('es-CO')}`,
+            },
             { metric: 'Total Items', value: report.totalItems },
-            { metric: 'IVA Total', value: `$${report.totalTax.toLocaleString('es-CO')}` },
-            { metric: 'Descuentos Total', value: `$${report.totalDiscount.toLocaleString('es-CO')}` },
-            { metric: 'Ticket Promedio', value: `$${report.averageTicket.toLocaleString('es-CO')}` },
+            {
+                metric: 'IVA Total',
+                value: `$${report.totalTax.toLocaleString('es-CO')}`,
+            },
+            {
+                metric: 'Descuentos Total',
+                value: `$${report.totalDiscount.toLocaleString('es-CO')}`,
+            },
+            {
+                metric: 'Ticket Promedio',
+                value: `$${report.averageTicket.toLocaleString('es-CO')}`,
+            },
         ]);
         summary.getRow(1).font = { bold: true };
         const daily = workbook.addWorksheet('Ventas Diarias');

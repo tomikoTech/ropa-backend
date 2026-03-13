@@ -49,10 +49,13 @@ export class ReturnsService {
    * Create a return: validate sale, create return + items,
    * restore inventory, create credit note — all in a transaction.
    */
-  async create(dto: CreateReturnDto, userId: string, tenantId: string): Promise<Return> {
+  async create(
+    dto: CreateReturnDto,
+    userId: string,
+    tenantId: string,
+  ): Promise<Return> {
     return this.dataSource.transaction(async (manager) => {
       const saleRepo = manager.getRepository(Sale);
-      const saleItemRepo = manager.getRepository(SaleItem);
       const returnRepo = manager.getRepository(Return);
       const returnItemRepo = manager.getRepository(ReturnItem);
       const creditNoteRepo = manager.getRepository(CreditNote);
@@ -68,7 +71,9 @@ export class ReturnsService {
         throw new NotFoundException('Venta no encontrada');
       }
       if (sale.status !== SaleStatus.COMPLETED) {
-        throw new BadRequestException('Solo se pueden devolver ventas completadas');
+        throw new BadRequestException(
+          'Solo se pueden devolver ventas completadas',
+        );
       }
 
       const returnNumber = await this.generateReturnNumber(tenantId);
@@ -80,7 +85,9 @@ export class ReturnsService {
       for (const itemDto of dto.items) {
         const saleItem = sale.items.find((i) => i.id === itemDto.saleItemId);
         if (!saleItem) {
-          throw new NotFoundException(`Item de venta ${itemDto.saleItemId} no encontrado`);
+          throw new NotFoundException(
+            `Item de venta ${itemDto.saleItemId} no encontrado`,
+          );
         }
         if (itemDto.quantity > saleItem.quantity) {
           throw new BadRequestException(
@@ -118,7 +125,11 @@ export class ReturnsService {
 
         // Restore stock
         const stock = await stockRepo.findOne({
-          where: { variantId: saleItem.variantId, warehouseId: sale.warehouseId, tenantId },
+          where: {
+            variantId: saleItem.variantId,
+            warehouseId: sale.warehouseId,
+            tenantId,
+          },
         });
         if (stock) {
           stock.quantity += quantity;
@@ -154,10 +165,19 @@ export class ReturnsService {
       // Return full entity
       const fullReturn = await returnRepo.findOne({
         where: { id: savedReturn.id, tenantId },
-        relations: ['sale', 'client', 'user', 'items', 'items.variant', 'creditNotes'],
+        relations: [
+          'sale',
+          'client',
+          'user',
+          'items',
+          'items.variant',
+          'creditNotes',
+        ],
       });
       if (!fullReturn) {
-        throw new NotFoundException('Devolución no encontrada después de crear');
+        throw new NotFoundException(
+          'Devolución no encontrada después de crear',
+        );
       }
       return fullReturn;
     });
@@ -174,7 +194,15 @@ export class ReturnsService {
   async findOne(id: string, tenantId: string): Promise<Return> {
     const ret = await this.returnRepository.findOne({
       where: { id, tenantId },
-      relations: ['sale', 'client', 'user', 'items', 'items.variant', 'items.saleItem', 'creditNotes'],
+      relations: [
+        'sale',
+        'client',
+        'user',
+        'items',
+        'items.variant',
+        'items.saleItem',
+        'creditNotes',
+      ],
     });
     if (!ret) {
       throw new NotFoundException('Devolución no encontrada');

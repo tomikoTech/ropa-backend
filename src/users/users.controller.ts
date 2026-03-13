@@ -40,7 +40,10 @@ export class UsersController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Obtener usuario por ID' })
-  findOne(@Param('id', ParseUUIDPipe) id: string, @TenantId() tenantId: string) {
+  findOne(
+    @Param('id', ParseUUIDPipe) id: string,
+    @TenantId() tenantId: string,
+  ) {
     return this.usersService.findOne(id, tenantId);
   }
 

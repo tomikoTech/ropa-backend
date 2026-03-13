@@ -40,7 +40,9 @@ export class StorefrontService {
     private readonly taxService: TaxService,
   ) {}
 
-  private async resolveTenant(tenantSlug: string): Promise<{ tenantId: string; settings: StoreSettings }> {
+  private async resolveTenant(
+    tenantSlug: string,
+  ): Promise<{ tenantId: string; settings: StoreSettings }> {
     const settings = await this.settingsRepo.findOne({
       where: { storeSlug: tenantSlug, isStorefrontActive: true },
     });
@@ -146,11 +148,14 @@ export class StorefrontService {
     });
   }
 
-  async getProducts(tenantSlug: string, filters?: {
-    categorySlug?: string;
-    gender?: string;
-    search?: string;
-  }) {
+  async getProducts(
+    tenantSlug: string,
+    filters?: {
+      categorySlug?: string;
+      gender?: string;
+      search?: string;
+    },
+  ) {
     const { tenantId, settings } = await this.resolveTenant(tenantSlug);
     const warehouseId = settings.defaultWarehouseId;
 
@@ -202,7 +207,12 @@ export class StorefrontService {
     const { tenantId, settings } = await this.resolveTenant(tenantSlug);
 
     const product = await this.productRepo.findOne({
-      where: { slug: productSlug, tenantId, isPublished: true, status: ProductStatus.ACTIVE },
+      where: {
+        slug: productSlug,
+        tenantId,
+        isPublished: true,
+        status: ProductStatus.ACTIVE,
+      },
       relations: ['category', 'variants'],
     });
     if (!product) {
@@ -216,7 +226,11 @@ export class StorefrontService {
     if (settings.defaultWarehouseId && product.variants.length > 0) {
       const variantIds = product.variants.map((v) => v.id);
       const stocks = await this.stockRepo.find({
-        where: { variantId: In(variantIds), warehouseId: settings.defaultWarehouseId, tenantId },
+        where: {
+          variantId: In(variantIds),
+          warehouseId: settings.defaultWarehouseId,
+          tenantId,
+        },
       });
       const stockMap = new Map(stocks.map((s) => [s.variantId, s.quantity]));
 
@@ -247,7 +261,9 @@ export class StorefrontService {
       .groupBy('p.category_id')
       .getRawMany();
 
-    const countMap = new Map(counts.map((c) => [c.categoryId, parseInt(c.count)]));
+    const countMap = new Map(
+      counts.map((c) => [c.categoryId, parseInt(c.count)]),
+    );
 
     return categories.map((cat) => ({
       ...cat,
@@ -308,7 +324,11 @@ export class StorefrontService {
       if (variant.tenantId !== tenantId) {
         throw new NotFoundException(`Variante ${item.variantId} no encontrada`);
       }
-      if (!variant.isActive || variant.product.status !== ProductStatus.ACTIVE || !variant.product.isPublished) {
+      if (
+        !variant.isActive ||
+        variant.product.status !== ProductStatus.ACTIVE ||
+        !variant.product.isPublished
+      ) {
         throw new BadRequestException(
           `Producto "${variant.product.displayName || variant.product.name}" (${variant.sku}) no está disponible`,
         );
@@ -319,7 +339,12 @@ export class StorefrontService {
         : Number(variant.product.basePrice);
       const taxRate = Number(variant.product.taxRate);
 
-      const lineCalc = this.taxService.calculateLine(unitPrice, item.quantity, 0, taxRate);
+      const lineCalc = this.taxService.calculateLine(
+        unitPrice,
+        item.quantity,
+        0,
+        taxRate,
+      );
       lineCalcs.push(lineCalc);
 
       variantData.push({ variant, quantity: item.quantity, lineCalc });
@@ -355,7 +380,8 @@ export class StorefrontService {
       const orderItem = this.orderItemRepo.create({
         orderId: savedOrder.id,
         variantId: data.variant.id,
-        productName: data.variant.product.displayName || data.variant.product.name,
+        productName:
+          data.variant.product.displayName || data.variant.product.name,
         productSlug: data.variant.product.slug,
         productImageUrl: data.variant.product.imageUrl,
         variantSku: data.variant.sku,
@@ -374,8 +400,11 @@ export class StorefrontService {
     // Build WhatsApp message with product links
     const baseUrl = dto.ecommerceBaseUrl || '';
     const productLines = variantData.map(
-      (d) => `${d.variant.product.displayName || d.variant.product.name} (${d.variant.size}, ${d.variant.color}) x${d.quantity}` +
-        (baseUrl ? `\n  ${baseUrl}/${settings.storeSlug}/products/${d.variant.product.slug}` : ''),
+      (d) =>
+        `${d.variant.product.displayName || d.variant.product.name} (${d.variant.size}, ${d.variant.color}) x${d.quantity}` +
+        (baseUrl
+          ? `\n  ${baseUrl}/${settings.storeSlug}/products/${d.variant.product.slug}`
+          : ''),
     );
 
     const message = [

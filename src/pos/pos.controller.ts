@@ -40,14 +40,17 @@ export class PosController {
     @Query('to') to?: string,
     @Query('limit') limit?: string,
   ) {
-    return this.posService.findAll({
-      status,
-      warehouseId,
-      userId,
-      from,
-      to,
-      limit: limit ? parseInt(limit, 10) : undefined,
-    }, tenantId);
+    return this.posService.findAll(
+      {
+        status,
+        warehouseId,
+        userId,
+        from,
+        to,
+        limit: limit ? parseInt(limit, 10) : undefined,
+      },
+      tenantId,
+    );
   }
 
   @Get('sales/daily-summary')

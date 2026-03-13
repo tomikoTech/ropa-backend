@@ -29,7 +29,10 @@ export class CategoriesService {
     const slug = this.slugify(dto.name);
 
     const existing = await this.categoryRepository.findOne({
-      where: [{ name: dto.name, tenantId }, { slug, tenantId }],
+      where: [
+        { name: dto.name, tenantId },
+        { slug, tenantId },
+      ],
     });
     if (existing) {
       throw new ConflictException('Ya existe una categoría con ese nombre');
@@ -84,13 +87,20 @@ export class CategoriesService {
     return category;
   }
 
-  async update(id: string, dto: UpdateCategoryDto, tenantId: string): Promise<Category> {
+  async update(
+    id: string,
+    dto: UpdateCategoryDto,
+    tenantId: string,
+  ): Promise<Category> {
     const category = await this.findOne(id, tenantId);
 
     if (dto.name && dto.name !== category.name) {
       const slug = this.slugify(dto.name);
       const existing = await this.categoryRepository.findOne({
-        where: [{ name: dto.name, tenantId }, { slug, tenantId }],
+        where: [
+          { name: dto.name, tenantId },
+          { slug, tenantId },
+        ],
       });
       if (existing && existing.id !== id) {
         throw new ConflictException('Ya existe una categoría con ese nombre');

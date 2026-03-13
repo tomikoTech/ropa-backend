@@ -1,4 +1,4 @@
-import { IsEnum, IsInt, IsNotEmpty, IsOptional, IsString, IsUUID } from 'class-validator';
+import { IsEnum, IsInt, IsOptional, IsString, IsUUID } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { MovementType } from '../../common/enums/movement-type.enum.js';
 
@@ -15,7 +15,9 @@ export class AdjustStockDto {
   @IsInt()
   quantity: number;
 
-  @ApiProperty({ enum: [MovementType.IN, MovementType.OUT, MovementType.ADJUSTMENT] })
+  @ApiProperty({
+    enum: [MovementType.IN, MovementType.OUT, MovementType.ADJUSTMENT],
+  })
   @IsEnum(MovementType)
   movementType: MovementType;
 

@@ -20,7 +20,6 @@ const return_entity_js_1 = require("./entities/return.entity.js");
 const return_item_entity_js_1 = require("./entities/return-item.entity.js");
 const credit_note_entity_js_1 = require("./entities/credit-note.entity.js");
 const sale_entity_js_1 = require("../pos/entities/sale.entity.js");
-const sale_item_entity_js_1 = require("../pos/entities/sale-item.entity.js");
 const stock_entity_js_1 = require("../inventory/entities/stock.entity.js");
 const stock_movement_entity_js_1 = require("../inventory/entities/stock-movement.entity.js");
 const return_status_enum_js_1 = require("../common/enums/return-status.enum.js");
@@ -54,7 +53,6 @@ let ReturnsService = class ReturnsService {
     async create(dto, userId, tenantId) {
         return this.dataSource.transaction(async (manager) => {
             const saleRepo = manager.getRepository(sale_entity_js_1.Sale);
-            const saleItemRepo = manager.getRepository(sale_item_entity_js_1.SaleItem);
             const returnRepo = manager.getRepository(return_entity_js_1.Return);
             const returnItemRepo = manager.getRepository(return_item_entity_js_1.ReturnItem);
             const creditNoteRepo = manager.getRepository(credit_note_entity_js_1.CreditNote);
@@ -106,7 +104,11 @@ let ReturnsService = class ReturnsService {
                 });
                 await returnItemRepo.save(ri);
                 const stock = await stockRepo.findOne({
-                    where: { variantId: saleItem.variantId, warehouseId: sale.warehouseId, tenantId },
+                    where: {
+                        variantId: saleItem.variantId,
+                        warehouseId: sale.warehouseId,
+                        tenantId,
+                    },
                 });
                 if (stock) {
                     stock.quantity += quantity;
@@ -136,7 +138,14 @@ let ReturnsService = class ReturnsService {
             await creditNoteRepo.save(creditNote);
             const fullReturn = await returnRepo.findOne({
                 where: { id: savedReturn.id, tenantId },
-                relations: ['sale', 'client', 'user', 'items', 'items.variant', 'creditNotes'],
+                relations: [
+                    'sale',
+                    'client',
+                    'user',
+                    'items',
+                    'items.variant',
+                    'creditNotes',
+                ],
             });
             if (!fullReturn) {
                 throw new common_1.NotFoundException('Devolución no encontrada después de crear');
@@ -154,7 +163,15 @@ let ReturnsService = class ReturnsService {
     async findOne(id, tenantId) {
         const ret = await this.returnRepository.findOne({
             where: { id, tenantId },
-            relations: ['sale', 'client', 'user', 'items', 'items.variant', 'items.saleItem', 'creditNotes'],
+            relations: [
+                'sale',
+                'client',
+                'user',
+                'items',
+                'items.variant',
+                'items.saleItem',
+                'creditNotes',
+            ],
         });
         if (!ret) {
             throw new common_1.NotFoundException('Devolución no encontrada');

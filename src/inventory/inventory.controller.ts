@@ -9,7 +9,12 @@ import {
   Query,
   ParseUUIDPipe,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiQuery,
+} from '@nestjs/swagger';
 import { InventoryService } from './inventory.service.js';
 import { CreateWarehouseDto } from './dto/create-warehouse.dto.js';
 import { UpdateWarehouseDto } from './dto/update-warehouse.dto.js';
@@ -30,7 +35,10 @@ export class InventoryController {
 
   @Post('warehouses')
   @ApiOperation({ summary: 'Crear bodega' })
-  createWarehouse(@Body() dto: CreateWarehouseDto, @TenantId() tenantId: string) {
+  createWarehouse(
+    @Body() dto: CreateWarehouseDto,
+    @TenantId() tenantId: string,
+  ) {
     return this.inventoryService.createWarehouse(dto, tenantId);
   }
 
@@ -42,7 +50,10 @@ export class InventoryController {
 
   @Get('warehouses/:id')
   @ApiOperation({ summary: 'Obtener bodega por ID' })
-  findWarehouse(@Param('id', ParseUUIDPipe) id: string, @TenantId() tenantId: string) {
+  findWarehouse(
+    @Param('id', ParseUUIDPipe) id: string,
+    @TenantId() tenantId: string,
+  ) {
     return this.inventoryService.findWarehouse(id, tenantId);
   }
 
@@ -58,7 +69,10 @@ export class InventoryController {
 
   @Delete('warehouses/:id')
   @ApiOperation({ summary: 'Eliminar bodega' })
-  removeWarehouse(@Param('id', ParseUUIDPipe) id: string, @TenantId() tenantId: string) {
+  removeWarehouse(
+    @Param('id', ParseUUIDPipe) id: string,
+    @TenantId() tenantId: string,
+  ) {
     return this.inventoryService.removeWarehouse(id, tenantId);
   }
 
@@ -151,6 +165,11 @@ export class InventoryController {
     @Body('minStock') minStock: number,
     @TenantId() tenantId: string,
   ) {
-    return this.inventoryService.setMinStock(variantId, warehouseId, minStock, tenantId);
+    return this.inventoryService.setMinStock(
+      variantId,
+      warehouseId,
+      minStock,
+      tenantId,
+    );
   }
 }

@@ -44,7 +44,10 @@ export class SuppliersController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Obtener proveedor por ID' })
-  findOne(@Param('id', ParseUUIDPipe) id: string, @TenantId() tenantId: string) {
+  findOne(
+    @Param('id', ParseUUIDPipe) id: string,
+    @TenantId() tenantId: string,
+  ) {
     return this.suppliersService.findOne(id, tenantId);
   }
 

@@ -29,7 +29,8 @@ export class AuditInterceptor implements NestInterceptor {
     // Derive entity type from controller path
     const segments = path.split('/').filter(Boolean);
     // Remove 'api' prefix if present
-    const entityType = (segments[0] === 'api' ? segments[1] : segments[0]) || 'unknown';
+    const entityType =
+      (segments[0] === 'api' ? segments[1] : segments[0]) || 'unknown';
 
     const actionMap: Record<string, string> = {
       POST: 'CREATE',
@@ -42,9 +43,7 @@ export class AuditInterceptor implements NestInterceptor {
     return next.handle().pipe(
       tap((responseData) => {
         const entityId =
-          req.params?.id ||
-          (responseData as any)?.data?.id ||
-          (responseData as any)?.id;
+          req.params?.id || responseData?.data?.id || responseData?.id;
 
         this.auditService
           .log({

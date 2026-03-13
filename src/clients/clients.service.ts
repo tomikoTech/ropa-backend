@@ -23,7 +23,9 @@ export class ClientsService {
         where: { documentNumber: dto.documentNumber, tenantId },
       });
       if (existing) {
-        throw new ConflictException('Ya existe un cliente con ese número de documento');
+        throw new ConflictException(
+          'Ya existe un cliente con ese número de documento',
+        );
       }
     }
 
@@ -53,7 +55,9 @@ export class ClientsService {
       where: { isGeneric: true, tenantId },
     });
     if (!generic) {
-      throw new NotFoundException('Cliente genérico no encontrado. Ejecutar seed.');
+      throw new NotFoundException(
+        'Cliente genérico no encontrado. Ejecutar seed.',
+      );
     }
     return generic;
   }
@@ -71,7 +75,11 @@ export class ClientsService {
       .getMany();
   }
 
-  async update(id: string, dto: UpdateClientDto, tenantId: string): Promise<Client> {
+  async update(
+    id: string,
+    dto: UpdateClientDto,
+    tenantId: string,
+  ): Promise<Client> {
     const client = await this.findOne(id, tenantId);
 
     if (client.isGeneric) {
@@ -83,7 +91,9 @@ export class ClientsService {
         where: { documentNumber: dto.documentNumber, tenantId },
       });
       if (existing) {
-        throw new ConflictException('Ya existe un cliente con ese número de documento');
+        throw new ConflictException(
+          'Ya existe un cliente con ese número de documento',
+        );
       }
     }
 

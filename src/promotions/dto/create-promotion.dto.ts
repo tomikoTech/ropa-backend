@@ -4,7 +4,6 @@ import {
   IsNumber,
   IsOptional,
   IsDateString,
-  IsBoolean,
   Min,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -29,7 +28,10 @@ export class CreatePromotionDto {
   @Min(0)
   discountValue: number;
 
-  @ApiPropertyOptional({ example: 'ALL', description: 'ALL | CATEGORY | PRODUCT' })
+  @ApiPropertyOptional({
+    example: 'ALL',
+    description: 'ALL | CATEGORY | PRODUCT',
+  })
   @IsOptional()
   @IsString()
   applicableTo?: string;

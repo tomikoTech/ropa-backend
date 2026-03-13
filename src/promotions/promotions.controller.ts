@@ -25,10 +25,7 @@ export class PromotionsController {
   @Post()
   @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Crear promoción' })
-  create(
-    @Body() dto: CreatePromotionDto,
-    @TenantId() tenantId: string,
-  ) {
+  create(@Body() dto: CreatePromotionDto, @TenantId() tenantId: string) {
     return this.promotionsService.create(dto, tenantId);
   }
 
@@ -67,10 +64,7 @@ export class PromotionsController {
   @Delete(':id')
   @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Eliminar promoción' })
-  remove(
-    @Param('id', ParseUUIDPipe) id: string,
-    @TenantId() tenantId: string,
-  ) {
+  remove(@Param('id', ParseUUIDPipe) id: string, @TenantId() tenantId: string) {
     return this.promotionsService.remove(id, tenantId);
   }
 }

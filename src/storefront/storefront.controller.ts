@@ -1,11 +1,4 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Body,
-  Param,
-  Query,
-} from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { Public } from '../common/decorators/public.decorator.js';
 import { StorefrontService } from './storefront.service.js';
@@ -52,7 +45,11 @@ export class StorefrontController {
     @Query('gender') gender?: string,
     @Query('search') search?: string,
   ) {
-    return this.storefrontService.getProducts(tenantSlug, { categorySlug, gender, search });
+    return this.storefrontService.getProducts(tenantSlug, {
+      categorySlug,
+      gender,
+      search,
+    });
   }
 
   @Public()
@@ -81,7 +78,9 @@ export class StorefrontController {
 
   @Public()
   @Post(':tenantSlug/orders')
-  @ApiOperation({ summary: 'Crear pedido e-commerce (deducción de stock + WhatsApp URL)' })
+  @ApiOperation({
+    summary: 'Crear pedido e-commerce (deducción de stock + WhatsApp URL)',
+  })
   createOrder(
     @Param('tenantSlug') tenantSlug: string,
     @Body() dto: CreateOrderDto,

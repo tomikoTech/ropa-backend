@@ -37,7 +37,9 @@ __decorate([
     __metadata("design:type", Number)
 ], AdjustStockDto.prototype, "quantity", void 0);
 __decorate([
-    (0, swagger_1.ApiProperty)({ enum: [movement_type_enum_js_1.MovementType.IN, movement_type_enum_js_1.MovementType.OUT, movement_type_enum_js_1.MovementType.ADJUSTMENT] }),
+    (0, swagger_1.ApiProperty)({
+        enum: [movement_type_enum_js_1.MovementType.IN, movement_type_enum_js_1.MovementType.OUT, movement_type_enum_js_1.MovementType.ADJUSTMENT],
+    }),
     (0, class_validator_1.IsEnum)(movement_type_enum_js_1.MovementType),
     __metadata("design:type", String)
 ], AdjustStockDto.prototype, "movementType", void 0);

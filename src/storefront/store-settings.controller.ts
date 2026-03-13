@@ -7,7 +7,12 @@ import {
   Query,
   ParseUUIDPipe,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiQuery,
+} from '@nestjs/swagger';
 import { TenantId } from '../common/decorators/tenant-id.decorator.js';
 import { UserId } from '../common/decorators/user-id.decorator.js';
 import { StoreSettingsService } from './store-settings.service.js';
@@ -66,7 +71,10 @@ export class StoreSettingsController {
   }
 
   @Patch('orders/:id/finalize')
-  @ApiOperation({ summary: 'Finalizar pedido e-commerce (deducir stock, marcar como entregado)' })
+  @ApiOperation({
+    summary:
+      'Finalizar pedido e-commerce (deducir stock, marcar como entregado)',
+  })
   finalizeOrder(
     @Param('id', ParseUUIDPipe) id: string,
     @UserId() userId: string,

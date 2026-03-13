@@ -39,9 +39,7 @@ let AuditInterceptor = class AuditInterceptor {
         };
         const action = actionMap[method] || method;
         return next.handle().pipe((0, rxjs_1.tap)((responseData) => {
-            const entityId = req.params?.id ||
-                responseData?.data?.id ||
-                responseData?.id;
+            const entityId = req.params?.id || responseData?.data?.id || responseData?.id;
             this.auditService
                 .log({
                 userId,

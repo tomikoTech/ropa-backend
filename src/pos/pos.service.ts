@@ -18,6 +18,7 @@ import { CreateSaleDto } from './dto/create-sale.dto.js';
 import { RecordArPaymentDto } from './dto/record-ar-payment.dto.js';
 import { TaxService, LineCalculation } from './services/tax.service.js';
 import { InvoiceService } from './services/invoice.service.js';
+import { ProductStatus } from '../common/enums/product-status.enum.js';
 import { ReceiptService, ReceiptData } from './services/receipt.service.js';
 import { SaleStatus } from '../common/enums/sale-status.enum.js';
 import { PaymentMethod } from '../common/enums/payment-method.enum.js';
@@ -55,7 +56,11 @@ export class PosService {
    * 5. Deduct inventory
    * 6. Record stock movements
    */
-  async createSale(dto: CreateSaleDto, userId: string, tenantId: string): Promise<Sale> {
+  async createSale(
+    dto: CreateSaleDto,
+    userId: string,
+    tenantId: string,
+  ): Promise<Sale> {
     return this.dataSource.transaction(async (manager) => {
       const variantRepo = manager.getRepository(ProductVariant);
       const stockRepo = manager.getRepository(Stock);
@@ -99,19 +104,30 @@ export class PosService {
           relations: ['product'],
         });
         if (!variant) {
-          throw new NotFoundException(`Variante ${item.variantId} no encontrada`);
+          throw new NotFoundException(
+            `Variante ${item.variantId} no encontrada`,
+          );
         }
         if (variant.tenantId !== tenantId) {
-          throw new NotFoundException(`Variante ${item.variantId} no encontrada`);
+          throw new NotFoundException(
+            `Variante ${item.variantId} no encontrada`,
+          );
         }
-        if (!variant.isActive || variant.product.status !== 'ACTIVE') {
+        if (
+          !variant.isActive ||
+          variant.product.status !== ProductStatus.ACTIVE
+        ) {
           throw new BadRequestException(
             `Producto "${variant.product.name}" (${variant.sku}) no está activo`,
           );
         }
 
         const stock = await stockRepo.findOne({
-          where: { variantId: item.variantId, warehouseId: dto.warehouseId, tenantId },
+          where: {
+            variantId: item.variantId,
+            warehouseId: dto.warehouseId,
+            tenantId,
+          },
         });
         if (!stock || stock.quantity < item.quantity) {
           throw new BadRequestException(
@@ -157,10 +173,7 @@ export class PosService {
         (sum, p) => sum + p.amount,
         0,
       );
-      const totalCredit = creditPayments.reduce(
-        (sum, p) => sum + p.amount,
-        0,
-      );
+      const totalCredit = creditPayments.reduce((sum, p) => sum + p.amount, 0);
 
       if (totalRegular + totalCredit < saleTotals.total) {
         throw new BadRequestException(
@@ -189,7 +202,8 @@ export class PosService {
 
       // Generate numbers
       const saleNumber = await this.invoiceService.generateSaleNumber(tenantId);
-      const invoiceNumber = await this.invoiceService.generateInvoiceNumber(tenantId);
+      const invoiceNumber =
+        await this.invoiceService.generateInvoiceNumber(tenantId);
 
       // Create sale
       const sale = saleRepo.create({
@@ -284,7 +298,14 @@ export class PosService {
       // Return full sale with relations using transaction manager
       const fullSale = await saleRepo.findOne({
         where: { id: savedSale.id, tenantId },
-        relations: ['client', 'user', 'warehouse', 'items', 'items.variant', 'payments'],
+        relations: [
+          'client',
+          'user',
+          'warehouse',
+          'items',
+          'items.variant',
+          'payments',
+        ],
       });
       if (!fullSale) {
         throw new NotFoundException('Venta no encontrada después de crear');
@@ -293,14 +314,19 @@ export class PosService {
     });
   }
 
-  async findAll(filters: {
-    status?: SaleStatus;
-    warehouseId?: string;
-    userId?: string;
-    from?: string;
-    to?: string;
-    limit?: number;
-  } | undefined, tenantId: string): Promise<Sale[]> {
+  async findAll(
+    filters:
+      | {
+          status?: SaleStatus;
+          warehouseId?: string;
+          userId?: string;
+          from?: string;
+          to?: string;
+          limit?: number;
+        }
+      | undefined,
+    tenantId: string,
+  ): Promise<Sale[]> {
     const where: Record<string, unknown> = { tenantId };
     if (filters?.status) where.status = filters.status;
     if (filters?.warehouseId) where.warehouseId = filters.warehouseId;
@@ -317,7 +343,14 @@ export class PosService {
   async findOne(id: string, tenantId: string): Promise<Sale> {
     const sale = await this.saleRepository.findOne({
       where: { id, tenantId },
-      relations: ['client', 'user', 'warehouse', 'items', 'items.variant', 'payments'],
+      relations: [
+        'client',
+        'user',
+        'warehouse',
+        'items',
+        'items.variant',
+        'payments',
+      ],
     });
     if (!sale) {
       throw new NotFoundException('Venta no encontrada');
@@ -330,7 +363,11 @@ export class PosService {
     return this.receiptService.generateReceipt(sale);
   }
 
-  async cancelSale(id: string, userId: string, tenantId: string): Promise<Sale> {
+  async cancelSale(
+    id: string,
+    userId: string,
+    tenantId: string,
+  ): Promise<Sale> {
     return this.dataSource.transaction(async (manager) => {
       const saleRepo = manager.getRepository(Sale);
       const stockRepo = manager.getRepository(Stock);
@@ -345,13 +382,19 @@ export class PosService {
         throw new NotFoundException('Venta no encontrada');
       }
       if (sale.status !== SaleStatus.COMPLETED) {
-        throw new BadRequestException('Solo se pueden cancelar ventas completadas');
+        throw new BadRequestException(
+          'Solo se pueden cancelar ventas completadas',
+        );
       }
 
       // Restore inventory
       for (const item of sale.items) {
         const stock = await stockRepo.findOne({
-          where: { variantId: item.variantId, warehouseId: sale.warehouseId, tenantId },
+          where: {
+            variantId: item.variantId,
+            warehouseId: sale.warehouseId,
+            tenantId,
+          },
         });
         if (stock) {
           stock.quantity += item.quantity;
@@ -379,7 +422,10 @@ export class PosService {
     });
   }
 
-  async getDailySummary(warehouseId: string | undefined, tenantId: string): Promise<{
+  async getDailySummary(
+    warehouseId: string | undefined,
+    tenantId: string,
+  ): Promise<{
     totalSales: number;
     totalAmount: number;
     totalItems: number;
@@ -429,10 +475,15 @@ export class PosService {
 
   // ─── Accounts Receivable ───
 
-  async findAllAccountsReceivable(filters: {
-    isFullyPaid?: boolean;
-    clientId?: string;
-  } | undefined, tenantId: string): Promise<AccountsReceivable[]> {
+  async findAllAccountsReceivable(
+    filters:
+      | {
+          isFullyPaid?: boolean;
+          clientId?: string;
+        }
+      | undefined,
+    tenantId: string,
+  ): Promise<AccountsReceivable[]> {
     const where: Record<string, unknown> = { tenantId };
     if (filters?.isFullyPaid !== undefined)
       where.isFullyPaid = filters.isFullyPaid;
@@ -445,7 +496,10 @@ export class PosService {
     });
   }
 
-  async findOneAccountReceivable(id: string, tenantId: string): Promise<AccountsReceivable> {
+  async findOneAccountReceivable(
+    id: string,
+    tenantId: string,
+  ): Promise<AccountsReceivable> {
     const ar = await this.arRepository.findOne({
       where: { id, tenantId },
       relations: ['sale', 'client', 'payments'],
@@ -473,7 +527,9 @@ export class PosService {
         throw new NotFoundException('Cuenta por cobrar no encontrada');
       }
       if (ar.isFullyPaid) {
-        throw new BadRequestException('Esta cuenta ya está completamente pagada');
+        throw new BadRequestException(
+          'Esta cuenta ya está completamente pagada',
+        );
       }
 
       const pending = Number(ar.totalAmount) - Number(ar.paidAmount);
@@ -512,7 +568,10 @@ export class PosService {
     });
   }
 
-  async getClientAccountSummary(clientId: string, tenantId: string): Promise<{
+  async getClientAccountSummary(
+    clientId: string,
+    tenantId: string,
+  ): Promise<{
     totalCredit: number;
     totalPaid: number;
     totalPending: number;

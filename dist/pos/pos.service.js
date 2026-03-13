@@ -27,6 +27,7 @@ const accounts_receivable_entity_js_1 = require("./entities/accounts-receivable.
 const accounts_receivable_payment_entity_js_1 = require("./entities/accounts-receivable-payment.entity.js");
 const tax_service_js_1 = require("./services/tax.service.js");
 const invoice_service_js_1 = require("./services/invoice.service.js");
+const product_status_enum_js_1 = require("../common/enums/product-status.enum.js");
 const receipt_service_js_1 = require("./services/receipt.service.js");
 const sale_status_enum_js_1 = require("../common/enums/sale-status.enum.js");
 const payment_method_enum_js_1 = require("../common/enums/payment-method.enum.js");
@@ -94,11 +95,16 @@ let PosService = class PosService {
                 if (variant.tenantId !== tenantId) {
                     throw new common_1.NotFoundException(`Variante ${item.variantId} no encontrada`);
                 }
-                if (!variant.isActive || variant.product.status !== 'ACTIVE') {
+                if (!variant.isActive ||
+                    variant.product.status !== product_status_enum_js_1.ProductStatus.ACTIVE) {
                     throw new common_1.BadRequestException(`Producto "${variant.product.name}" (${variant.sku}) no está activo`);
                 }
                 const stock = await stockRepo.findOne({
-                    where: { variantId: item.variantId, warehouseId: dto.warehouseId, tenantId },
+                    where: {
+                        variantId: item.variantId,
+                        warehouseId: dto.warehouseId,
+                        tenantId,
+                    },
                 });
                 if (!stock || stock.quantity < item.quantity) {
                     throw new common_1.BadRequestException(`Stock insuficiente para "${variant.product.name}" ${variant.size}/${variant.color}. ` +
@@ -220,7 +226,14 @@ let PosService = class PosService {
             }
             const fullSale = await saleRepo.findOne({
                 where: { id: savedSale.id, tenantId },
-                relations: ['client', 'user', 'warehouse', 'items', 'items.variant', 'payments'],
+                relations: [
+                    'client',
+                    'user',
+                    'warehouse',
+                    'items',
+                    'items.variant',
+                    'payments',
+                ],
             });
             if (!fullSale) {
                 throw new common_1.NotFoundException('Venta no encontrada después de crear');
@@ -246,7 +259,14 @@ let PosService = class PosService {
     async findOne(id, tenantId) {
         const sale = await this.saleRepository.findOne({
             where: { id, tenantId },
-            relations: ['client', 'user', 'warehouse', 'items', 'items.variant', 'payments'],
+            relations: [
+                'client',
+                'user',
+                'warehouse',
+                'items',
+                'items.variant',
+                'payments',
+            ],
         });
         if (!sale) {
             throw new common_1.NotFoundException('Venta no encontrada');
@@ -274,7 +294,11 @@ let PosService = class PosService {
             }
             for (const item of sale.items) {
                 const stock = await stockRepo.findOne({
-                    where: { variantId: item.variantId, warehouseId: sale.warehouseId, tenantId },
+                    where: {
+                        variantId: item.variantId,
+                        warehouseId: sale.warehouseId,
+                        tenantId,
+                    },
                 });
                 if (stock) {
                     stock.quantity += item.quantity;

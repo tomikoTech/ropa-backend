@@ -1,8 +1,4 @@
-import {
-  Injectable,
-  NotFoundException,
-  ConflictException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Product } from './entities/product.entity.js';
@@ -31,7 +27,14 @@ export class ProductsService {
   private generateSku(prefix: string, size?: string, color?: string): string {
     const parts = [prefix];
     if (size) parts.push(size.toUpperCase().slice(0, 3));
-    if (color) parts.push(color.toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').slice(0, 3));
+    if (color)
+      parts.push(
+        color
+          .toUpperCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .slice(0, 3),
+      );
     if (parts.length === 1) parts.push(this.generateBarcode().slice(-4));
     return parts.join('-');
   }
@@ -53,7 +56,11 @@ export class ProductsService {
       .replace(/^-+|-+$/g, '');
   }
 
-  private async ensureUniqueSlug(slug: string, tenantId: string, excludeId?: string): Promise<string> {
+  private async ensureUniqueSlug(
+    slug: string,
+    tenantId: string,
+    excludeId?: string,
+  ): Promise<string> {
     let candidate = slug;
     let counter = 2;
     while (true) {
@@ -80,7 +87,10 @@ export class ProductsService {
       skuPrefix = `${skuPrefix}${count}`;
     }
 
-    const slug = await this.ensureUniqueSlug(this.generateSlug(dto.name), tenantId);
+    const slug = await this.ensureUniqueSlug(
+      this.generateSlug(dto.name),
+      tenantId,
+    );
 
     const product = this.productRepository.create({
       name: dto.name,
@@ -138,13 +148,21 @@ export class ProductsService {
     return product;
   }
 
-  async update(id: string, dto: UpdateProductDto, tenantId: string): Promise<Product> {
+  async update(
+    id: string,
+    dto: UpdateProductDto,
+    tenantId: string,
+  ): Promise<Product> {
     const product = await this.findOne(id, tenantId);
 
     if (dto.name !== undefined) {
       product.name = dto.name;
       // Regenerate slug when name changes
-      product.slug = await this.ensureUniqueSlug(this.generateSlug(dto.name), tenantId, id);
+      product.slug = await this.ensureUniqueSlug(
+        this.generateSlug(dto.name),
+        tenantId,
+        id,
+      );
     }
     if (dto.description !== undefined) product.description = dto.description;
     if (dto.basePrice !== undefined) product.basePrice = dto.basePrice;
@@ -191,11 +209,7 @@ export class ProductsService {
           // Create new variant
           const newVariant = this.variantRepository.create({
             productId: id,
-            sku: this.generateSku(
-              product.skuPrefix,
-              v.size,
-              v.color,
-            ),
+            sku: this.generateSku(product.skuPrefix, v.size, v.color),
             size: v.size || '',
             color: v.color || '',
             barcode: this.generateBarcode(),
@@ -231,7 +245,10 @@ export class ProductsService {
     return this.findOne(id, tenantId);
   }
 
-  async findVariant(variantId: string, tenantId: string): Promise<ProductVariant> {
+  async findVariant(
+    variantId: string,
+    tenantId: string,
+  ): Promise<ProductVariant> {
     const variant = await this.variantRepository.findOne({
       where: { id: variantId },
       relations: ['product'],
@@ -246,17 +263,19 @@ export class ProductsService {
     return variant;
   }
 
-  async searchVariants(query: string, tenantId: string): Promise<ProductVariant[]> {
+  async searchVariants(
+    query: string,
+    tenantId: string,
+  ): Promise<ProductVariant[]> {
     return this.variantRepository
       .createQueryBuilder('v')
       .leftJoinAndSelect('v.product', 'p')
       .where('v.is_active = true')
       .andWhere('p.status = :status', { status: 'ACTIVE' })
       .andWhere('p.tenant_id = :tenantId', { tenantId })
-      .andWhere(
-        '(v.sku ILIKE :q OR v.barcode ILIKE :q OR p.name ILIKE :q)',
-        { q: `%${query}%` },
-      )
+      .andWhere('(v.sku ILIKE :q OR v.barcode ILIKE :q OR p.name ILIKE :q)', {
+        q: `%${query}%`,
+      })
       .limit(20)
       .getMany();
   }

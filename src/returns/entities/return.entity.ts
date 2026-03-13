@@ -57,7 +57,13 @@ export class Return extends TenantAwareEntity {
   })
   status: ReturnStatus;
 
-  @Column({ name: 'refund_amount', type: 'decimal', precision: 14, scale: 2, default: 0 })
+  @Column({
+    name: 'refund_amount',
+    type: 'decimal',
+    precision: 14,
+    scale: 2,
+    default: 0,
+  })
   refundAmount: number;
 
   @OneToMany(() => ReturnItem, (item) => item.return, { cascade: true })

@@ -112,7 +112,12 @@ let AuthService = class AuthService {
         return this.usersService.findOne(userId, tenantId);
     }
     async generateTokens(user) {
-        const payload = { sub: user.id, email: user.email, role: user.role, tenantId: user.tenantId };
+        const payload = {
+            sub: user.id,
+            email: user.email,
+            role: user.role,
+            tenantId: user.tenantId,
+        };
         const accessToken = this.jwtService.sign(payload);
         const refreshToken = (0, uuid_1.v4)();
         const expiresAt = new Date();

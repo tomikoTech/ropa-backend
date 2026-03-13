@@ -40,7 +40,10 @@ export class CategoriesController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Obtener categoría por ID' })
-  findOne(@Param('id', ParseUUIDPipe) id: string, @TenantId() tenantId: string) {
+  findOne(
+    @Param('id', ParseUUIDPipe) id: string,
+    @TenantId() tenantId: string,
+  ) {
     return this.categoriesService.findOne(id, tenantId);
   }
 

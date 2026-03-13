@@ -58,7 +58,11 @@ export class SuppliersService {
       .getMany();
   }
 
-  async update(id: string, dto: UpdateSupplierDto, tenantId: string): Promise<Supplier> {
+  async update(
+    id: string,
+    dto: UpdateSupplierDto,
+    tenantId: string,
+  ): Promise<Supplier> {
     const supplier = await this.findOne(id, tenantId);
 
     if (dto.nit && dto.nit !== supplier.nit) {

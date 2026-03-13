@@ -33,7 +33,10 @@ let CategoriesService = class CategoriesService {
     async create(dto, tenantId) {
         const slug = this.slugify(dto.name);
         const existing = await this.categoryRepository.findOne({
-            where: [{ name: dto.name, tenantId }, { slug, tenantId }],
+            where: [
+                { name: dto.name, tenantId },
+                { slug, tenantId },
+            ],
         });
         if (existing) {
             throw new common_1.ConflictException('Ya existe una categoría con ese nombre');
@@ -86,7 +89,10 @@ let CategoriesService = class CategoriesService {
         if (dto.name && dto.name !== category.name) {
             const slug = this.slugify(dto.name);
             const existing = await this.categoryRepository.findOne({
-                where: [{ name: dto.name, tenantId }, { slug, tenantId }],
+                where: [
+                    { name: dto.name, tenantId },
+                    { slug, tenantId },
+                ],
             });
             if (existing && existing.id !== id) {
                 throw new common_1.ConflictException('Ya existe una categoría con ese nombre');

@@ -60,7 +60,10 @@ export class TaxService {
    * Aggregate all line calculations into a sale-level total.
    */
   calculateSaleTotals(lines: LineCalculation[]): TaxCalculation {
-    const subtotal = lines.reduce((sum, l) => sum + l.subtotalBeforeDiscount, 0);
+    const subtotal = lines.reduce(
+      (sum, l) => sum + l.subtotalBeforeDiscount,
+      0,
+    );
     const discountAmount = lines.reduce((sum, l) => sum + l.discountAmount, 0);
     const taxAmount = lines.reduce((sum, l) => sum + l.taxAmount, 0);
     const total = lines.reduce((sum, l) => sum + l.lineTotal, 0);

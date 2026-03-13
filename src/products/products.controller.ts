@@ -9,7 +9,12 @@ import {
   Query,
   ParseUUIDPipe,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiQuery,
+} from '@nestjs/swagger';
 import { ProductsService } from './products.service.js';
 import { CreateProductDto } from './dto/create-product.dto.js';
 import { UpdateProductDto } from './dto/update-product.dto.js';
@@ -34,7 +39,9 @@ export class ProductsController {
   }
 
   @Get('search')
-  @ApiOperation({ summary: 'Buscar variantes por SKU, código de barras o nombre' })
+  @ApiOperation({
+    summary: 'Buscar variantes por SKU, código de barras o nombre',
+  })
   @ApiQuery({ name: 'q', required: true })
   searchVariants(@Query('q') query: string, @TenantId() tenantId: string) {
     return this.productsService.searchVariants(query, tenantId);
@@ -42,7 +49,10 @@ export class ProductsController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Obtener producto por ID' })
-  findOne(@Param('id', ParseUUIDPipe) id: string, @TenantId() tenantId: string) {
+  findOne(
+    @Param('id', ParseUUIDPipe) id: string,
+    @TenantId() tenantId: string,
+  ) {
     return this.productsService.findOne(id, tenantId);
   }
 
@@ -58,13 +68,19 @@ export class ProductsController {
 
   @Patch(':id/publish')
   @ApiOperation({ summary: 'Publicar producto en e-commerce' })
-  publish(@Param('id', ParseUUIDPipe) id: string, @TenantId() tenantId: string) {
+  publish(
+    @Param('id', ParseUUIDPipe) id: string,
+    @TenantId() tenantId: string,
+  ) {
     return this.productsService.publish(id, tenantId);
   }
 
   @Patch(':id/unpublish')
   @ApiOperation({ summary: 'Despublicar producto del e-commerce' })
-  unpublish(@Param('id', ParseUUIDPipe) id: string, @TenantId() tenantId: string) {
+  unpublish(
+    @Param('id', ParseUUIDPipe) id: string,
+    @TenantId() tenantId: string,
+  ) {
     return this.productsService.unpublish(id, tenantId);
   }
 
@@ -76,7 +92,10 @@ export class ProductsController {
 
   @Get('variants/:variantId')
   @ApiOperation({ summary: 'Obtener variante por ID' })
-  findVariant(@Param('variantId', ParseUUIDPipe) variantId: string, @TenantId() tenantId: string) {
+  findVariant(
+    @Param('variantId', ParseUUIDPipe) variantId: string,
+    @TenantId() tenantId: string,
+  ) {
     return this.productsService.findVariant(variantId, tenantId);
   }
 }

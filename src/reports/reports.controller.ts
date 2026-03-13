@@ -37,7 +37,10 @@ export class ReportsController {
     if (!from || !to) {
       throw new BadRequestException('Parámetros from y to son requeridos');
     }
-    return this.reportsService.getSalesReport({ from, to, warehouseId, userId }, tenantId);
+    return this.reportsService.getSalesReport(
+      { from, to, warehouseId, userId },
+      tenantId,
+    );
   }
 
   @Get('top-products')
@@ -51,11 +54,14 @@ export class ReportsController {
     if (!from || !to) {
       throw new BadRequestException('Parámetros from y to son requeridos');
     }
-    return this.reportsService.getTopProducts({
-      from,
-      to,
-      limit: limit ? parseInt(limit, 10) : undefined,
-    }, tenantId);
+    return this.reportsService.getTopProducts(
+      {
+        from,
+        to,
+        limit: limit ? parseInt(limit, 10) : undefined,
+      },
+      tenantId,
+    );
   }
 
   @Get('inventory')
@@ -81,8 +87,14 @@ export class ReportsController {
       throw new BadRequestException('Parámetros from y to son requeridos');
     }
 
-    const report = await this.reportsService.getSalesReport({ from, to, warehouseId }, tenantId);
-    const topProducts = await this.reportsService.getTopProducts({ from, to }, tenantId);
+    const report = await this.reportsService.getSalesReport(
+      { from, to, warehouseId },
+      tenantId,
+    );
+    const topProducts = await this.reportsService.getTopProducts(
+      { from, to },
+      tenantId,
+    );
 
     const workbook = new ExcelJS.Workbook();
 
@@ -94,11 +106,23 @@ export class ReportsController {
     ];
     summary.addRows([
       { metric: 'Total Ventas', value: report.totalSales },
-      { metric: 'Monto Total', value: `$${report.totalAmount.toLocaleString('es-CO')}` },
+      {
+        metric: 'Monto Total',
+        value: `$${report.totalAmount.toLocaleString('es-CO')}`,
+      },
       { metric: 'Total Items', value: report.totalItems },
-      { metric: 'IVA Total', value: `$${report.totalTax.toLocaleString('es-CO')}` },
-      { metric: 'Descuentos Total', value: `$${report.totalDiscount.toLocaleString('es-CO')}` },
-      { metric: 'Ticket Promedio', value: `$${report.averageTicket.toLocaleString('es-CO')}` },
+      {
+        metric: 'IVA Total',
+        value: `$${report.totalTax.toLocaleString('es-CO')}`,
+      },
+      {
+        metric: 'Descuentos Total',
+        value: `$${report.totalDiscount.toLocaleString('es-CO')}`,
+      },
+      {
+        metric: 'Ticket Promedio',
+        value: `$${report.averageTicket.toLocaleString('es-CO')}`,
+      },
     ]);
     summary.getRow(1).font = { bold: true };
 

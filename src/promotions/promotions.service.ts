@@ -1,7 +1,4 @@
-import {
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, LessThanOrEqual, MoreThanOrEqual } from 'typeorm';
 import { Promotion } from './entities/promotion.entity.js';
@@ -34,7 +31,9 @@ export class PromotionsService {
   }
 
   async findOne(id: string, tenantId: string): Promise<Promotion> {
-    const promotion = await this.promotionRepository.findOne({ where: { id, tenantId } });
+    const promotion = await this.promotionRepository.findOne({
+      where: { id, tenantId },
+    });
     if (!promotion) {
       throw new NotFoundException('Promoción no encontrada');
     }
@@ -54,7 +53,11 @@ export class PromotionsService {
     });
   }
 
-  async update(id: string, dto: UpdatePromotionDto, tenantId: string): Promise<Promotion> {
+  async update(
+    id: string,
+    dto: UpdatePromotionDto,
+    tenantId: string,
+  ): Promise<Promotion> {
     const promotion = await this.findOne(id, tenantId);
     if (dto.startDate) (dto as any).startDate = new Date(dto.startDate);
     if (dto.endDate) (dto as any).endDate = new Date(dto.endDate);

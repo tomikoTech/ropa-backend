@@ -29,7 +29,10 @@ export class InventoryService {
 
   // ─── Warehouses ───
 
-  async createWarehouse(dto: CreateWarehouseDto, tenantId: string): Promise<Warehouse> {
+  async createWarehouse(
+    dto: CreateWarehouseDto,
+    tenantId: string,
+  ): Promise<Warehouse> {
     const existing = await this.warehouseRepository.findOne({
       where: [
         { name: dto.name, tenantId },
@@ -37,7 +40,9 @@ export class InventoryService {
       ],
     });
     if (existing) {
-      throw new ConflictException('Ya existe una bodega con ese nombre o código');
+      throw new ConflictException(
+        'Ya existe una bodega con ese nombre o código',
+      );
     }
     const warehouse = this.warehouseRepository.create({ ...dto, tenantId });
     return this.warehouseRepository.save(warehouse);
@@ -58,13 +63,18 @@ export class InventoryService {
     return warehouse;
   }
 
-  async updateWarehouse(id: string, dto: UpdateWarehouseDto, tenantId: string): Promise<Warehouse> {
+  async updateWarehouse(
+    id: string,
+    dto: UpdateWarehouseDto,
+    tenantId: string,
+  ): Promise<Warehouse> {
     const warehouse = await this.findWarehouse(id, tenantId);
 
     if (dto.name !== undefined) warehouse.name = dto.name;
     if (dto.code !== undefined) warehouse.code = dto.code;
     if (dto.address !== undefined) warehouse.address = dto.address;
-    if (dto.isPosLocation !== undefined) warehouse.isPosLocation = dto.isPosLocation;
+    if (dto.isPosLocation !== undefined)
+      warehouse.isPosLocation = dto.isPosLocation;
     if (dto.isActive !== undefined) warehouse.isActive = dto.isActive;
 
     return this.warehouseRepository.save(warehouse);
@@ -77,7 +87,10 @@ export class InventoryService {
 
   // ─── Stock ───
 
-  async getStockByWarehouse(warehouseId: string, tenantId: string): Promise<Stock[]> {
+  async getStockByWarehouse(
+    warehouseId: string,
+    tenantId: string,
+  ): Promise<Stock[]> {
     return this.stockRepository.find({
       where: { warehouseId, tenantId },
       relations: ['variant', 'variant.product', 'warehouse'],
@@ -85,7 +98,10 @@ export class InventoryService {
     });
   }
 
-  async getStockByVariant(variantId: string, tenantId: string): Promise<Stock[]> {
+  async getStockByVariant(
+    variantId: string,
+    tenantId: string,
+  ): Promise<Stock[]> {
     return this.stockRepository.find({
       where: { variantId, tenantId },
       relations: ['variant', 'variant.product', 'warehouse'],
@@ -132,13 +148,21 @@ export class InventoryService {
 
   // ─── Stock Adjustments ───
 
-  async adjustStock(dto: AdjustStockDto, userId: string, tenantId: string): Promise<Stock> {
+  async adjustStock(
+    dto: AdjustStockDto,
+    userId: string,
+    tenantId: string,
+  ): Promise<Stock> {
     return this.dataSource.transaction(async (manager) => {
       const stockRepo = manager.getRepository(Stock);
       const movementRepo = manager.getRepository(StockMovement);
 
       let stock = await stockRepo.findOne({
-        where: { variantId: dto.variantId, warehouseId: dto.warehouseId, tenantId },
+        where: {
+          variantId: dto.variantId,
+          warehouseId: dto.warehouseId,
+          tenantId,
+        },
       });
 
       if (!stock) {
@@ -190,9 +214,15 @@ export class InventoryService {
 
   // ─── Transfers ───
 
-  async transferStock(dto: TransferStockDto, userId: string, tenantId: string): Promise<{ from: Stock; to: Stock }> {
+  async transferStock(
+    dto: TransferStockDto,
+    userId: string,
+    tenantId: string,
+  ): Promise<{ from: Stock; to: Stock }> {
     if (dto.fromWarehouseId === dto.toWarehouseId) {
-      throw new BadRequestException('La bodega origen y destino deben ser diferentes');
+      throw new BadRequestException(
+        'La bodega origen y destino deben ser diferentes',
+      );
     }
 
     return this.dataSource.transaction(async (manager) => {
@@ -200,8 +230,12 @@ export class InventoryService {
       const movementRepo = manager.getRepository(StockMovement);
 
       // Get or create source stock
-      let fromStock = await stockRepo.findOne({
-        where: { variantId: dto.variantId, warehouseId: dto.fromWarehouseId, tenantId },
+      const fromStock = await stockRepo.findOne({
+        where: {
+          variantId: dto.variantId,
+          warehouseId: dto.fromWarehouseId,
+          tenantId,
+        },
       });
 
       if (!fromStock || fromStock.quantity < dto.quantity) {
@@ -212,7 +246,11 @@ export class InventoryService {
 
       // Get or create destination stock
       let toStock = await stockRepo.findOne({
-        where: { variantId: dto.variantId, warehouseId: dto.toWarehouseId, tenantId },
+        where: {
+          variantId: dto.variantId,
+          warehouseId: dto.toWarehouseId,
+          tenantId,
+        },
       });
 
       if (!toStock) {
@@ -273,12 +311,15 @@ export class InventoryService {
 
   // ─── Movements ───
 
-  async getMovements(tenantId: string, filters?: {
-    warehouseId?: string;
-    variantId?: string;
-    movementType?: MovementType;
-    limit?: number;
-  }): Promise<StockMovement[]> {
+  async getMovements(
+    tenantId: string,
+    filters?: {
+      warehouseId?: string;
+      variantId?: string;
+      movementType?: MovementType;
+      limit?: number;
+    },
+  ): Promise<StockMovement[]> {
     const where: Record<string, unknown> = { tenantId };
     if (filters?.warehouseId) where.warehouseId = filters.warehouseId;
     if (filters?.variantId) where.variantId = filters.variantId;

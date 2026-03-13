@@ -39,7 +39,9 @@ let PromotionsService = class PromotionsService {
         });
     }
     async findOne(id, tenantId) {
-        const promotion = await this.promotionRepository.findOne({ where: { id, tenantId } });
+        const promotion = await this.promotionRepository.findOne({
+            where: { id, tenantId },
+        });
         if (!promotion) {
             throw new common_1.NotFoundException('Promoción no encontrada');
         }

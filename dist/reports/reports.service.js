@@ -55,11 +55,13 @@ let ReportsService = class ReportsService {
         const byPaymentMethod = {};
         for (const sale of sales) {
             for (const p of sale.payments) {
-                byPaymentMethod[p.method] = (byPaymentMethod[p.method] || 0) + Number(p.amount);
+                byPaymentMethod[p.method] =
+                    (byPaymentMethod[p.method] || 0) + Number(p.amount);
             }
             if (sale.accountsReceivable) {
                 for (const ar of sale.accountsReceivable) {
-                    byPaymentMethod['CREDITO'] = (byPaymentMethod['CREDITO'] || 0) + Number(ar.totalAmount);
+                    byPaymentMethod['CREDITO'] =
+                        (byPaymentMethod['CREDITO'] || 0) + Number(ar.totalAmount);
                 }
             }
         }
@@ -156,7 +158,13 @@ let ReportsService = class ReportsService {
                 retailValue,
             };
         });
-        return { totalItems, totalCostValue, totalRetailValue, lowStockCount, items };
+        return {
+            totalItems,
+            totalCostValue,
+            totalRetailValue,
+            lowStockCount,
+            items,
+        };
     }
     async getDashboardStats(tenantId) {
         const today = new Date();
@@ -175,7 +183,9 @@ let ReportsService = class ReportsService {
             .select('COUNT(*)', 'count')
             .addSelect('COALESCE(SUM(s.total), 0)', 'revenue')
             .where('s.status = :status', { status: sale_status_enum_js_1.SaleStatus.COMPLETED })
-            .andWhere('s.created_at >= :monthStart', { monthStart: monthStart.toISOString() })
+            .andWhere('s.created_at >= :monthStart', {
+            monthStart: monthStart.toISOString(),
+        })
             .andWhere('s.tenant_id = :tenantId', { tenantId })
             .getRawOne();
         const lowStockCount = await this.stockRepository

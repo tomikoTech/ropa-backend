@@ -21,7 +21,10 @@ export class TenantsController {
 
   @Post('onboard')
   @Roles(Role.SUPER_ADMIN)
-  @ApiOperation({ summary: 'Onboarding: crear tienda completa (tenant + admin + warehouse + settings)' })
+  @ApiOperation({
+    summary:
+      'Onboarding: crear tienda completa (tenant + admin + warehouse + settings)',
+  })
   onboardStore(@Body() dto: OnboardStoreDto) {
     return this.tenantsService.onboardStore(dto);
   }
@@ -46,7 +49,10 @@ export class TenantsController {
 
   @Put(':id')
   @Roles(Role.SUPER_ADMIN)
-  update(@Param('id') id: string, @Body() body: Partial<{ name: string; slug: string; isActive: boolean }>) {
+  update(
+    @Param('id') id: string,
+    @Body() body: Partial<{ name: string; slug: string; isActive: boolean }>,
+  ) {
     return this.tenantsService.update(id, body);
   }
 

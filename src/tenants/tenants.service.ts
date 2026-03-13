@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import * as bcrypt from 'bcrypt';
@@ -20,7 +24,9 @@ export class TenantsService {
   ) {}
 
   async create(data: { name: string; slug: string }): Promise<Tenant> {
-    const existing = await this.tenantRepo.findOne({ where: { slug: data.slug } });
+    const existing = await this.tenantRepo.findOne({
+      where: { slug: data.slug },
+    });
     if (existing) {
       throw new ConflictException('Slug ya existe');
     }
@@ -37,7 +43,10 @@ export class TenantsService {
     return tenant;
   }
 
-  async update(id: string, data: Partial<{ name: string; slug: string; isActive: boolean }>): Promise<Tenant> {
+  async update(
+    id: string,
+    data: Partial<{ name: string; slug: string; isActive: boolean }>,
+  ): Promise<Tenant> {
     const tenant = await this.findOne(id);
     Object.assign(tenant, data);
     return this.tenantRepo.save(tenant);
@@ -67,9 +76,13 @@ export class TenantsService {
 
     // Check email uniqueness
     const userRepo = this.dataSource.getRepository(User);
-    const existingUser = await userRepo.findOne({ where: { email: dto.adminEmail } });
+    const existingUser = await userRepo.findOne({
+      where: { email: dto.adminEmail },
+    });
     if (existingUser) {
-      throw new ConflictException(`El email "${dto.adminEmail}" ya está registrado`);
+      throw new ConflictException(
+        `El email "${dto.adminEmail}" ya está registrado`,
+      );
     }
 
     return this.dataSource.transaction(async (manager) => {

@@ -51,9 +51,7 @@ export class ReceiptService {
       invoiceNumber: sale.invoiceNumber || '',
       date: saleDate.toLocaleDateString('es-CO'),
       time: saleDate.toLocaleTimeString('es-CO'),
-      seller: sale.user
-        ? `${sale.user.firstName} ${sale.user.lastName}`
-        : '',
+      seller: sale.user ? `${sale.user.firstName} ${sale.user.lastName}` : '',
       client: sale.client
         ? `${sale.client.firstName} ${sale.client.lastName}`
         : 'Consumidor Final',

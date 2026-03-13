@@ -96,7 +96,14 @@ let PurchasesService = class PurchasesService {
             where.supplierId = filters.supplierId;
         return this.poRepository.find({
             where,
-            relations: ['supplier', 'warehouse', 'createdBy', 'items', 'items.variant', 'accountsPayable'],
+            relations: [
+                'supplier',
+                'warehouse',
+                'createdBy',
+                'items',
+                'items.variant',
+                'accountsPayable',
+            ],
             order: { createdAt: 'DESC' },
         });
     }

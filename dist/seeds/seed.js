@@ -127,7 +127,9 @@ async function seed() {
     const stockMovementRepo = dataSource.getRepository(stock_movement_entity_js_1.StockMovement);
     const clientRepo = dataSource.getRepository(client_entity_js_1.Client);
     const settingsRepo = dataSource.getRepository(store_settings_entity_js_1.StoreSettings);
-    let platformTenant = await tenantRepo.findOne({ where: { slug: 'mipinta-platform' } });
+    let platformTenant = await tenantRepo.findOne({
+        where: { slug: 'mipinta-platform' },
+    });
     if (!platformTenant) {
         platformTenant = await tenantRepo.save(tenantRepo.create({ name: 'MiPinta Platform', slug: 'mipinta-platform' }));
         console.log('Platform tenant created: MiPinta Platform');
@@ -135,7 +137,9 @@ async function seed() {
     else {
         console.log('Platform tenant already exists');
     }
-    let superAdmin = await userRepo.findOne({ where: { email: 'dyez1110@gmail.com' } });
+    let superAdmin = await userRepo.findOne({
+        where: { email: 'dyez1110@gmail.com' },
+    });
     if (!superAdmin) {
         const passwordHash = await bcrypt.hash('supermario123', 10);
         superAdmin = await userRepo.save(userRepo.create({
@@ -161,7 +165,9 @@ async function seed() {
         console.log('Tenant already exists: Tu Chapato');
     }
     const tenantId = storeTenant.id;
-    let storeAdmin = await userRepo.findOne({ where: { email: 'tuchapato@gmail.com' } });
+    let storeAdmin = await userRepo.findOne({
+        where: { email: 'tuchapato@gmail.com' },
+    });
     if (!storeAdmin) {
         const passwordHash = await bcrypt.hash('tuchapato123', 10);
         storeAdmin = await userRepo.save(userRepo.create({
@@ -193,7 +199,9 @@ async function seed() {
         }));
         console.log('Generic client created: Consumidor Final');
     }
-    let warehouse = await warehouseRepo.findOne({ where: { code: 'TCH-01', tenantId } });
+    let warehouse = await warehouseRepo.findOne({
+        where: { code: 'TCH-01', tenantId },
+    });
     if (!warehouse) {
         warehouse = await warehouseRepo.save(warehouseRepo.create({
             name: 'Tu Chapato Principal',
@@ -213,7 +221,9 @@ async function seed() {
     ];
     const categories = [];
     for (const cData of categoriesData) {
-        let c = await categoryRepo.findOne({ where: { slug: cData.slug, tenantId } });
+        let c = await categoryRepo.findOne({
+            where: { slug: cData.slug, tenantId },
+        });
         if (!c) {
             c = await categoryRepo.save(categoryRepo.create({ ...cData, tenantId }));
             console.log(`Category created: ${c.name}`);

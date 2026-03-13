@@ -47,7 +47,9 @@ exports.TenantsController = TenantsController;
 __decorate([
     (0, common_1.Post)('onboard'),
     (0, roles_decorator_js_1.Roles)(role_enum_js_1.Role.SUPER_ADMIN),
-    (0, swagger_1.ApiOperation)({ summary: 'Onboarding: crear tienda completa (tenant + admin + warehouse + settings)' }),
+    (0, swagger_1.ApiOperation)({
+        summary: 'Onboarding: crear tienda completa (tenant + admin + warehouse + settings)',
+    }),
     __param(0, (0, common_1.Body)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [onboard_store_dto_js_1.OnboardStoreDto]),

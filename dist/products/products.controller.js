@@ -72,7 +72,9 @@ __decorate([
 ], ProductsController.prototype, "findAll", null);
 __decorate([
     (0, common_1.Get)('search'),
-    (0, swagger_1.ApiOperation)({ summary: 'Buscar variantes por SKU, código de barras o nombre' }),
+    (0, swagger_1.ApiOperation)({
+        summary: 'Buscar variantes por SKU, código de barras o nombre',
+    }),
     (0, swagger_1.ApiQuery)({ name: 'q', required: true }),
     __param(0, (0, common_1.Query)('q')),
     __param(1, (0, tenant_id_decorator_js_1.TenantId)()),

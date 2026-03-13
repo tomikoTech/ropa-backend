@@ -56,12 +56,15 @@ export class ReportsService {
     private readonly stockRepository: Repository<Stock>,
   ) {}
 
-  async getSalesReport(filters: {
-    from: string;
-    to: string;
-    warehouseId?: string;
-    userId?: string;
-  }, tenantId: string): Promise<SalesReport> {
+  async getSalesReport(
+    filters: {
+      from: string;
+      to: string;
+      warehouseId?: string;
+      userId?: string;
+    },
+    tenantId: string,
+  ): Promise<SalesReport> {
     const qb = this.saleRepository
       .createQueryBuilder('s')
       .leftJoinAndSelect('s.items', 'items')
@@ -84,7 +87,10 @@ export class ReportsService {
     const totalSales = sales.length;
     const totalAmount = sales.reduce((s, sale) => s + Number(sale.total), 0);
     const totalTax = sales.reduce((s, sale) => s + Number(sale.taxAmount), 0);
-    const totalDiscount = sales.reduce((s, sale) => s + Number(sale.discountAmount), 0);
+    const totalDiscount = sales.reduce(
+      (s, sale) => s + Number(sale.discountAmount),
+      0,
+    );
     const totalItems = sales.reduce(
       (s, sale) => s + sale.items.reduce((is, i) => is + i.quantity, 0),
       0,
@@ -94,12 +100,14 @@ export class ReportsService {
     const byPaymentMethod: Record<string, number> = {};
     for (const sale of sales) {
       for (const p of sale.payments) {
-        byPaymentMethod[p.method] = (byPaymentMethod[p.method] || 0) + Number(p.amount);
+        byPaymentMethod[p.method] =
+          (byPaymentMethod[p.method] || 0) + Number(p.amount);
       }
       // Credit sales: accountsReceivable records
       if (sale.accountsReceivable) {
         for (const ar of sale.accountsReceivable) {
-          byPaymentMethod['CREDITO'] = (byPaymentMethod['CREDITO'] || 0) + Number(ar.totalAmount);
+          byPaymentMethod['CREDITO'] =
+            (byPaymentMethod['CREDITO'] || 0) + Number(ar.totalAmount);
         }
       }
     }
@@ -129,11 +137,14 @@ export class ReportsService {
     };
   }
 
-  async getTopProducts(filters: {
-    from: string;
-    to: string;
-    limit?: number;
-  }, tenantId: string): Promise<TopProduct[]> {
+  async getTopProducts(
+    filters: {
+      from: string;
+      to: string;
+      limit?: number;
+    },
+    tenantId: string,
+  ): Promise<TopProduct[]> {
     const result = await this.saleItemRepository
       .createQueryBuilder('si')
       .innerJoin('si.sale', 's')
@@ -165,7 +176,10 @@ export class ReportsService {
     }));
   }
 
-  async getInventoryValuation(warehouseId: string | undefined, tenantId: string): Promise<InventoryValuation> {
+  async getInventoryValuation(
+    warehouseId: string | undefined,
+    tenantId: string,
+  ): Promise<InventoryValuation> {
     const qb = this.stockRepository
       .createQueryBuilder('st')
       .leftJoinAndSelect('st.variant', 'v')
@@ -212,7 +226,13 @@ export class ReportsService {
       };
     });
 
-    return { totalItems, totalCostValue, totalRetailValue, lowStockCount, items };
+    return {
+      totalItems,
+      totalCostValue,
+      totalRetailValue,
+      lowStockCount,
+      items,
+    };
   }
 
   async getDashboardStats(tenantId: string): Promise<{
@@ -241,7 +261,9 @@ export class ReportsService {
       .select('COUNT(*)', 'count')
       .addSelect('COALESCE(SUM(s.total), 0)', 'revenue')
       .where('s.status = :status', { status: SaleStatus.COMPLETED })
-      .andWhere('s.created_at >= :monthStart', { monthStart: monthStart.toISOString() })
+      .andWhere('s.created_at >= :monthStart', {
+        monthStart: monthStart.toISOString(),
+      })
       .andWhere('s.tenant_id = :tenantId', { tenantId })
       .getRawOne();
 

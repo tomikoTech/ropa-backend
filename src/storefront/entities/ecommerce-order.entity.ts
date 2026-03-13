@@ -35,10 +35,22 @@ export class EcommerceOrder extends TenantAwareEntity {
   @Column({ type: 'decimal', precision: 14, scale: 2 })
   subtotal: number;
 
-  @Column({ name: 'discount_amount', type: 'decimal', precision: 14, scale: 2, default: 0 })
+  @Column({
+    name: 'discount_amount',
+    type: 'decimal',
+    precision: 14,
+    scale: 2,
+    default: 0,
+  })
   discountAmount: number;
 
-  @Column({ name: 'tax_amount', type: 'decimal', precision: 14, scale: 2, default: 0 })
+  @Column({
+    name: 'tax_amount',
+    type: 'decimal',
+    precision: 14,
+    scale: 2,
+    default: 0,
+  })
   taxAmount: number;
 
   @Column({ type: 'decimal', precision: 14, scale: 2 })

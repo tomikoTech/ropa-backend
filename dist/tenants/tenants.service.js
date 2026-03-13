@@ -65,7 +65,9 @@ let TenantsService = class TenantsService {
         this.dataSource = dataSource;
     }
     async create(data) {
-        const existing = await this.tenantRepo.findOne({ where: { slug: data.slug } });
+        const existing = await this.tenantRepo.findOne({
+            where: { slug: data.slug },
+        });
         if (existing) {
             throw new common_1.ConflictException('Slug ya existe');
         }
@@ -101,7 +103,9 @@ let TenantsService = class TenantsService {
             throw new common_1.ConflictException(`Ya existe una tienda con slug "${slug}"`);
         }
         const userRepo = this.dataSource.getRepository(user_entity_js_1.User);
-        const existingUser = await userRepo.findOne({ where: { email: dto.adminEmail } });
+        const existingUser = await userRepo.findOne({
+            where: { email: dto.adminEmail },
+        });
         if (existingUser) {
             throw new common_1.ConflictException(`El email "${dto.adminEmail}" ya está registrado`);
         }

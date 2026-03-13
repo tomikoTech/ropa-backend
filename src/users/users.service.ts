@@ -1,4 +1,8 @@
-import { Injectable, ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
@@ -54,7 +58,11 @@ export class UsersService {
     return this.userRepository.findOne({ where: { email } });
   }
 
-  async update(id: string, updateUserDto: UpdateUserDto, tenantId: string): Promise<User> {
+  async update(
+    id: string,
+    updateUserDto: UpdateUserDto,
+    tenantId: string,
+  ): Promise<User> {
     const user = await this.findOne(id, tenantId);
 
     if (updateUserDto.email && updateUserDto.email !== user.email) {
@@ -74,7 +82,8 @@ export class UsersService {
     if (updateUserDto.firstName) user.firstName = updateUserDto.firstName;
     if (updateUserDto.lastName) user.lastName = updateUserDto.lastName;
     if (updateUserDto.role) user.role = updateUserDto.role;
-    if (updateUserDto.isActive !== undefined) user.isActive = updateUserDto.isActive;
+    if (updateUserDto.isActive !== undefined)
+      user.isActive = updateUserDto.isActive;
 
     return this.userRepository.save(user);
   }

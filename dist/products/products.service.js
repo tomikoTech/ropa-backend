@@ -38,7 +38,11 @@ let ProductsService = class ProductsService {
         if (size)
             parts.push(size.toUpperCase().slice(0, 3));
         if (color)
-            parts.push(color.toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').slice(0, 3));
+            parts.push(color
+                .toUpperCase()
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .slice(0, 3));
         if (parts.length === 1)
             parts.push(this.generateBarcode().slice(-4));
         return parts.join('-');
@@ -236,7 +240,9 @@ let ProductsService = class ProductsService {
             .where('v.is_active = true')
             .andWhere('p.status = :status', { status: 'ACTIVE' })
             .andWhere('p.tenant_id = :tenantId', { tenantId })
-            .andWhere('(v.sku ILIKE :q OR v.barcode ILIKE :q OR p.name ILIKE :q)', { q: `%${query}%` })
+            .andWhere('(v.sku ILIKE :q OR v.barcode ILIKE :q OR p.name ILIKE :q)', {
+            q: `%${query}%`,
+        })
             .limit(20)
             .getMany();
     }

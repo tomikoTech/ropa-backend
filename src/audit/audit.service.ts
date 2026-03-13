@@ -24,14 +24,19 @@ export class AuditService {
     await this.auditLogRepository.save(log);
   }
 
-  async findAll(filters: {
-    entityType?: string;
-    userId?: string;
-    action?: string;
-    from?: string;
-    to?: string;
-    limit?: number;
-  } | undefined, tenantId: string): Promise<AuditLog[]> {
+  async findAll(
+    filters:
+      | {
+          entityType?: string;
+          userId?: string;
+          action?: string;
+          from?: string;
+          to?: string;
+          limit?: number;
+        }
+      | undefined,
+    tenantId: string,
+  ): Promise<AuditLog[]> {
     const where: Record<string, unknown> = { tenantId };
     if (filters?.entityType) where.entityType = filters.entityType;
     if (filters?.userId) where.userId = filters.userId;

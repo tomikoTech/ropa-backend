@@ -101,7 +101,9 @@ async function seed() {
   // ═══════════════════════════════════════════
   // 1. Platform Tenant (for Super Admin)
   // ═══════════════════════════════════════════
-  let platformTenant = await tenantRepo.findOne({ where: { slug: 'mipinta-platform' } });
+  let platformTenant = await tenantRepo.findOne({
+    where: { slug: 'mipinta-platform' },
+  });
   if (!platformTenant) {
     platformTenant = await tenantRepo.save(
       tenantRepo.create({ name: 'MiPinta Platform', slug: 'mipinta-platform' }),
@@ -114,7 +116,9 @@ async function seed() {
   // ═══════════════════════════════════════════
   // 2. Super Admin User
   // ═══════════════════════════════════════════
-  let superAdmin = await userRepo.findOne({ where: { email: 'dyez1110@gmail.com' } });
+  let superAdmin = await userRepo.findOne({
+    where: { email: 'dyez1110@gmail.com' },
+  });
   if (!superAdmin) {
     const passwordHash = await bcrypt.hash('supermario123', 10);
     superAdmin = await userRepo.save(
@@ -148,7 +152,9 @@ async function seed() {
   const tenantId = storeTenant.id;
 
   // ── Store Admin ──
-  let storeAdmin = await userRepo.findOne({ where: { email: 'tuchapato@gmail.com' } });
+  let storeAdmin = await userRepo.findOne({
+    where: { email: 'tuchapato@gmail.com' },
+  });
   if (!storeAdmin) {
     const passwordHash = await bcrypt.hash('tuchapato123', 10);
     storeAdmin = await userRepo.save(
@@ -187,7 +193,9 @@ async function seed() {
   }
 
   // ── Warehouse ──
-  let warehouse = await warehouseRepo.findOne({ where: { code: 'TCH-01', tenantId } });
+  let warehouse = await warehouseRepo.findOne({
+    where: { code: 'TCH-01', tenantId },
+  });
   if (!warehouse) {
     warehouse = await warehouseRepo.save(
       warehouseRepo.create({
@@ -212,7 +220,9 @@ async function seed() {
 
   const categories: Category[] = [];
   for (const cData of categoriesData) {
-    let c = await categoryRepo.findOne({ where: { slug: cData.slug, tenantId } });
+    let c = await categoryRepo.findOne({
+      where: { slug: cData.slug, tenantId },
+    });
     if (!c) {
       c = await categoryRepo.save(categoryRepo.create({ ...cData, tenantId }));
       console.log(`Category created: ${c.name}`);
@@ -324,13 +334,15 @@ async function seed() {
     });
     if (!product) {
       const { variants, isPublished, ...productFields } = pData;
-      product = await productRepo.save(productRepo.create({
-        ...productFields,
-        slug: generateSlug(pData.name),
-        isPublished,
-        publishedAt: isPublished ? new Date() : undefined,
-        tenantId,
-      }));
+      product = await productRepo.save(
+        productRepo.create({
+          ...productFields,
+          slug: generateSlug(pData.name),
+          isPublished,
+          publishedAt: isPublished ? new Date() : undefined,
+          tenantId,
+        }),
+      );
       console.log(`Product created: ${product.name}`);
 
       const timestamp = Date.now().toString().slice(-6);
@@ -396,7 +408,8 @@ async function seed() {
         heroSubtitle: 'DESDE LOS PIES.',
         accentColor: '#2563eb',
         whatsappNumber: '',
-        aboutText: 'Tu Chapato: encuentra el calzado perfecto para cada ocasión.',
+        aboutText:
+          'Tu Chapato: encuentra el calzado perfecto para cada ocasión.',
         isStorefrontActive: true,
         defaultWarehouseId: warehouse.id,
         tenantId,

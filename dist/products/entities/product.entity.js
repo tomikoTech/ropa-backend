@@ -64,7 +64,13 @@ __decorate([
     __metadata("design:type", Number)
 ], Product.prototype, "basePrice", void 0);
 __decorate([
-    (0, typeorm_1.Column)({ name: 'cost_price', type: 'decimal', precision: 12, scale: 2, default: 0 }),
+    (0, typeorm_1.Column)({
+        name: 'cost_price',
+        type: 'decimal',
+        precision: 12,
+        scale: 2,
+        default: 0,
+    }),
     __metadata("design:type", Number)
 ], Product.prototype, "costPrice", void 0);
 __decorate([
