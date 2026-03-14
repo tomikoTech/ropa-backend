@@ -551,13 +551,16 @@ export class PosService {
       });
       await arPayRepo.save(payment);
 
-      // Update totals
-      ar.paidAmount = Number(ar.paidAmount) + dto.amount;
-      if (ar.paidAmount >= Number(ar.totalAmount)) {
-        ar.isFullyPaid = true;
-        ar.fullyPaidAt = new Date();
-      }
-      await arRepo.save(ar);
+      // Update totals (use update() to avoid TypeORM cascade issues with loaded relations)
+      const newPaidAmount = Number(ar.paidAmount) + dto.amount;
+      const isFullyPaid = newPaidAmount >= Number(ar.totalAmount);
+      await arRepo.update(
+        { id: arId, tenantId },
+        {
+          paidAmount: newPaidAmount,
+          ...(isFullyPaid ? { isFullyPaid: true, fullyPaidAt: new Date() } : {}),
+        },
+      );
 
       // Return with relations
       const updated = await arRepo.findOne({
