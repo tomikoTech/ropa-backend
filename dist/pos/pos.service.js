@@ -405,12 +405,12 @@ let PosService = class PosService {
                 tenantId,
             });
             await arPayRepo.save(payment);
-            ar.paidAmount = Number(ar.paidAmount) + dto.amount;
-            if (ar.paidAmount >= Number(ar.totalAmount)) {
-                ar.isFullyPaid = true;
-                ar.fullyPaidAt = new Date();
-            }
-            await arRepo.save(ar);
+            const newPaidAmount = Number(ar.paidAmount) + dto.amount;
+            const isFullyPaid = newPaidAmount >= Number(ar.totalAmount);
+            await arRepo.update({ id: arId, tenantId }, {
+                paidAmount: newPaidAmount,
+                ...(isFullyPaid ? { isFullyPaid: true, fullyPaidAt: new Date() } : {}),
+            });
             const updated = await arRepo.findOne({
                 where: { id: arId, tenantId },
                 relations: ['sale', 'client', 'payments'],
