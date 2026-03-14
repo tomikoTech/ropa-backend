@@ -131,6 +131,7 @@ export class StoreSettingsService {
     id: string,
     userId: string,
     tenantId: string,
+    warehouseId?: string,
   ): Promise<EcommerceOrder> {
     return this.dataSource.transaction(async (manager) => {
       const orderRepo = manager.getRepository(EcommerceOrder);
@@ -153,12 +154,25 @@ export class StoreSettingsService {
         );
       }
 
+      // Use provided warehouseId or fall back to the order's original warehouse
+      const effectiveWarehouseId = warehouseId || order.warehouseId;
+      if (!effectiveWarehouseId) {
+        throw new BadRequestException(
+          'No se ha configurado una bodega para este pedido',
+        );
+      }
+
+      // Update the order's warehouseId if a different one was provided
+      if (warehouseId && warehouseId !== order.warehouseId) {
+        order.warehouseId = warehouseId;
+      }
+
       // Deduct inventory for each item
       for (const item of order.items) {
         const stock = await stockRepo.findOne({
           where: {
             variantId: item.variantId,
-            warehouseId: order.warehouseId,
+            warehouseId: effectiveWarehouseId,
             tenantId,
           },
         });
@@ -174,7 +188,7 @@ export class StoreSettingsService {
 
         const movement = movementRepo.create({
           variantId: item.variantId,
-          warehouseId: order.warehouseId,
+          warehouseId: effectiveWarehouseId,
           movementType: MovementType.OUT,
           quantity: -item.quantity,
           referenceType: 'ECOMMERCE_ORDER',

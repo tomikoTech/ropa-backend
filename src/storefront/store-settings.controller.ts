@@ -79,8 +79,14 @@ export class StoreSettingsController {
     @Param('id', ParseUUIDPipe) id: string,
     @UserId() userId: string,
     @TenantId() tenantId: string,
+    @Body() body: { warehouseId?: string },
   ) {
-    return this.storeSettingsService.finalizeOrder(id, userId, tenantId);
+    return this.storeSettingsService.finalizeOrder(
+      id,
+      userId,
+      tenantId,
+      body?.warehouseId,
+    );
   }
 
   @Patch('orders/:id/cancel')
