@@ -21,6 +21,7 @@ async function bootstrap() {
       'http://localhost:3002',
       'https://ecommerce-frontend-production-964f.up.railway.app',
       'https://ropa-frontend-production.up.railway.app',
+      'https://mipintapos.up.railway.app',
     ],
     credentials: true,
   });
