@@ -11,5 +11,6 @@ export declare class CategoriesService {
     findTree(tenantId: string): Promise<Category[]>;
     findOne(id: string, tenantId: string): Promise<Category>;
     update(id: string, dto: UpdateCategoryDto, tenantId: string): Promise<Category>;
+    reorder(orderedIds: string[], tenantId: string): Promise<void>;
     remove(id: string, tenantId: string): Promise<void>;
 }

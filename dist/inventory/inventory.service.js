@@ -32,16 +32,21 @@ let InventoryService = class InventoryService {
         this.dataSource = dataSource;
     }
     async createWarehouse(dto, tenantId) {
+        let code = dto.code;
+        if (!code) {
+            const count = await this.warehouseRepository.count({ where: { tenantId } });
+            code = `BOD-${String(count + 1).padStart(3, '0')}`;
+        }
         const existing = await this.warehouseRepository.findOne({
             where: [
                 { name: dto.name, tenantId },
-                { code: dto.code, tenantId },
+                { code, tenantId },
             ],
         });
         if (existing) {
             throw new common_1.ConflictException('Ya existe una bodega con ese nombre o código');
         }
-        const warehouse = this.warehouseRepository.create({ ...dto, tenantId });
+        const warehouse = this.warehouseRepository.create({ ...dto, code, tenantId });
         return this.warehouseRepository.save(warehouse);
     }
     async findAllWarehouses(tenantId) {

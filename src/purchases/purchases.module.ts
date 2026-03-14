@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { PurchaseOrder } from './entities/purchase-order.entity.js';
 import { PurchaseOrderItem } from './entities/purchase-order-item.entity.js';
 import { AccountsPayable } from './entities/accounts-payable.entity.js';
+import { AccountsPayablePayment } from './entities/accounts-payable-payment.entity.js';
 import { ProductVariant } from '../products/entities/product-variant.entity.js';
 import { Stock } from '../inventory/entities/stock.entity.js';
 import { StockMovement } from '../inventory/entities/stock-movement.entity.js';
@@ -15,6 +16,7 @@ import { PurchasesController } from './purchases.controller.js';
       PurchaseOrder,
       PurchaseOrderItem,
       AccountsPayable,
+      AccountsPayablePayment,
       ProductVariant,
       Stock,
       StockMovement,

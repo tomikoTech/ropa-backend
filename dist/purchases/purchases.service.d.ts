@@ -2,6 +2,7 @@ import { Repository, DataSource } from 'typeorm';
 import { PurchaseOrder } from './entities/purchase-order.entity.js';
 import { PurchaseOrderItem } from './entities/purchase-order-item.entity.js';
 import { AccountsPayable } from './entities/accounts-payable.entity.js';
+import { AccountsPayablePayment } from './entities/accounts-payable-payment.entity.js';
 import { ProductVariant } from '../products/entities/product-variant.entity.js';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto.js';
 import { ReceiveItemsDto } from './dto/receive-items.dto.js';
@@ -10,9 +11,10 @@ export declare class PurchasesService {
     private readonly poRepository;
     private readonly poItemRepository;
     private readonly apRepository;
+    private readonly apPaymentRepository;
     private readonly variantRepository;
     private readonly dataSource;
-    constructor(poRepository: Repository<PurchaseOrder>, poItemRepository: Repository<PurchaseOrderItem>, apRepository: Repository<AccountsPayable>, variantRepository: Repository<ProductVariant>, dataSource: DataSource);
+    constructor(poRepository: Repository<PurchaseOrder>, poItemRepository: Repository<PurchaseOrderItem>, apRepository: Repository<AccountsPayable>, apPaymentRepository: Repository<AccountsPayablePayment>, variantRepository: Repository<ProductVariant>, dataSource: DataSource);
     private generateOrderNumber;
     create(dto: CreatePurchaseOrderDto, userId: string, tenantId: string): Promise<PurchaseOrder>;
     findAll(filters: {
@@ -27,4 +29,11 @@ export declare class PurchasesService {
         isPaid?: boolean;
     } | undefined, tenantId: string): Promise<AccountsPayable[]>;
     markAsPaid(apId: string, receiptImageUrl: string | undefined, tenantId: string): Promise<AccountsPayable>;
+    addApPayment(apId: string, dto: {
+        amount: number;
+        method: string;
+        reference?: string;
+        receiptImageUrl?: string;
+        notes?: string;
+    }, tenantId: string): Promise<AccountsPayable>;
 }

@@ -33,6 +33,9 @@ let CategoriesController = class CategoriesController {
     findTree(tenantId) {
         return this.categoriesService.findTree(tenantId);
     }
+    reorder(body, tenantId) {
+        return this.categoriesService.reorder(body.orderedIds, tenantId);
+    }
     findOne(id, tenantId) {
         return this.categoriesService.findOne(id, tenantId);
     }
@@ -69,6 +72,15 @@ __decorate([
     __metadata("design:paramtypes", [String]),
     __metadata("design:returntype", void 0)
 ], CategoriesController.prototype, "findTree", null);
+__decorate([
+    (0, common_1.Patch)('reorder'),
+    (0, swagger_1.ApiOperation)({ summary: 'Reordenar categorías' }),
+    __param(0, (0, common_1.Body)()),
+    __param(1, (0, tenant_id_decorator_js_1.TenantId)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], CategoriesController.prototype, "reorder", null);
 __decorate([
     (0, common_1.Get)(':id'),
     (0, swagger_1.ApiOperation)({ summary: 'Obtener categoría por ID' }),

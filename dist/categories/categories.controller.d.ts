@@ -7,6 +7,9 @@ export declare class CategoriesController {
     create(dto: CreateCategoryDto, tenantId: string): Promise<import("./entities/category.entity.js").Category>;
     findAll(tenantId: string): Promise<import("./entities/category.entity.js").Category[]>;
     findTree(tenantId: string): Promise<import("./entities/category.entity.js").Category[]>;
+    reorder(body: {
+        orderedIds: string[];
+    }, tenantId: string): Promise<void>;
     findOne(id: string, tenantId: string): Promise<import("./entities/category.entity.js").Category>;
     update(id: string, dto: UpdateCategoryDto, tenantId: string): Promise<import("./entities/category.entity.js").Category>;
     remove(id: string, tenantId: string): Promise<void>;

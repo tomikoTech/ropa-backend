@@ -19,4 +19,11 @@ export declare class PurchasesController {
     markAsPaid(id: string, body: {
         receiptImageUrl?: string;
     }, tenantId: string): Promise<import("./entities/accounts-payable.entity.js").AccountsPayable>;
+    addApPayment(id: string, body: {
+        amount: number;
+        method: string;
+        reference?: string;
+        receiptImageUrl?: string;
+        notes?: string;
+    }, tenantId: string): Promise<import("./entities/accounts-payable.entity.js").AccountsPayable>;
 }

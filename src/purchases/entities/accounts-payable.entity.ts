@@ -3,11 +3,13 @@ import {
   PrimaryGeneratedColumn,
   Column,
   ManyToOne,
+  OneToMany,
   JoinColumn,
   CreateDateColumn,
   UpdateDateColumn,
 } from 'typeorm';
 import { PurchaseOrder } from './purchase-order.entity.js';
+import { AccountsPayablePayment } from './accounts-payable-payment.entity.js';
 import { TenantAwareEntity } from '../../common/entities/tenant-aware.entity.js';
 
 @Entity('accounts_payable')
@@ -27,6 +29,9 @@ export class AccountsPayable extends TenantAwareEntity {
   @Column({ type: 'decimal', precision: 14, scale: 2 })
   amount: number;
 
+  @Column({ name: 'paid_amount', type: 'decimal', precision: 12, scale: 2, default: 0 })
+  paidAmount: number;
+
   @Column({ name: 'due_date', type: 'date' })
   dueDate: Date;
 
@@ -44,6 +49,9 @@ export class AccountsPayable extends TenantAwareEntity {
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
+
+  @OneToMany(() => AccountsPayablePayment, (p) => p.accountsPayable)
+  payments: AccountsPayablePayment[];
 
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
   updatedAt: Date;

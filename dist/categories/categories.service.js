@@ -122,6 +122,11 @@ let CategoriesService = class CategoriesService {
             category.isActive = dto.isActive;
         return this.categoryRepository.save(category);
     }
+    async reorder(orderedIds, tenantId) {
+        for (let i = 0; i < orderedIds.length; i++) {
+            await this.categoryRepository.update({ id: orderedIds[i], tenantId }, { sortOrder: i });
+        }
+    }
     async remove(id, tenantId) {
         const category = await this.findOne(id, tenantId);
         await this.categoryRepository.remove(category);

@@ -105,4 +105,15 @@ export class PurchasesController {
       tenantId,
     );
   }
+
+  @Post('accounts-payable/:id/payment')
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Registrar abono a cuenta por pagar' })
+  addApPayment(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: { amount: number; method: string; reference?: string; receiptImageUrl?: string; notes?: string },
+    @TenantId() tenantId: string,
+  ) {
+    return this.purchasesService.addApPayment(id, body, tenantId);
+  }
 }

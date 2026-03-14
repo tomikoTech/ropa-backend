@@ -8,6 +8,7 @@ import { Repository, DataSource } from 'typeorm';
 import { PurchaseOrder } from './entities/purchase-order.entity.js';
 import { PurchaseOrderItem } from './entities/purchase-order-item.entity.js';
 import { AccountsPayable } from './entities/accounts-payable.entity.js';
+import { AccountsPayablePayment } from './entities/accounts-payable-payment.entity.js';
 import { ProductVariant } from '../products/entities/product-variant.entity.js';
 import { Stock } from '../inventory/entities/stock.entity.js';
 import { StockMovement } from '../inventory/entities/stock-movement.entity.js';
@@ -25,6 +26,8 @@ export class PurchasesService {
     private readonly poItemRepository: Repository<PurchaseOrderItem>,
     @InjectRepository(AccountsPayable)
     private readonly apRepository: Repository<AccountsPayable>,
+    @InjectRepository(AccountsPayablePayment)
+    private readonly apPaymentRepository: Repository<AccountsPayablePayment>,
     @InjectRepository(ProductVariant)
     private readonly variantRepository: Repository<ProductVariant>,
     private readonly dataSource: DataSource,
@@ -123,6 +126,7 @@ export class PurchasesService {
         'createdBy',
         'items',
         'items.variant',
+        'items.variant.product',
         'accountsPayable',
       ],
       order: { createdAt: 'DESC' },
@@ -271,6 +275,7 @@ export class PurchasesService {
           'createdBy',
           'items',
           'items.variant',
+          'items.variant.product',
           'accountsPayable',
         ],
       });
@@ -308,7 +313,7 @@ export class PurchasesService {
 
     return this.apRepository.find({
       where,
-      relations: ['purchaseOrder', 'purchaseOrder.supplier'],
+      relations: ['purchaseOrder', 'purchaseOrder.supplier', 'payments'],
       order: { dueDate: 'ASC' },
     });
   }
@@ -334,5 +339,46 @@ export class PurchasesService {
       ap.receiptImageUrl = receiptImageUrl;
     }
     return this.apRepository.save(ap);
+  }
+
+  async addApPayment(
+    apId: string,
+    dto: { amount: number; method: string; reference?: string; receiptImageUrl?: string; notes?: string },
+    tenantId: string,
+  ): Promise<AccountsPayable> {
+    const ap = await this.apRepository.findOne({
+      where: { id: apId, tenantId },
+      relations: ['payments', 'purchaseOrder', 'purchaseOrder.supplier'],
+    });
+    if (!ap) throw new NotFoundException('Cuenta por pagar no encontrada');
+    if (ap.isPaid) throw new BadRequestException('Esta cuenta ya fue pagada completamente');
+
+    const remaining = Number(ap.amount) - Number(ap.paidAmount);
+    if (dto.amount > remaining) {
+      throw new BadRequestException(`El monto excede el saldo pendiente de ${remaining}`);
+    }
+
+    const payment = this.apPaymentRepository.create({
+      accountsPayableId: apId,
+      amount: dto.amount,
+      method: dto.method,
+      reference: dto.reference,
+      receiptImageUrl: dto.receiptImageUrl,
+      notes: dto.notes,
+      tenantId,
+    });
+    await this.apPaymentRepository.save(payment);
+
+    ap.paidAmount = Number(ap.paidAmount) + dto.amount;
+    if (ap.paidAmount >= Number(ap.amount)) {
+      ap.isPaid = true;
+      ap.paidAt = new Date();
+    }
+    await this.apRepository.save(ap);
+
+    return this.apRepository.findOne({
+      where: { id: apId, tenantId },
+      relations: ['payments', 'purchaseOrder', 'purchaseOrder.supplier'],
+    }) as Promise<AccountsPayable>;
   }
 }

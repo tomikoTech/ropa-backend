@@ -19,6 +19,7 @@ const typeorm_2 = require("typeorm");
 const purchase_order_entity_js_1 = require("./entities/purchase-order.entity.js");
 const purchase_order_item_entity_js_1 = require("./entities/purchase-order-item.entity.js");
 const accounts_payable_entity_js_1 = require("./entities/accounts-payable.entity.js");
+const accounts_payable_payment_entity_js_1 = require("./entities/accounts-payable-payment.entity.js");
 const product_variant_entity_js_1 = require("../products/entities/product-variant.entity.js");
 const stock_entity_js_1 = require("../inventory/entities/stock.entity.js");
 const stock_movement_entity_js_1 = require("../inventory/entities/stock-movement.entity.js");
@@ -28,12 +29,14 @@ let PurchasesService = class PurchasesService {
     poRepository;
     poItemRepository;
     apRepository;
+    apPaymentRepository;
     variantRepository;
     dataSource;
-    constructor(poRepository, poItemRepository, apRepository, variantRepository, dataSource) {
+    constructor(poRepository, poItemRepository, apRepository, apPaymentRepository, variantRepository, dataSource) {
         this.poRepository = poRepository;
         this.poItemRepository = poItemRepository;
         this.apRepository = apRepository;
+        this.apPaymentRepository = apPaymentRepository;
         this.variantRepository = variantRepository;
         this.dataSource = dataSource;
     }
@@ -102,6 +105,7 @@ let PurchasesService = class PurchasesService {
                 'createdBy',
                 'items',
                 'items.variant',
+                'items.variant.product',
                 'accountsPayable',
             ],
             order: { createdAt: 'DESC' },
@@ -216,6 +220,7 @@ let PurchasesService = class PurchasesService {
                     'createdBy',
                     'items',
                     'items.variant',
+                    'items.variant.product',
                     'accountsPayable',
                 ],
             });
@@ -240,7 +245,7 @@ let PurchasesService = class PurchasesService {
             where.isPaid = filters.isPaid;
         return this.apRepository.find({
             where,
-            relations: ['purchaseOrder', 'purchaseOrder.supplier'],
+            relations: ['purchaseOrder', 'purchaseOrder.supplier', 'payments'],
             order: { dueDate: 'ASC' },
         });
     }
@@ -262,6 +267,40 @@ let PurchasesService = class PurchasesService {
         }
         return this.apRepository.save(ap);
     }
+    async addApPayment(apId, dto, tenantId) {
+        const ap = await this.apRepository.findOne({
+            where: { id: apId, tenantId },
+            relations: ['payments', 'purchaseOrder', 'purchaseOrder.supplier'],
+        });
+        if (!ap)
+            throw new common_1.NotFoundException('Cuenta por pagar no encontrada');
+        if (ap.isPaid)
+            throw new common_1.BadRequestException('Esta cuenta ya fue pagada completamente');
+        const remaining = Number(ap.amount) - Number(ap.paidAmount);
+        if (dto.amount > remaining) {
+            throw new common_1.BadRequestException(`El monto excede el saldo pendiente de ${remaining}`);
+        }
+        const payment = this.apPaymentRepository.create({
+            accountsPayableId: apId,
+            amount: dto.amount,
+            method: dto.method,
+            reference: dto.reference,
+            receiptImageUrl: dto.receiptImageUrl,
+            notes: dto.notes,
+            tenantId,
+        });
+        await this.apPaymentRepository.save(payment);
+        ap.paidAmount = Number(ap.paidAmount) + dto.amount;
+        if (ap.paidAmount >= Number(ap.amount)) {
+            ap.isPaid = true;
+            ap.paidAt = new Date();
+        }
+        await this.apRepository.save(ap);
+        return this.apRepository.findOne({
+            where: { id: apId, tenantId },
+            relations: ['payments', 'purchaseOrder', 'purchaseOrder.supplier'],
+        });
+    }
 };
 exports.PurchasesService = PurchasesService;
 exports.PurchasesService = PurchasesService = __decorate([
@@ -269,8 +308,10 @@ exports.PurchasesService = PurchasesService = __decorate([
     __param(0, (0, typeorm_1.InjectRepository)(purchase_order_entity_js_1.PurchaseOrder)),
     __param(1, (0, typeorm_1.InjectRepository)(purchase_order_item_entity_js_1.PurchaseOrderItem)),
     __param(2, (0, typeorm_1.InjectRepository)(accounts_payable_entity_js_1.AccountsPayable)),
-    __param(3, (0, typeorm_1.InjectRepository)(product_variant_entity_js_1.ProductVariant)),
+    __param(3, (0, typeorm_1.InjectRepository)(accounts_payable_payment_entity_js_1.AccountsPayablePayment)),
+    __param(4, (0, typeorm_1.InjectRepository)(product_variant_entity_js_1.ProductVariant)),
     __metadata("design:paramtypes", [typeorm_2.Repository,
+        typeorm_2.Repository,
         typeorm_2.Repository,
         typeorm_2.Repository,
         typeorm_2.Repository,

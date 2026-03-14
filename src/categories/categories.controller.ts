@@ -38,6 +38,12 @@ export class CategoriesController {
     return this.categoriesService.findTree(tenantId);
   }
 
+  @Patch('reorder')
+  @ApiOperation({ summary: 'Reordenar categorías' })
+  reorder(@Body() body: { orderedIds: string[] }, @TenantId() tenantId: string) {
+    return this.categoriesService.reorder(body.orderedIds, tenantId);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Obtener categoría por ID' })
   findOne(

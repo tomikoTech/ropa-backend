@@ -133,6 +133,15 @@ export class CategoriesService {
     return this.categoryRepository.save(category);
   }
 
+  async reorder(orderedIds: string[], tenantId: string): Promise<void> {
+    for (let i = 0; i < orderedIds.length; i++) {
+      await this.categoryRepository.update(
+        { id: orderedIds[i], tenantId },
+        { sortOrder: i },
+      );
+    }
+  }
+
   async remove(id: string, tenantId: string): Promise<void> {
     const category = await this.findOne(id, tenantId);
     await this.categoryRepository.remove(category);

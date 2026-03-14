@@ -33,10 +33,17 @@ export class InventoryService {
     dto: CreateWarehouseDto,
     tenantId: string,
   ): Promise<Warehouse> {
+    // Auto-generate code if not provided
+    let code = dto.code;
+    if (!code) {
+      const count = await this.warehouseRepository.count({ where: { tenantId } });
+      code = `BOD-${String(count + 1).padStart(3, '0')}`;
+    }
+
     const existing = await this.warehouseRepository.findOne({
       where: [
         { name: dto.name, tenantId },
-        { code: dto.code, tenantId },
+        { code, tenantId },
       ],
     });
     if (existing) {
@@ -44,7 +51,7 @@ export class InventoryService {
         'Ya existe una bodega con ese nombre o código',
       );
     }
-    const warehouse = this.warehouseRepository.create({ ...dto, tenantId });
+    const warehouse = this.warehouseRepository.create({ ...dto, code, tenantId });
     return this.warehouseRepository.save(warehouse);
   }
 

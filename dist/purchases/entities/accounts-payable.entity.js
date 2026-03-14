@@ -12,18 +12,21 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.AccountsPayable = void 0;
 const typeorm_1 = require("typeorm");
 const purchase_order_entity_js_1 = require("./purchase-order.entity.js");
+const accounts_payable_payment_entity_js_1 = require("./accounts-payable-payment.entity.js");
 const tenant_aware_entity_js_1 = require("../../common/entities/tenant-aware.entity.js");
 let AccountsPayable = class AccountsPayable extends tenant_aware_entity_js_1.TenantAwareEntity {
     id;
     purchaseOrder;
     purchaseOrderId;
     amount;
+    paidAmount;
     dueDate;
     isPaid;
     paidAt;
     notes;
     receiptImageUrl;
     createdAt;
+    payments;
     updatedAt;
 };
 exports.AccountsPayable = AccountsPayable;
@@ -46,6 +49,10 @@ __decorate([
     (0, typeorm_1.Column)({ type: 'decimal', precision: 14, scale: 2 }),
     __metadata("design:type", Number)
 ], AccountsPayable.prototype, "amount", void 0);
+__decorate([
+    (0, typeorm_1.Column)({ name: 'paid_amount', type: 'decimal', precision: 12, scale: 2, default: 0 }),
+    __metadata("design:type", Number)
+], AccountsPayable.prototype, "paidAmount", void 0);
 __decorate([
     (0, typeorm_1.Column)({ name: 'due_date', type: 'date' }),
     __metadata("design:type", Date)
@@ -70,6 +77,10 @@ __decorate([
     (0, typeorm_1.CreateDateColumn)({ name: 'created_at', type: 'timestamptz' }),
     __metadata("design:type", Date)
 ], AccountsPayable.prototype, "createdAt", void 0);
+__decorate([
+    (0, typeorm_1.OneToMany)(() => accounts_payable_payment_entity_js_1.AccountsPayablePayment, (p) => p.accountsPayable),
+    __metadata("design:type", Array)
+], AccountsPayable.prototype, "payments", void 0);
 __decorate([
     (0, typeorm_1.UpdateDateColumn)({ name: 'updated_at', type: 'timestamptz' }),
     __metadata("design:type", Date)

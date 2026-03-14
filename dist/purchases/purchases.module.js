@@ -12,6 +12,7 @@ const typeorm_1 = require("@nestjs/typeorm");
 const purchase_order_entity_js_1 = require("./entities/purchase-order.entity.js");
 const purchase_order_item_entity_js_1 = require("./entities/purchase-order-item.entity.js");
 const accounts_payable_entity_js_1 = require("./entities/accounts-payable.entity.js");
+const accounts_payable_payment_entity_js_1 = require("./entities/accounts-payable-payment.entity.js");
 const product_variant_entity_js_1 = require("../products/entities/product-variant.entity.js");
 const stock_entity_js_1 = require("../inventory/entities/stock.entity.js");
 const stock_movement_entity_js_1 = require("../inventory/entities/stock-movement.entity.js");
@@ -27,6 +28,7 @@ exports.PurchasesModule = PurchasesModule = __decorate([
                 purchase_order_entity_js_1.PurchaseOrder,
                 purchase_order_item_entity_js_1.PurchaseOrderItem,
                 accounts_payable_entity_js_1.AccountsPayable,
+                accounts_payable_payment_entity_js_1.AccountsPayablePayment,
                 product_variant_entity_js_1.ProductVariant,
                 stock_entity_js_1.Stock,
                 stock_movement_entity_js_1.StockMovement,

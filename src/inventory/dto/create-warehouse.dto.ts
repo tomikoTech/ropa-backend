@@ -7,10 +7,15 @@ export class CreateWarehouseDto {
   @IsNotEmpty()
   name: string;
 
-  @ApiProperty({ example: 'BOD-01' })
+  @ApiPropertyOptional({ example: 'BOD-01' })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  code: string;
+  code?: string;
+
+  @ApiPropertyOptional({ example: true })
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
 
   @ApiPropertyOptional({ example: 'Calle 123 #45-67, Bogotá' })
   @IsOptional()
