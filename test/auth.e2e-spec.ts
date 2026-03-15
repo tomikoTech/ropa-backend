@@ -21,12 +21,12 @@ describe('Auth (e2e)', () => {
         .send({ email: 'admin@mipinta.co', password: 'admin123' })
         .expect(201);
 
-      expect(res.body.data).toHaveProperty('accessToken');
-      expect(res.body.data).toHaveProperty('refreshToken');
-      expect(res.body.data).toHaveProperty('user');
-      expect(res.body.data.user.email).toBe('admin@mipinta.co');
+      expect(res.body).toHaveProperty('accessToken');
+      expect(res.body).toHaveProperty('refreshToken');
+      expect(res.body).toHaveProperty('user');
+      expect(res.body.user.email).toBe('admin@mipinta.co');
 
-      token = res.body.data.accessToken;
+      token = res.body.accessToken;
     });
 
     it('should return 401 with wrong password', async () => {
@@ -60,9 +60,9 @@ describe('Auth (e2e)', () => {
         .set('Authorization', `Bearer ${token}`)
         .expect(200);
 
-      expect(res.body.data).toHaveProperty('id');
-      expect(res.body.data).toHaveProperty('email');
-      expect(res.body.data.email).toBe('admin@mipinta.co');
+      expect(res.body).toHaveProperty('id');
+      expect(res.body).toHaveProperty('email');
+      expect(res.body.email).toBe('admin@mipinta.co');
     });
 
     it('should return 401 without token', async () => {

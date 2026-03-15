@@ -26,8 +26,8 @@ describe('Inventory (e2e)', () => {
         variants: [{ size: 'M', color: 'Rojo' }],
       });
 
-    productId = productRes.body.data.id;
-    variantId = productRes.body.data.variants[0].id;
+    productId = productRes.body.id;
+    variantId = productRes.body.variants[0].id;
   }, 30000);
 
   afterAll(async () => {
@@ -51,12 +51,12 @@ describe('Inventory (e2e)', () => {
         })
         .expect(201);
 
-      expect(res.body.data).toHaveProperty('id');
-      expect(res.body.data.name).toBe(`Bodega Auto ${uniqueSuffix}`);
-      expect(res.body.data).toHaveProperty('code');
-      expect(res.body.data.code).toBeTruthy();
+      expect(res.body).toHaveProperty('id');
+      expect(res.body.name).toBe(`Bodega Auto ${uniqueSuffix}`);
+      expect(res.body).toHaveProperty('code');
+      expect(res.body.code).toBeTruthy();
 
-      warehouseId1 = res.body.data.id;
+      warehouseId1 = res.body.id;
     });
 
     it('should create a second warehouse with explicit code', async () => {
@@ -72,8 +72,8 @@ describe('Inventory (e2e)', () => {
         })
         .expect(201);
 
-      expect(res.body.data.code).toBe(code);
-      warehouseId2 = res.body.data.id;
+      expect(res.body.code).toBe(code);
+      warehouseId2 = res.body.id;
     });
   });
 
@@ -84,9 +84,9 @@ describe('Inventory (e2e)', () => {
         .set('Authorization', `Bearer ${token}`)
         .expect(200);
 
-      expect(res.body.data).toBeInstanceOf(Array);
+      expect(res.body).toBeInstanceOf(Array);
 
-      const ids = res.body.data.map((w: any) => w.id);
+      const ids = res.body.map((w: any) => w.id);
       expect(ids).toContain(warehouseId1);
       expect(ids).toContain(warehouseId2);
     });
@@ -99,7 +99,7 @@ describe('Inventory (e2e)', () => {
         .set('Authorization', `Bearer ${token}`)
         .expect(200);
 
-      expect(res.body.data).toBeInstanceOf(Array);
+      expect(res.body).toBeInstanceOf(Array);
     });
   });
 
@@ -117,7 +117,7 @@ describe('Inventory (e2e)', () => {
         })
         .expect(201);
 
-      expect(res.body.data).toBeDefined();
+      expect(res.body).toBeDefined();
     });
 
     it('should adjust stock IN for variant in warehouse 2', async () => {
@@ -133,7 +133,7 @@ describe('Inventory (e2e)', () => {
         })
         .expect(201);
 
-      expect(res.body.data).toBeDefined();
+      expect(res.body).toBeDefined();
     });
   });
 
@@ -144,7 +144,7 @@ describe('Inventory (e2e)', () => {
         .set('Authorization', `Bearer ${token}`)
         .expect(200);
 
-      const entries = res.body.data.filter(
+      const entries = res.body.filter(
         (s: any) => s.variantId === variantId || s.variant?.id === variantId,
       );
       expect(entries.length).toBeGreaterThanOrEqual(2);
@@ -165,7 +165,7 @@ describe('Inventory (e2e)', () => {
         })
         .expect(201);
 
-      expect(res.body.data).toBeDefined();
+      expect(res.body).toBeDefined();
     });
   });
 
@@ -176,7 +176,7 @@ describe('Inventory (e2e)', () => {
         .set('Authorization', `Bearer ${token}`)
         .expect(200);
 
-      const stockByWarehouse = res.body.data;
+      const stockByWarehouse = res.body;
       expect(stockByWarehouse).toBeInstanceOf(Array);
 
       const wh1Stock = stockByWarehouse.find(
@@ -205,8 +205,8 @@ describe('Inventory (e2e)', () => {
         .set('Authorization', `Bearer ${token}`)
         .expect(200);
 
-      expect(res.body.data).toBeInstanceOf(Array);
-      expect(res.body.data.length).toBeGreaterThanOrEqual(1);
+      expect(res.body).toBeInstanceOf(Array);
+      expect(res.body.length).toBeGreaterThanOrEqual(1);
     });
   });
 
@@ -217,8 +217,8 @@ describe('Inventory (e2e)', () => {
         .set('Authorization', `Bearer ${token}`)
         .expect(200);
 
-      expect(res.body.data).toBeInstanceOf(Array);
-      expect(res.body.data.length).toBeGreaterThanOrEqual(2);
+      expect(res.body).toBeInstanceOf(Array);
+      expect(res.body.length).toBeGreaterThanOrEqual(2);
     });
   });
 
@@ -229,8 +229,8 @@ describe('Inventory (e2e)', () => {
         .set('Authorization', `Bearer ${token}`)
         .expect(200);
 
-      expect(res.body.data).toBeInstanceOf(Array);
-      expect(res.body.data.length).toBeGreaterThanOrEqual(1);
+      expect(res.body).toBeInstanceOf(Array);
+      expect(res.body.length).toBeGreaterThanOrEqual(1);
     });
   });
 

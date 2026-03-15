@@ -30,9 +30,9 @@ describe('Categories (e2e)', () => {
         })
         .expect(201);
 
-      expect(res.body.data).toHaveProperty('id');
-      expect(res.body.data.name).toBe(`Cat A ${uniqueSuffix}`);
-      categoryId1 = res.body.data.id;
+      expect(res.body).toHaveProperty('id');
+      expect(res.body.name).toBe(`Cat A ${uniqueSuffix}`);
+      categoryId1 = res.body.id;
     });
 
     it('should create a second category', async () => {
@@ -46,8 +46,8 @@ describe('Categories (e2e)', () => {
         })
         .expect(201);
 
-      expect(res.body.data).toHaveProperty('id');
-      categoryId2 = res.body.data.id;
+      expect(res.body).toHaveProperty('id');
+      categoryId2 = res.body.id;
     });
 
     it('should reject category without name', async () => {
@@ -66,8 +66,8 @@ describe('Categories (e2e)', () => {
         .set('Authorization', `Bearer ${token}`)
         .expect(200);
 
-      expect(res.body.data).toBeInstanceOf(Array);
-      expect(res.body.data.length).toBeGreaterThanOrEqual(2);
+      expect(res.body).toBeInstanceOf(Array);
+      expect(res.body.length).toBeGreaterThanOrEqual(2);
     });
   });
 
@@ -81,7 +81,7 @@ describe('Categories (e2e)', () => {
         .send({ name: updatedName })
         .expect(200);
 
-      expect(res.body.data.name).toBe(updatedName);
+      expect(res.body.name).toBe(updatedName);
     });
   });
 

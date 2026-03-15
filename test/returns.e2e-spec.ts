@@ -36,7 +36,7 @@ describe('Returns (e2e)', () => {
       })
       .expect(201);
 
-    const product = productRes.body.data;
+    const product = productRes.body;
     _productId = product.id;
     variantId = product.variants[0].id;
 
@@ -52,7 +52,7 @@ describe('Returns (e2e)', () => {
       })
       .expect(201);
 
-    warehouseId = warehouseRes.body.data.id;
+    warehouseId = warehouseRes.body.id;
 
     // ── Adjust stock: add 20 units ──
 
@@ -81,7 +81,7 @@ describe('Returns (e2e)', () => {
       })
       .expect(201);
 
-    clientId = clientRes.body.data.id;
+    clientId = clientRes.body.id;
 
     // ── Create a sale to return ──
 
@@ -102,7 +102,7 @@ describe('Returns (e2e)', () => {
       })
       .expect(201);
 
-    const sale = saleRes.body.data;
+    const sale = saleRes.body;
     saleId = sale.id;
     saleItemId = sale.items[0].id;
     _saleItemQuantity = sale.items[0].quantity;
@@ -114,7 +114,7 @@ describe('Returns (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
 
-    const stocks = stockRes.body.data;
+    const stocks = stockRes.body;
     const whStock = stocks.find((s: any) => s.warehouseId === warehouseId);
     stockBeforeReturn = whStock.quantity;
     // Should be 20 - 3 = 17
@@ -137,7 +137,7 @@ describe('Returns (e2e)', () => {
       })
       .expect(201);
 
-    const ret = res.body.data;
+    const ret = res.body;
     expect(ret).toBeDefined();
     expect(ret.returnNumber).toBeDefined();
     expect(ret.status).toBe('COMPLETED');
@@ -159,7 +159,7 @@ describe('Returns (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
 
-    const stocks = res.body.data;
+    const stocks = res.body;
     const whStock = stocks.find((s: any) => s.warehouseId === warehouseId);
     expect(whStock).toBeDefined();
     // stockBeforeReturn was 17, returned 2 → should be 19
@@ -174,7 +174,7 @@ describe('Returns (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
 
-    const returns = res.body.data;
+    const returns = res.body;
     expect(Array.isArray(returns)).toBe(true);
 
     const found = returns.find((r: any) => r.id === returnId);
@@ -191,7 +191,7 @@ describe('Returns (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
 
-    const ret = res.body.data;
+    const ret = res.body;
     expect(ret.id).toBe(returnId);
     expect(ret.reason).toBe('Producto defectuoso - E2E test');
     expect(ret.items).toHaveLength(1);
@@ -210,7 +210,7 @@ describe('Returns (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
 
-    const creditNotes = res.body.data;
+    const creditNotes = res.body;
     expect(Array.isArray(creditNotes)).toBe(true);
 
     const found = creditNotes.find((cn: any) => cn.returnId === returnId);

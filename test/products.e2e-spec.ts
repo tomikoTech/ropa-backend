@@ -30,7 +30,7 @@ describe('Products (e2e)', () => {
         .set('Authorization', `Bearer ${token}`)
         .expect(200);
 
-      expect(res.body.data).toBeInstanceOf(Array);
+      expect(res.body).toBeInstanceOf(Array);
     });
   });
 
@@ -51,12 +51,12 @@ describe('Products (e2e)', () => {
         })
         .expect(201);
 
-      expect(res.body.data).toHaveProperty('id');
-      expect(res.body.data.name).toBe(uniqueName);
-      expect(Number(res.body.data.basePrice)).toBe(49900);
-      expect(res.body.data.variants).toHaveLength(2);
+      expect(res.body).toHaveProperty('id');
+      expect(res.body.name).toBe(uniqueName);
+      expect(Number(res.body.basePrice)).toBe(49900);
+      expect(res.body.variants).toHaveLength(2);
 
-      createdProductId = res.body.data.id;
+      createdProductId = res.body.id;
     });
 
     it('should reject product without required fields', async () => {
@@ -77,9 +77,9 @@ describe('Products (e2e)', () => {
         .set('Authorization', `Bearer ${token}`)
         .expect(200);
 
-      expect(res.body.data.id).toBe(createdProductId);
-      expect(res.body.data.name).toBe(uniqueName);
-      expect(res.body.data.variants).toBeInstanceOf(Array);
+      expect(res.body.id).toBe(createdProductId);
+      expect(res.body.name).toBe(uniqueName);
+      expect(res.body.variants).toBeInstanceOf(Array);
     });
   });
 
@@ -94,8 +94,8 @@ describe('Products (e2e)', () => {
         .send({ name: updatedName, basePrice: 59900 })
         .expect(200);
 
-      expect(res.body.data.name).toBe(updatedName);
-      expect(Number(res.body.data.basePrice)).toBe(59900);
+      expect(res.body.name).toBe(updatedName);
+      expect(Number(res.body.basePrice)).toBe(59900);
     });
   });
 
@@ -107,7 +107,7 @@ describe('Products (e2e)', () => {
         .set('Authorization', `Bearer ${token}`)
         .expect(200);
 
-      expect(res.body.data).toBeInstanceOf(Array);
+      expect(res.body).toBeInstanceOf(Array);
     });
   });
 
@@ -120,8 +120,8 @@ describe('Products (e2e)', () => {
         .set('Authorization', `Bearer ${token}`)
         .expect(200);
 
-      expect(res.body.data.isPublished).toBe(true);
-      expect(res.body.data.publishedAt).toBeDefined();
+      expect(res.body.isPublished).toBe(true);
+      expect(res.body.publishedAt).toBeDefined();
     });
   });
 
@@ -134,7 +134,7 @@ describe('Products (e2e)', () => {
         .set('Authorization', `Bearer ${token}`)
         .expect(200);
 
-      expect(res.body.data.isPublished).toBe(false);
+      expect(res.body.isPublished).toBe(false);
     });
   });
 

@@ -31,7 +31,7 @@ describe('Clients (e2e)', () => {
       })
       .expect(201);
 
-    const client = res.body.data;
+    const client = res.body;
     expect(client).toBeDefined();
     expect(client.id).toBeDefined();
     expect(client.firstName).toBe(`E2E Client ${uniqueSuffix}`);
@@ -50,7 +50,7 @@ describe('Clients (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
 
-    const clients = res.body.data;
+    const clients = res.body;
     expect(Array.isArray(clients)).toBe(true);
 
     const found = clients.find((c: any) => c.id === createdClientId);
@@ -66,7 +66,7 @@ describe('Clients (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
 
-    const results = res.body.data;
+    const results = res.body;
     expect(Array.isArray(results)).toBe(true);
     expect(results.length).toBeGreaterThanOrEqual(1);
 
@@ -84,7 +84,7 @@ describe('Clients (e2e)', () => {
       .send({ phone: newPhone })
       .expect(200);
 
-    const updated = res.body.data;
+    const updated = res.body;
     expect(updated.phone).toBe(newPhone);
     expect(updated.firstName).toBe(`E2E Client ${uniqueSuffix}`);
   });
@@ -97,7 +97,7 @@ describe('Clients (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
 
-    const generic = res.body.data;
+    const generic = res.body;
     expect(generic).toBeDefined();
     expect(generic.isGeneric).toBe(true);
   });

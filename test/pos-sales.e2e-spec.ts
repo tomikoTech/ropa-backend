@@ -41,7 +41,7 @@ describe('POS Sales & Accounts Receivable (e2e)', () => {
       })
       .expect(201);
 
-    const product = productRes.body.data;
+    const product = productRes.body;
     _productId = product.id;
     variant1Id = product.variants[0].id;
     variant2Id = product.variants[1].id;
@@ -58,7 +58,7 @@ describe('POS Sales & Accounts Receivable (e2e)', () => {
       })
       .expect(201);
 
-    warehouseId = warehouseRes.body.data.id;
+    warehouseId = warehouseRes.body.id;
 
     // ── Adjust stock: add 10 units of each variant ──
 
@@ -99,7 +99,7 @@ describe('POS Sales & Accounts Receivable (e2e)', () => {
       })
       .expect(201);
 
-    clientId = clientRes.body.data.id;
+    clientId = clientRes.body.id;
   }, 60000);
 
   afterAll(async () => {
@@ -126,7 +126,7 @@ describe('POS Sales & Accounts Receivable (e2e)', () => {
       })
       .expect(201);
 
-    const sale = res.body.data;
+    const sale = res.body;
     expect(sale).toBeDefined();
     expect(sale.saleNumber).toBeDefined();
     expect(sale.status).toBe('COMPLETED');
@@ -149,7 +149,7 @@ describe('POS Sales & Accounts Receivable (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
 
-    const stocks = res.body.data;
+    const stocks = res.body;
     expect(Array.isArray(stocks)).toBe(true);
 
     const warehouseStock = stocks.find(
@@ -184,7 +184,7 @@ describe('POS Sales & Accounts Receivable (e2e)', () => {
       })
       .expect(201);
 
-    const sale = res.body.data;
+    const sale = res.body;
     expect(sale).toBeDefined();
     expect(sale.saleNumber).toBeDefined();
     expect(sale.status).toBe('COMPLETED');
@@ -201,7 +201,7 @@ describe('POS Sales & Accounts Receivable (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
 
-    const sales = res.body.data;
+    const sales = res.body;
     expect(Array.isArray(sales)).toBe(true);
     expect(sales.length).toBeGreaterThanOrEqual(2);
 
@@ -220,7 +220,7 @@ describe('POS Sales & Accounts Receivable (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
 
-    const sale = res.body.data;
+    const sale = res.body;
     expect(sale.id).toBe(cashSaleId);
     expect(sale.items).toHaveLength(1);
     expect(sale.payments).toHaveLength(1);
@@ -236,7 +236,7 @@ describe('POS Sales & Accounts Receivable (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
 
-    const arList = res.body.data;
+    const arList = res.body;
     expect(Array.isArray(arList)).toBe(true);
 
     const ar = arList.find((a: any) => a.saleId === creditSaleId);
@@ -263,7 +263,7 @@ describe('POS Sales & Accounts Receivable (e2e)', () => {
       })
       .expect(201);
 
-    const ar = res.body.data;
+    const ar = res.body;
     expect(ar).toBeDefined();
     expect(Number(ar.paidAmount)).toBeCloseTo(halfAmount, 0);
     expect(ar.isFullyPaid).toBe(false);
@@ -277,7 +277,7 @@ describe('POS Sales & Accounts Receivable (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
 
-    const ar = res.body.data;
+    const ar = res.body;
     expect(ar.isFullyPaid).toBe(false);
     expect(Number(ar.paidAmount)).toBeGreaterThan(0);
     expect(Number(ar.paidAmount)).toBeLessThan(arTotalAmount);
@@ -301,7 +301,7 @@ describe('POS Sales & Accounts Receivable (e2e)', () => {
       })
       .expect(201);
 
-    const ar = res.body.data;
+    const ar = res.body;
     expect(ar).toBeDefined();
     expect(ar.isFullyPaid).toBe(true);
   });
@@ -314,7 +314,7 @@ describe('POS Sales & Accounts Receivable (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
 
-    const ar = res.body.data;
+    const ar = res.body;
     expect(ar.isFullyPaid).toBe(true);
     expect(Number(ar.paidAmount)).toBeCloseTo(arTotalAmount, 0);
     expect(ar.payments.length).toBe(2);
@@ -328,7 +328,7 @@ describe('POS Sales & Accounts Receivable (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
 
-    const arList = res.body.data;
+    const arList = res.body;
     // Our AR is now fully paid, so it should NOT be in this list
     const found = arList.find((a: any) => a.id === arId);
     expect(found).toBeUndefined();
@@ -342,7 +342,7 @@ describe('POS Sales & Accounts Receivable (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
 
-    const summary = res.body.data;
+    const summary = res.body;
     expect(summary).toBeDefined();
     expect(typeof summary.totalCredit).toBe('number');
     expect(typeof summary.totalPaid).toBe('number');
@@ -413,7 +413,7 @@ describe('POS Sales & Accounts Receivable (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
 
-    const summary = res.body.data;
+    const summary = res.body;
     expect(typeof summary.totalSales).toBe('number');
     expect(typeof summary.totalAmount).toBe('number');
     expect(typeof summary.totalItems).toBe('number');

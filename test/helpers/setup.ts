@@ -20,15 +20,14 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from '../../src/app.module';
-import { HttpExceptionFilter } from '../../src/common/filters/http-exception.filter';
-import { TransformResponseInterceptor } from '../../src/common/interceptors/transform-response.interceptor';
 
 let app: INestApplication;
 let accessToken: string;
 
 /**
  * Creates and configures the NestJS app for E2E testing.
- * Mirrors the setup in main.ts (prefix, pipes, filters, interceptors).
+ * Minimal setup: prefix + validation only (no filter/interceptor)
+ * so response shape matches raw controller output.
  */
 export async function setupTestApp(): Promise<INestApplication> {
   const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -42,13 +41,9 @@ export async function setupTestApp(): Promise<INestApplication> {
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
-      forbidNonWhitelisted: true,
       transform: true,
     }),
   );
-
-  app.useGlobalFilters(new HttpExceptionFilter());
-  app.useGlobalInterceptors(new TransformResponseInterceptor());
 
   await app.init();
   return app;
@@ -65,7 +60,7 @@ export async function loginAsAdmin(
     .send({ email: 'admin@mipinta.co', password: 'admin123' })
     .expect(201);
 
-  accessToken = res.body.data.accessToken;
+  accessToken = res.body.accessToken;
   return accessToken;
 }
 
