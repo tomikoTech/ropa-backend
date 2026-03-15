@@ -62,6 +62,9 @@ export class StoreSettings extends TenantAwareEntity {
   @Column({ name: 'default_warehouse_id', type: 'uuid', nullable: true })
   defaultWarehouseId: string;
 
+  @Column({ name: 'brevo_api_key', nullable: true })
+  brevoApiKey: string;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 

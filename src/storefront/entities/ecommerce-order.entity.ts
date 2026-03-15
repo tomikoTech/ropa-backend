@@ -23,7 +23,7 @@ export class EcommerceOrder extends TenantAwareEntity {
   @Column({ name: 'customer_name' })
   customerName: string;
 
-  @Column({ name: 'customer_phone' })
+  @Column({ name: 'customer_phone', nullable: true })
   customerPhone: string;
 
   @Column({ name: 'customer_email', nullable: true })

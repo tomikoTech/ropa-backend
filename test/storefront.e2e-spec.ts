@@ -2,13 +2,14 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
+import { tryLogin } from './helpers/login';
 
 describe('Storefront & E-commerce (e2e)', () => {
   let app: INestApplication;
   let authToken: string;
 
   const ts = Date.now();
-  const tenantSlug = 'tuchapato';
+  let tenantSlug = 'tuchapato'; // CI seed slug, will be detected dynamically
 
   // Setup entities
   let warehouseId: string;
@@ -33,10 +34,15 @@ describe('Storefront & E-commerce (e2e)', () => {
     await app.init();
 
     // Login
-    const loginRes = await request(app.getHttpServer())
-      .post('/api/auth/login')
-      .send({ email: 'tuchapato@gmail.com', password: 'tuchapato123' });
-    authToken = loginRes.body.accessToken;
+    authToken = await tryLogin(app);
+
+    // Detect tenant slug from store settings
+    const settingsRes = await request(app.getHttpServer())
+      .get('/api/store-settings')
+      .set('Authorization', `Bearer ${authToken}`);
+    if (settingsRes.body?.storeSlug) {
+      tenantSlug = settingsRes.body.storeSlug;
+    }
 
     // Create warehouse for the storefront
     const whRes = await request(app.getHttpServer())

@@ -11,6 +11,8 @@ import { RecordArPaymentDto } from './dto/record-ar-payment.dto.js';
 import { TaxService } from './services/tax.service.js';
 import { InvoiceService } from './services/invoice.service.js';
 import { ReceiptService, ReceiptData } from './services/receipt.service.js';
+import { InvoiceEmailService } from '../common/services/invoice-email.service.js';
+import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
 import { SaleStatus } from '../common/enums/sale-status.enum.js';
 export declare class PosService {
     private readonly saleRepository;
@@ -20,11 +22,13 @@ export declare class PosService {
     private readonly arPaymentRepository;
     private readonly variantRepository;
     private readonly stockRepository;
+    private readonly storeSettingsRepo;
     private readonly dataSource;
     private readonly taxService;
     private readonly invoiceService;
     private readonly receiptService;
-    constructor(saleRepository: Repository<Sale>, saleItemRepository: Repository<SaleItem>, paymentRepository: Repository<Payment>, arRepository: Repository<AccountsReceivable>, arPaymentRepository: Repository<AccountsReceivablePayment>, variantRepository: Repository<ProductVariant>, stockRepository: Repository<Stock>, dataSource: DataSource, taxService: TaxService, invoiceService: InvoiceService, receiptService: ReceiptService);
+    private readonly invoiceEmailService;
+    constructor(saleRepository: Repository<Sale>, saleItemRepository: Repository<SaleItem>, paymentRepository: Repository<Payment>, arRepository: Repository<AccountsReceivable>, arPaymentRepository: Repository<AccountsReceivablePayment>, variantRepository: Repository<ProductVariant>, stockRepository: Repository<Stock>, storeSettingsRepo: Repository<StoreSettings>, dataSource: DataSource, taxService: TaxService, invoiceService: InvoiceService, receiptService: ReceiptService, invoiceEmailService: InvoiceEmailService);
     createSale(dto: CreateSaleDto, userId: string, tenantId: string): Promise<Sale>;
     findAll(filters: {
         status?: SaleStatus;

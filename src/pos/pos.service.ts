@@ -4,7 +4,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, In } from 'typeorm';
 import { Sale } from './entities/sale.entity.js';
 import { SaleItem } from './entities/sale-item.entity.js';
 import { Payment } from './entities/payment.entity.js';
@@ -20,6 +20,8 @@ import { TaxService, LineCalculation } from './services/tax.service.js';
 import { InvoiceService } from './services/invoice.service.js';
 import { ProductStatus } from '../common/enums/product-status.enum.js';
 import { ReceiptService, ReceiptData } from './services/receipt.service.js';
+import { InvoiceEmailService } from '../common/services/invoice-email.service.js';
+import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
 import { SaleStatus } from '../common/enums/sale-status.enum.js';
 import { PaymentMethod } from '../common/enums/payment-method.enum.js';
 import { MovementType } from '../common/enums/movement-type.enum.js';
@@ -41,10 +43,13 @@ export class PosService {
     private readonly variantRepository: Repository<ProductVariant>,
     @InjectRepository(Stock)
     private readonly stockRepository: Repository<Stock>,
+    @InjectRepository(StoreSettings)
+    private readonly storeSettingsRepo: Repository<StoreSettings>,
     private readonly dataSource: DataSource,
     private readonly taxService: TaxService,
     private readonly invoiceService: InvoiceService,
     private readonly receiptService: ReceiptService,
+    private readonly invoiceEmailService: InvoiceEmailService,
   ) {}
 
   /**
@@ -61,7 +66,7 @@ export class PosService {
     userId: string,
     tenantId: string,
   ): Promise<Sale> {
-    return this.dataSource.transaction(async (manager) => {
+    const fullSale = await this.dataSource.transaction(async (manager) => {
       const variantRepo = manager.getRepository(ProductVariant);
       const stockRepo = manager.getRepository(Stock);
       const movementRepo = manager.getRepository(StockMovement);
@@ -92,11 +97,23 @@ export class PosService {
       const lineCalcs: LineCalculation[] = [];
       const variantData: {
         variant: ProductVariant;
-        stock: Stock;
+        stocks: Stock[];
         quantity: number;
         discountPercent: number;
         lineCalc: LineCalculation;
       }[] = [];
+
+      // Batch load all stocks for requested variants (1 query instead of N)
+      const allVariantIds = dto.items.map((i) => i.variantId);
+      const allStocks = await stockRepo.find({
+        where: { variantId: In(allVariantIds), tenantId },
+      });
+      const stocksByVariant = new Map<string, Stock[]>();
+      for (const s of allStocks) {
+        const arr = stocksByVariant.get(s.variantId);
+        if (arr) arr.push(s);
+        else stocksByVariant.set(s.variantId, [s]);
+      }
 
       for (const item of dto.items) {
         const variant = await variantRepo.findOne({
@@ -122,17 +139,20 @@ export class PosService {
           );
         }
 
-        const stock = await stockRepo.findOne({
-          where: {
-            variantId: item.variantId,
-            warehouseId: dto.warehouseId,
-            tenantId,
-          },
+        // Cascade stock check: primary warehouse first, then others by qty desc
+        const itemStocks = stocksByVariant.get(item.variantId) || [];
+        itemStocks.sort((a, b) => {
+          if (a.warehouseId === dto.warehouseId) return -1;
+          if (b.warehouseId === dto.warehouseId) return 1;
+          return Number(b.quantity) - Number(a.quantity);
         });
-        if (!stock || stock.quantity < item.quantity) {
+        const totalAvailable = itemStocks.reduce(
+          (sum, s) => sum + Number(s.quantity), 0,
+        );
+        if (totalAvailable < item.quantity) {
           throw new BadRequestException(
             `Stock insuficiente para "${variant.product.name}" ${variant.size}/${variant.color}. ` +
-              `Disponible: ${stock?.quantity ?? 0}, Solicitado: ${item.quantity}`,
+              `Disponible total: ${totalAvailable}, Solicitado: ${item.quantity}`,
           );
         }
 
@@ -152,7 +172,7 @@ export class PosService {
 
         variantData.push({
           variant,
-          stock,
+          stocks: itemStocks,
           quantity: item.quantity,
           discountPercent,
           lineCalc,
@@ -241,23 +261,32 @@ export class PosService {
         });
         await saleItemRepo.save(saleItem);
 
-        // Deduct inventory
-        data.stock.quantity -= data.quantity;
-        await stockRepo.save(data.stock);
+        // Deduct inventory — cascade: primary warehouse first, then others by qty desc
+        let remaining = data.quantity;
+        for (const stock of data.stocks) {
+          if (remaining <= 0) break;
+          const available = Number(stock.quantity);
+          if (available <= 0) continue;
 
-        // Record stock movement
-        const movement = movementRepo.create({
-          variantId: data.variant.id,
-          warehouseId: dto.warehouseId,
-          movementType: MovementType.OUT,
-          quantity: -data.quantity,
-          referenceType: 'SALE',
-          referenceId: savedSale.id,
-          notes: `Venta ${saleNumber}`,
-          createdById: userId,
-          tenantId,
-        });
-        await movementRepo.save(movement);
+          const toDeduct = Math.min(available, remaining);
+          stock.quantity = available - toDeduct;
+          remaining -= toDeduct;
+
+          await stockRepo.save(stock);
+
+          const movement = movementRepo.create({
+            variantId: data.variant.id,
+            warehouseId: stock.warehouseId,
+            movementType: MovementType.OUT,
+            quantity: -toDeduct,
+            referenceType: 'SALE',
+            referenceId: savedSale.id,
+            notes: `Venta ${saleNumber}`,
+            createdById: userId,
+            tenantId,
+          });
+          await movementRepo.save(movement);
+        }
       }
 
       // Create payments (only regular, not credit)
@@ -312,6 +341,37 @@ export class PosService {
       }
       return fullSale;
     });
+
+    // Send invoice email asynchronously (fire-and-forget)
+    if (fullSale.client?.email) {
+      const settings = await this.storeSettingsRepo.findOne({
+        where: { tenantId },
+      });
+      this.invoiceEmailService
+        .sendInvoice(tenantId, {
+          invoiceNumber: fullSale.invoiceNumber,
+          orderNumber: fullSale.saleNumber,
+          storeName: settings?.storeName || 'MiPinta',
+          customerName: `${fullSale.client.firstName} ${fullSale.client.lastName}`,
+          customerEmail: fullSale.client.email,
+          items: fullSale.items.map((i) => ({
+            productName: i.productName,
+            variantInfo: `${i.variantSize} / ${i.variantColor}`,
+            quantity: i.quantity,
+            unitPrice: Number(i.unitPrice),
+            lineTotal: Number(i.lineTotal),
+          })),
+          subtotal: Number(fullSale.subtotal),
+          discountAmount: Number(fullSale.discountAmount),
+          taxAmount: Number(fullSale.taxAmount),
+          total: Number(fullSale.total),
+          paymentMethod: fullSale.payments?.[0]?.method,
+          date: fullSale.createdAt,
+        })
+        .catch(() => {});
+    }
+
+    return fullSale;
   }
 
   async findAll(
@@ -387,32 +447,40 @@ export class PosService {
         );
       }
 
-      // Restore inventory
-      for (const item of sale.items) {
+      // Restore inventory — reverse actual movements (supports cascade deductions)
+      const saleMovements = await movementRepo.find({
+        where: {
+          referenceType: 'SALE',
+          referenceId: sale.id,
+          tenantId,
+        },
+      });
+
+      for (const mov of saleMovements) {
         const stock = await stockRepo.findOne({
           where: {
-            variantId: item.variantId,
-            warehouseId: sale.warehouseId,
+            variantId: mov.variantId,
+            warehouseId: mov.warehouseId,
             tenantId,
           },
         });
         if (stock) {
-          stock.quantity += item.quantity;
+          stock.quantity += Math.abs(Number(mov.quantity));
           await stockRepo.save(stock);
         }
 
-        const movement = movementRepo.create({
-          variantId: item.variantId,
-          warehouseId: sale.warehouseId,
+        const reversal = movementRepo.create({
+          variantId: mov.variantId,
+          warehouseId: mov.warehouseId,
           movementType: MovementType.IN,
-          quantity: item.quantity,
+          quantity: Math.abs(Number(mov.quantity)),
           referenceType: 'SALE_CANCEL',
           referenceId: sale.id,
           notes: `Cancelación venta ${sale.saleNumber}`,
           createdById: userId,
           tenantId,
         });
-        await movementRepo.save(movement);
+        await movementRepo.save(reversal);
       }
 
       sale.status = SaleStatus.CANCELLED;

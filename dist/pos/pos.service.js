@@ -29,6 +29,8 @@ const tax_service_js_1 = require("./services/tax.service.js");
 const invoice_service_js_1 = require("./services/invoice.service.js");
 const product_status_enum_js_1 = require("../common/enums/product-status.enum.js");
 const receipt_service_js_1 = require("./services/receipt.service.js");
+const invoice_email_service_js_1 = require("../common/services/invoice-email.service.js");
+const store_settings_entity_js_1 = require("../storefront/entities/store-settings.entity.js");
 const sale_status_enum_js_1 = require("../common/enums/sale-status.enum.js");
 const payment_method_enum_js_1 = require("../common/enums/payment-method.enum.js");
 const movement_type_enum_js_1 = require("../common/enums/movement-type.enum.js");
@@ -40,11 +42,13 @@ let PosService = class PosService {
     arPaymentRepository;
     variantRepository;
     stockRepository;
+    storeSettingsRepo;
     dataSource;
     taxService;
     invoiceService;
     receiptService;
-    constructor(saleRepository, saleItemRepository, paymentRepository, arRepository, arPaymentRepository, variantRepository, stockRepository, dataSource, taxService, invoiceService, receiptService) {
+    invoiceEmailService;
+    constructor(saleRepository, saleItemRepository, paymentRepository, arRepository, arPaymentRepository, variantRepository, stockRepository, storeSettingsRepo, dataSource, taxService, invoiceService, receiptService, invoiceEmailService) {
         this.saleRepository = saleRepository;
         this.saleItemRepository = saleItemRepository;
         this.paymentRepository = paymentRepository;
@@ -52,13 +56,15 @@ let PosService = class PosService {
         this.arPaymentRepository = arPaymentRepository;
         this.variantRepository = variantRepository;
         this.stockRepository = stockRepository;
+        this.storeSettingsRepo = storeSettingsRepo;
         this.dataSource = dataSource;
         this.taxService = taxService;
         this.invoiceService = invoiceService;
         this.receiptService = receiptService;
+        this.invoiceEmailService = invoiceEmailService;
     }
     async createSale(dto, userId, tenantId) {
-        return this.dataSource.transaction(async (manager) => {
+        const fullSale = await this.dataSource.transaction(async (manager) => {
             const variantRepo = manager.getRepository(product_variant_entity_js_1.ProductVariant);
             const stockRepo = manager.getRepository(stock_entity_js_1.Stock);
             const movementRepo = manager.getRepository(stock_movement_entity_js_1.StockMovement);
@@ -84,6 +90,18 @@ let PosService = class PosService {
             }
             const lineCalcs = [];
             const variantData = [];
+            const allVariantIds = dto.items.map((i) => i.variantId);
+            const allStocks = await stockRepo.find({
+                where: { variantId: (0, typeorm_2.In)(allVariantIds), tenantId },
+            });
+            const stocksByVariant = new Map();
+            for (const s of allStocks) {
+                const arr = stocksByVariant.get(s.variantId);
+                if (arr)
+                    arr.push(s);
+                else
+                    stocksByVariant.set(s.variantId, [s]);
+            }
             for (const item of dto.items) {
                 const variant = await variantRepo.findOne({
                     where: { id: item.variantId },
@@ -99,16 +117,18 @@ let PosService = class PosService {
                     variant.product.status !== product_status_enum_js_1.ProductStatus.ACTIVE) {
                     throw new common_1.BadRequestException(`Producto "${variant.product.name}" (${variant.sku}) no está activo`);
                 }
-                const stock = await stockRepo.findOne({
-                    where: {
-                        variantId: item.variantId,
-                        warehouseId: dto.warehouseId,
-                        tenantId,
-                    },
+                const itemStocks = stocksByVariant.get(item.variantId) || [];
+                itemStocks.sort((a, b) => {
+                    if (a.warehouseId === dto.warehouseId)
+                        return -1;
+                    if (b.warehouseId === dto.warehouseId)
+                        return 1;
+                    return Number(b.quantity) - Number(a.quantity);
                 });
-                if (!stock || stock.quantity < item.quantity) {
+                const totalAvailable = itemStocks.reduce((sum, s) => sum + Number(s.quantity), 0);
+                if (totalAvailable < item.quantity) {
                     throw new common_1.BadRequestException(`Stock insuficiente para "${variant.product.name}" ${variant.size}/${variant.color}. ` +
-                        `Disponible: ${stock?.quantity ?? 0}, Solicitado: ${item.quantity}`);
+                        `Disponible total: ${totalAvailable}, Solicitado: ${item.quantity}`);
                 }
                 const unitPrice = variant.priceOverride
                     ? Number(variant.priceOverride)
@@ -119,7 +139,7 @@ let PosService = class PosService {
                 lineCalcs.push(lineCalc);
                 variantData.push({
                     variant,
-                    stock,
+                    stocks: itemStocks,
                     quantity: item.quantity,
                     discountPercent,
                     lineCalc,
@@ -180,20 +200,30 @@ let PosService = class PosService {
                     tenantId,
                 });
                 await saleItemRepo.save(saleItem);
-                data.stock.quantity -= data.quantity;
-                await stockRepo.save(data.stock);
-                const movement = movementRepo.create({
-                    variantId: data.variant.id,
-                    warehouseId: dto.warehouseId,
-                    movementType: movement_type_enum_js_1.MovementType.OUT,
-                    quantity: -data.quantity,
-                    referenceType: 'SALE',
-                    referenceId: savedSale.id,
-                    notes: `Venta ${saleNumber}`,
-                    createdById: userId,
-                    tenantId,
-                });
-                await movementRepo.save(movement);
+                let remaining = data.quantity;
+                for (const stock of data.stocks) {
+                    if (remaining <= 0)
+                        break;
+                    const available = Number(stock.quantity);
+                    if (available <= 0)
+                        continue;
+                    const toDeduct = Math.min(available, remaining);
+                    stock.quantity = available - toDeduct;
+                    remaining -= toDeduct;
+                    await stockRepo.save(stock);
+                    const movement = movementRepo.create({
+                        variantId: data.variant.id,
+                        warehouseId: stock.warehouseId,
+                        movementType: movement_type_enum_js_1.MovementType.OUT,
+                        quantity: -toDeduct,
+                        referenceType: 'SALE',
+                        referenceId: savedSale.id,
+                        notes: `Venta ${saleNumber}`,
+                        createdById: userId,
+                        tenantId,
+                    });
+                    await movementRepo.save(movement);
+                }
             }
             for (const p of regularPayments) {
                 const receivedAmount = p.receivedAmount ?? p.amount;
@@ -240,6 +270,34 @@ let PosService = class PosService {
             }
             return fullSale;
         });
+        if (fullSale.client?.email) {
+            const settings = await this.storeSettingsRepo.findOne({
+                where: { tenantId },
+            });
+            this.invoiceEmailService
+                .sendInvoice(tenantId, {
+                invoiceNumber: fullSale.invoiceNumber,
+                orderNumber: fullSale.saleNumber,
+                storeName: settings?.storeName || 'MiPinta',
+                customerName: `${fullSale.client.firstName} ${fullSale.client.lastName}`,
+                customerEmail: fullSale.client.email,
+                items: fullSale.items.map((i) => ({
+                    productName: i.productName,
+                    variantInfo: `${i.variantSize} / ${i.variantColor}`,
+                    quantity: i.quantity,
+                    unitPrice: Number(i.unitPrice),
+                    lineTotal: Number(i.lineTotal),
+                })),
+                subtotal: Number(fullSale.subtotal),
+                discountAmount: Number(fullSale.discountAmount),
+                taxAmount: Number(fullSale.taxAmount),
+                total: Number(fullSale.total),
+                paymentMethod: fullSale.payments?.[0]?.method,
+                date: fullSale.createdAt,
+            })
+                .catch(() => { });
+        }
+        return fullSale;
     }
     async findAll(filters, tenantId) {
         const where = { tenantId };
@@ -292,30 +350,37 @@ let PosService = class PosService {
             if (sale.status !== sale_status_enum_js_1.SaleStatus.COMPLETED) {
                 throw new common_1.BadRequestException('Solo se pueden cancelar ventas completadas');
             }
-            for (const item of sale.items) {
+            const saleMovements = await movementRepo.find({
+                where: {
+                    referenceType: 'SALE',
+                    referenceId: sale.id,
+                    tenantId,
+                },
+            });
+            for (const mov of saleMovements) {
                 const stock = await stockRepo.findOne({
                     where: {
-                        variantId: item.variantId,
-                        warehouseId: sale.warehouseId,
+                        variantId: mov.variantId,
+                        warehouseId: mov.warehouseId,
                         tenantId,
                     },
                 });
                 if (stock) {
-                    stock.quantity += item.quantity;
+                    stock.quantity += Math.abs(Number(mov.quantity));
                     await stockRepo.save(stock);
                 }
-                const movement = movementRepo.create({
-                    variantId: item.variantId,
-                    warehouseId: sale.warehouseId,
+                const reversal = movementRepo.create({
+                    variantId: mov.variantId,
+                    warehouseId: mov.warehouseId,
                     movementType: movement_type_enum_js_1.MovementType.IN,
-                    quantity: item.quantity,
+                    quantity: Math.abs(Number(mov.quantity)),
                     referenceType: 'SALE_CANCEL',
                     referenceId: sale.id,
                     notes: `Cancelación venta ${sale.saleNumber}`,
                     createdById: userId,
                     tenantId,
                 });
-                await movementRepo.save(movement);
+                await movementRepo.save(reversal);
             }
             sale.status = sale_status_enum_js_1.SaleStatus.CANCELLED;
             await saleRepo.save(sale);
@@ -409,7 +474,9 @@ let PosService = class PosService {
             const isFullyPaid = newPaidAmount >= Number(ar.totalAmount);
             await arRepo.update({ id: arId, tenantId }, {
                 paidAmount: newPaidAmount,
-                ...(isFullyPaid ? { isFullyPaid: true, fullyPaidAt: new Date() } : {}),
+                ...(isFullyPaid
+                    ? { isFullyPaid: true, fullyPaidAt: new Date() }
+                    : {}),
             });
             const updated = await arRepo.findOne({
                 where: { id: arId, tenantId },
@@ -442,7 +509,9 @@ exports.PosService = PosService = __decorate([
     __param(4, (0, typeorm_1.InjectRepository)(accounts_receivable_payment_entity_js_1.AccountsReceivablePayment)),
     __param(5, (0, typeorm_1.InjectRepository)(product_variant_entity_js_1.ProductVariant)),
     __param(6, (0, typeorm_1.InjectRepository)(stock_entity_js_1.Stock)),
+    __param(7, (0, typeorm_1.InjectRepository)(store_settings_entity_js_1.StoreSettings)),
     __metadata("design:paramtypes", [typeorm_2.Repository,
+        typeorm_2.Repository,
         typeorm_2.Repository,
         typeorm_2.Repository,
         typeorm_2.Repository,
@@ -452,6 +521,7 @@ exports.PosService = PosService = __decorate([
         typeorm_2.DataSource,
         tax_service_js_1.TaxService,
         invoice_service_js_1.InvoiceService,
-        receipt_service_js_1.ReceiptService])
+        receipt_service_js_1.ReceiptService,
+        invoice_email_service_js_1.InvoiceEmailService])
 ], PosService);
 //# sourceMappingURL=pos.service.js.map

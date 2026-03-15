@@ -53,6 +53,7 @@ const supplier_entity_js_1 = require("../suppliers/entities/supplier.entity.js")
 const purchase_order_entity_js_1 = require("../purchases/entities/purchase-order.entity.js");
 const purchase_order_item_entity_js_1 = require("../purchases/entities/purchase-order-item.entity.js");
 const accounts_payable_entity_js_1 = require("../purchases/entities/accounts-payable.entity.js");
+const accounts_payable_payment_entity_js_1 = require("../purchases/entities/accounts-payable-payment.entity.js");
 const promotion_entity_js_1 = require("../promotions/entities/promotion.entity.js");
 const return_entity_js_1 = require("../returns/entities/return.entity.js");
 const return_item_entity_js_1 = require("../returns/entities/return-item.entity.js");
@@ -95,6 +96,7 @@ const dataSource = new typeorm_1.DataSource({
         purchase_order_entity_js_1.PurchaseOrder,
         purchase_order_item_entity_js_1.PurchaseOrderItem,
         accounts_payable_entity_js_1.AccountsPayable,
+        accounts_payable_payment_entity_js_1.AccountsPayablePayment,
         promotion_entity_js_1.Promotion,
         return_entity_js_1.Return,
         return_item_entity_js_1.ReturnItem,

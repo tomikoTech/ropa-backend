@@ -204,7 +204,15 @@ let ProductsService = class ProductsService {
     }
     async remove(id, tenantId) {
         const product = await this.findOne(id, tenantId);
-        await this.productRepository.remove(product);
+        try {
+            await this.productRepository.remove(product);
+        }
+        catch (error) {
+            if (error?.code === '23503') {
+                throw new common_1.ConflictException('No se puede eliminar este producto porque tiene ventas, devoluciones u órdenes asociadas. Puedes desactivarlo en su lugar.');
+            }
+            throw error;
+        }
     }
     async publish(id, tenantId) {
         const product = await this.findOne(id, tenantId);

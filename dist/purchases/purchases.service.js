@@ -290,12 +290,12 @@ let PurchasesService = class PurchasesService {
             tenantId,
         });
         await this.apPaymentRepository.save(payment);
-        ap.paidAmount = Number(ap.paidAmount) + dto.amount;
-        if (ap.paidAmount >= Number(ap.amount)) {
-            ap.isPaid = true;
-            ap.paidAt = new Date();
-        }
-        await this.apRepository.save(ap);
+        const newPaidAmount = Number(ap.paidAmount) + dto.amount;
+        const isNowPaid = newPaidAmount >= Number(ap.amount);
+        await this.apRepository.update({ id: apId, tenantId }, {
+            paidAmount: newPaidAmount,
+            ...(isNowPaid ? { isPaid: true, paidAt: new Date() } : {}),
+        });
         return this.apRepository.findOne({
             where: { id: apId, tenantId },
             relations: ['payments', 'purchaseOrder', 'purchaseOrder.supplier'],

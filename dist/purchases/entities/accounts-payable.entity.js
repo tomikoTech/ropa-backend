@@ -50,7 +50,13 @@ __decorate([
     __metadata("design:type", Number)
 ], AccountsPayable.prototype, "amount", void 0);
 __decorate([
-    (0, typeorm_1.Column)({ name: 'paid_amount', type: 'decimal', precision: 12, scale: 2, default: 0 }),
+    (0, typeorm_1.Column)({
+        name: 'paid_amount',
+        type: 'decimal',
+        precision: 12,
+        scale: 2,
+        default: 0,
+    }),
     __metadata("design:type", Number)
 ], AccountsPayable.prototype, "paidAmount", void 0);
 __decorate([

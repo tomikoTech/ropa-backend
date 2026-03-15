@@ -17,6 +17,7 @@ const stock_entity_js_1 = require("../inventory/entities/stock.entity.js");
 const stock_movement_entity_js_1 = require("../inventory/entities/stock-movement.entity.js");
 const accounts_receivable_entity_js_1 = require("./entities/accounts-receivable.entity.js");
 const accounts_receivable_payment_entity_js_1 = require("./entities/accounts-receivable-payment.entity.js");
+const store_settings_entity_js_1 = require("../storefront/entities/store-settings.entity.js");
 const pos_service_js_1 = require("./pos.service.js");
 const pos_controller_js_1 = require("./pos.controller.js");
 const tax_service_js_1 = require("./services/tax.service.js");
@@ -38,6 +39,7 @@ exports.PosModule = PosModule = __decorate([
                 stock_movement_entity_js_1.StockMovement,
                 accounts_receivable_entity_js_1.AccountsReceivable,
                 accounts_receivable_payment_entity_js_1.AccountsReceivablePayment,
+                store_settings_entity_js_1.StoreSettings,
             ]),
             clients_module_js_1.ClientsModule,
         ],

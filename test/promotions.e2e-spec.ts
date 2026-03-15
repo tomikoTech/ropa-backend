@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
+import { tryLogin } from './helpers/login';
 
 describe('Promotions (e2e)', () => {
   let app: INestApplication;
@@ -28,10 +29,7 @@ describe('Promotions (e2e)', () => {
     );
     await app.init();
 
-    const res = await request(app.getHttpServer())
-      .post('/api/auth/login')
-      .send({ email: 'tuchapato@gmail.com', password: 'tuchapato123' });
-    authToken = res.body.accessToken;
+    authToken = await tryLogin(app);
 
     // Create a category for CATEGORY-scoped promotion test
     const catRes = await request(app.getHttpServer())

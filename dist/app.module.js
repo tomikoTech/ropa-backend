@@ -32,6 +32,7 @@ const reports_module_js_1 = require("./reports/reports.module.js");
 const audit_module_js_1 = require("./audit/audit.module.js");
 const tenants_module_js_1 = require("./tenants/tenants.module.js");
 const storefront_module_js_1 = require("./storefront/storefront.module.js");
+const common_module_js_1 = require("./common/common.module.js");
 const audit_interceptor_js_1 = require("./audit/audit.interceptor.js");
 const jwt_auth_guard_js_1 = require("./common/guards/jwt-auth.guard.js");
 let AppModule = class AppModule {
@@ -64,6 +65,7 @@ exports.AppModule = AppModule = __decorate([
             audit_module_js_1.AuditModule,
             tenants_module_js_1.TenantsModule,
             storefront_module_js_1.StorefrontModule,
+            common_module_js_1.CommonModule,
         ],
         providers: [
             {

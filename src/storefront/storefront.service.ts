@@ -104,7 +104,7 @@ export class StorefrontService {
       .where('p.tenant_id IN (:...tenantIds)', { tenantIds })
       .andWhere('p.is_published = true')
       .andWhere('p.status = :status', { status: ProductStatus.ACTIVE })
-      .orderBy('p.created_at', 'DESC')
+      .orderBy('p.createdAt', 'DESC')
       .take(limit)
       .getMany();
 
@@ -183,14 +183,19 @@ export class StorefrontService {
 
     const products = await qb.getMany();
 
-    // Load stock for each variant
-    if (warehouseId && products.length > 0) {
+    // Load stock for each variant — sum across ALL warehouses (cascade logic)
+    if (products.length > 0) {
       const variantIds = products.flatMap((p) => p.variants.map((v) => v.id));
       if (variantIds.length > 0) {
         const stocks = await this.stockRepo.find({
-          where: { variantId: In(variantIds), warehouseId, tenantId },
+          where: { variantId: In(variantIds), tenantId },
         });
-        const stockMap = new Map(stocks.map((s) => [s.variantId, s.quantity]));
+
+        // Sum stock across all warehouses per variant
+        const stockMap = new Map<string, number>();
+        for (const s of stocks) {
+          stockMap.set(s.variantId, (stockMap.get(s.variantId) ?? 0) + Number(s.quantity));
+        }
 
         for (const product of products) {
           for (const variant of product.variants) {
@@ -222,17 +227,17 @@ export class StorefrontService {
     // Filter to active variants only
     product.variants = product.variants.filter((v) => v.isActive);
 
-    // Load stock
-    if (settings.defaultWarehouseId && product.variants.length > 0) {
+    // Load stock — sum across ALL warehouses (cascade deduction logic)
+    if (product.variants.length > 0) {
       const variantIds = product.variants.map((v) => v.id);
       const stocks = await this.stockRepo.find({
-        where: {
-          variantId: In(variantIds),
-          warehouseId: settings.defaultWarehouseId,
-          tenantId,
-        },
+        where: { variantId: In(variantIds), tenantId },
       });
-      const stockMap = new Map(stocks.map((s) => [s.variantId, s.quantity]));
+
+      const stockMap = new Map<string, number>();
+      for (const s of stocks) {
+        stockMap.set(s.variantId, (stockMap.get(s.variantId) ?? 0) + Number(s.quantity));
+      }
 
       for (const variant of product.variants) {
         (variant as any).stock = stockMap.get(variant.id) ?? 0;
@@ -287,6 +292,13 @@ export class StorefrontService {
   }
 
   async createOrder(tenantSlug: string, dto: CreateOrderDto) {
+    // Cross-optional: at least phone or email must be provided
+    if (!dto.customerPhone && !dto.customerEmail) {
+      throw new BadRequestException(
+        'Debes proporcionar al menos un teléfono o correo electrónico',
+      );
+    }
+
     // Resolve tenant — allow inactive storefront to prevent race conditions
     const settings = await this.settingsRepo.findOne({
       where: { storeSlug: tenantSlug },
@@ -407,6 +419,14 @@ export class StorefrontService {
           : ''),
     );
 
+    const contactLines: string[] = [];
+    if (dto.customerPhone) {
+      contactLines.push(`Mi teléfono: ${dto.customerPhone}`);
+    }
+    if (dto.customerEmail) {
+      contactLines.push(`Mi correo: ${dto.customerEmail}`);
+    }
+
     const message = [
       `Hola! Soy ${dto.customerName}.`,
       `Estoy interesado en:`,
@@ -414,10 +434,13 @@ export class StorefrontService {
       ...productLines,
       '',
       `Total estimado: $${Number(saleTotals.total).toLocaleString('es-CO')}`,
-      `Mi teléfono: ${dto.customerPhone}`,
+      ...contactLines,
     ].join('\n');
 
-    const whatsappUrl = `https://wa.me/${settings.whatsappNumber}?text=${encodeURIComponent(message)}`;
+    // Only generate WhatsApp URL if customer provided a phone number
+    const whatsappUrl = dto.customerPhone
+      ? `https://wa.me/${settings.whatsappNumber}?text=${encodeURIComponent(message)}`
+      : null;
 
     return {
       orderNumber: savedOrder.orderNumber,

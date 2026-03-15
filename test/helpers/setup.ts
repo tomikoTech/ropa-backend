@@ -55,13 +55,23 @@ export async function setupTestApp(): Promise<INestApplication> {
 export async function loginAsAdmin(
   application: INestApplication,
 ): Promise<string> {
-  const res = await request(application.getHttpServer())
-    .post('/api/auth/login')
-    .send({ email: 'tuchapato@gmail.com', password: 'tuchapato123' })
-    .expect(201);
+  // Try CI seed credentials first, then local dev credentials
+  const credentials = [
+    { email: 'tuchapato@gmail.com', password: 'tuchapato123' },
+    { email: 'admin@mipinta.co', password: 'admin123' },
+  ];
 
-  accessToken = res.body.accessToken;
-  return accessToken;
+  for (const cred of credentials) {
+    const res = await request(application.getHttpServer())
+      .post('/api/auth/login')
+      .send(cred);
+    if (res.status === 201) {
+      accessToken = res.body.accessToken;
+      return accessToken;
+    }
+  }
+
+  throw new Error('Could not login with any known admin credentials');
 }
 
 /**

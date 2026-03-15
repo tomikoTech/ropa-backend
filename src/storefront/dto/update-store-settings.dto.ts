@@ -76,4 +76,9 @@ export class UpdateStoreSettingsDto {
   @IsOptional()
   @IsUUID()
   defaultWarehouseId?: string;
+
+  @ApiPropertyOptional({ example: 'xkeysib-...' })
+  @IsOptional()
+  @IsString()
+  brevoApiKey?: string;
 }

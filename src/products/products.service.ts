@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Product } from './entities/product.entity.js';
@@ -226,7 +226,16 @@ export class ProductsService {
 
   async remove(id: string, tenantId: string): Promise<void> {
     const product = await this.findOne(id, tenantId);
-    await this.productRepository.remove(product);
+    try {
+      await this.productRepository.remove(product);
+    } catch (error: any) {
+      if (error?.code === '23503') {
+        throw new ConflictException(
+          'No se puede eliminar este producto porque tiene ventas, devoluciones u órdenes asociadas. Puedes desactivarlo en su lugar.',
+        );
+      }
+      throw error;
+    }
   }
 
   async publish(id: string, tenantId: string): Promise<Product> {

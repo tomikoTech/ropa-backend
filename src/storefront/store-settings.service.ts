@@ -4,7 +4,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, In } from 'typeorm';
 import { StoreSettings } from './entities/store-settings.entity.js';
 import { EcommerceOrder } from './entities/ecommerce-order.entity.js';
 import { EcommerceOrderItem } from './entities/ecommerce-order-item.entity.js';
@@ -12,6 +12,7 @@ import { Stock } from '../inventory/entities/stock.entity.js';
 import { StockMovement } from '../inventory/entities/stock-movement.entity.js';
 import { UpdateStoreSettingsDto } from './dto/update-store-settings.dto.js';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto.js';
+import { InvoiceEmailService } from '../common/services/invoice-email.service.js';
 import { EcommerceOrderStatus } from '../common/enums/ecommerce-order-status.enum.js';
 import { MovementType } from '../common/enums/movement-type.enum.js';
 
@@ -25,6 +26,7 @@ export class StoreSettingsService {
     @InjectRepository(EcommerceOrderItem)
     private readonly orderItemRepo: Repository<EcommerceOrderItem>,
     private readonly dataSource: DataSource,
+    private readonly invoiceEmailService: InvoiceEmailService,
   ) {}
 
   async getSettings(tenantId: string): Promise<StoreSettings> {
@@ -68,6 +70,8 @@ export class StoreSettingsService {
       settings.isStorefrontActive = dto.isStorefrontActive;
     if (dto.defaultWarehouseId !== undefined)
       settings.defaultWarehouseId = dto.defaultWarehouseId;
+    if (dto.brevoApiKey !== undefined)
+      settings.brevoApiKey = dto.brevoApiKey;
 
     return this.settingsRepo.save(settings);
   }
@@ -133,29 +137,29 @@ export class StoreSettingsService {
     tenantId: string,
     warehouseId?: string,
   ): Promise<EcommerceOrder> {
-    return this.dataSource.transaction(async (manager) => {
+    const order = await this.dataSource.transaction(async (manager) => {
       const orderRepo = manager.getRepository(EcommerceOrder);
       const stockRepo = manager.getRepository(Stock);
       const movementRepo = manager.getRepository(StockMovement);
 
-      const order = await orderRepo.findOne({
+      const o = await orderRepo.findOne({
         where: { id, tenantId },
         relations: ['items'],
       });
-      if (!order) {
+      if (!o) {
         throw new NotFoundException('Pedido no encontrado');
       }
-      if (order.status === EcommerceOrderStatus.DELIVERED) {
+      if (o.status === EcommerceOrderStatus.DELIVERED) {
         throw new BadRequestException('El pedido ya fue finalizado');
       }
-      if (order.status === EcommerceOrderStatus.CANCELLED) {
+      if (o.status === EcommerceOrderStatus.CANCELLED) {
         throw new BadRequestException(
           'No se puede finalizar un pedido cancelado',
         );
       }
 
       // Use provided warehouseId or fall back to the order's original warehouse
-      const effectiveWarehouseId = warehouseId || order.warehouseId;
+      const effectiveWarehouseId = warehouseId || o.warehouseId;
       if (!effectiveWarehouseId) {
         throw new BadRequestException(
           'No se ha configurado una bodega para este pedido',
@@ -163,48 +167,101 @@ export class StoreSettingsService {
       }
 
       // Update the order's warehouseId if a different one was provided
-      if (warehouseId && warehouseId !== order.warehouseId) {
-        order.warehouseId = warehouseId;
+      if (warehouseId && warehouseId !== o.warehouseId) {
+        o.warehouseId = warehouseId;
       }
 
-      // Deduct inventory for each item
-      for (const item of order.items) {
-        const stock = await stockRepo.findOne({
-          where: {
-            variantId: item.variantId,
-            warehouseId: effectiveWarehouseId,
-            tenantId,
-          },
+      // Batch load all stocks for order variants (1 query instead of N)
+      const variantIds = o.items.map((i) => i.variantId);
+      const allStocksFlat = await stockRepo.find({
+        where: { variantId: In(variantIds), tenantId },
+      });
+      const stocksByVariant = new Map<string, Stock[]>();
+      for (const s of allStocksFlat) {
+        const arr = stocksByVariant.get(s.variantId);
+        if (arr) arr.push(s);
+        else stocksByVariant.set(s.variantId, [s]);
+      }
+
+      // Deduct inventory for each item — cascade: default warehouse first, then others by quantity desc
+      for (const item of o.items) {
+        let remaining = item.quantity;
+
+        const itemStocks = stocksByVariant.get(item.variantId) || [];
+        itemStocks.sort((a, b) => {
+          if (a.warehouseId === effectiveWarehouseId) return -1;
+          if (b.warehouseId === effectiveWarehouseId) return 1;
+          return Number(b.quantity) - Number(a.quantity);
         });
-        if (!stock || stock.quantity < item.quantity) {
+
+        const totalAvailable = itemStocks.reduce((sum, s) => sum + Number(s.quantity), 0);
+        if (totalAvailable < remaining) {
           throw new BadRequestException(
             `Stock insuficiente para "${item.productName}" ${item.variantSize}/${item.variantColor}. ` +
-              `Disponible: ${stock?.quantity ?? 0}, Requerido: ${item.quantity}`,
+              `Disponible total: ${totalAvailable}, Requerido: ${remaining}`,
           );
         }
 
-        stock.quantity -= item.quantity;
-        await stockRepo.save(stock);
+        for (const stock of itemStocks) {
+          if (remaining <= 0) break;
+          const available = Number(stock.quantity);
+          if (available <= 0) continue;
 
-        const movement = movementRepo.create({
-          variantId: item.variantId,
-          warehouseId: effectiveWarehouseId,
-          movementType: MovementType.OUT,
-          quantity: -item.quantity,
-          referenceType: 'ECOMMERCE_ORDER',
-          referenceId: order.id,
-          notes: `Venta web finalizada ${order.orderNumber}`,
-          createdById: userId,
-          tenantId,
-        });
-        await movementRepo.save(movement);
+          const toDeduct = Math.min(available, remaining);
+          stock.quantity = available - toDeduct;
+          remaining -= toDeduct;
+
+          await stockRepo.save(stock);
+
+          const movement = movementRepo.create({
+            variantId: item.variantId,
+            warehouseId: stock.warehouseId,
+            movementType: MovementType.OUT,
+            quantity: -toDeduct,
+            referenceType: 'ECOMMERCE_ORDER',
+            referenceId: o.id,
+            notes: `Venta web finalizada ${o.orderNumber}`,
+            createdById: userId,
+            tenantId,
+          });
+          await movementRepo.save(movement);
+        }
       }
 
-      order.status = EcommerceOrderStatus.DELIVERED;
-      await orderRepo.save(order);
+      o.status = EcommerceOrderStatus.DELIVERED;
+      await orderRepo.save(o);
 
-      return order;
+      return o;
     });
+
+    // Send invoice email asynchronously (fire-and-forget)
+    if (order.customerEmail) {
+      const settings = await this.settingsRepo.findOne({
+        where: { tenantId },
+      });
+      this.invoiceEmailService
+        .sendInvoice(tenantId, {
+          orderNumber: order.orderNumber,
+          storeName: settings?.storeName || 'MiPinta',
+          customerName: order.customerName,
+          customerEmail: order.customerEmail,
+          items: order.items.map((i) => ({
+            productName: i.productName,
+            variantInfo: `${i.variantSize} / ${i.variantColor}`,
+            quantity: i.quantity,
+            unitPrice: Number(i.unitPrice),
+            lineTotal: Number(i.lineTotal),
+          })),
+          subtotal: Number(order.subtotal),
+          discountAmount: Number(order.discountAmount),
+          taxAmount: Number(order.taxAmount),
+          total: Number(order.total),
+          date: new Date(),
+        })
+        .catch(() => {});
+    }
+
+    return order;
   }
 
   async cancelOrder(
