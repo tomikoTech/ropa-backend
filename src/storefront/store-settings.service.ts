@@ -70,8 +70,9 @@ export class StoreSettingsService {
       settings.isStorefrontActive = dto.isStorefrontActive;
     if (dto.defaultWarehouseId !== undefined)
       settings.defaultWarehouseId = dto.defaultWarehouseId;
-    if (dto.brevoApiKey !== undefined)
-      settings.brevoApiKey = dto.brevoApiKey;
+    if (dto.brevoApiKey !== undefined) settings.brevoApiKey = dto.brevoApiKey;
+    if (dto.brevoSenderEmail !== undefined)
+      settings.brevoSenderEmail = dto.brevoSenderEmail;
 
     return this.settingsRepo.save(settings);
   }
@@ -194,7 +195,10 @@ export class StoreSettingsService {
           return Number(b.quantity) - Number(a.quantity);
         });
 
-        const totalAvailable = itemStocks.reduce((sum, s) => sum + Number(s.quantity), 0);
+        const totalAvailable = itemStocks.reduce(
+          (sum, s) => sum + Number(s.quantity),
+          0,
+        );
         if (totalAvailable < remaining) {
           throw new BadRequestException(
             `Stock insuficiente para "${item.productName}" ${item.variantSize}/${item.variantColor}. ` +

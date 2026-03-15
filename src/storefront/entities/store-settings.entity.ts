@@ -65,6 +65,9 @@ export class StoreSettings extends TenantAwareEntity {
   @Column({ name: 'brevo_api_key', nullable: true })
   brevoApiKey: string;
 
+  @Column({ name: 'brevo_sender_email', nullable: true })
+  brevoSenderEmail: string;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 

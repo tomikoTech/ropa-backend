@@ -15,6 +15,7 @@ import { Stock } from '../inventory/entities/stock.entity.js';
 import { Promotion } from '../promotions/entities/promotion.entity.js';
 import { TaxService, LineCalculation } from '../pos/services/tax.service.js';
 import { CreateOrderDto } from './dto/create-order.dto.js';
+import { InvoiceEmailService } from '../common/services/invoice-email.service.js';
 import { EcommerceOrderStatus } from '../common/enums/ecommerce-order-status.enum.js';
 import { ProductStatus } from '../common/enums/product-status.enum.js';
 
@@ -38,6 +39,7 @@ export class StorefrontService {
     @InjectRepository(EcommerceOrderItem)
     private readonly orderItemRepo: Repository<EcommerceOrderItem>,
     private readonly taxService: TaxService,
+    private readonly invoiceEmailService: InvoiceEmailService,
   ) {}
 
   private async resolveTenant(
@@ -129,7 +131,7 @@ export class StorefrontService {
             const store = storeMap.get(product.tenantId);
             const wId = store?.defaultWarehouseId;
             for (const variant of product.variants) {
-              (variant as any).stock = wId
+              (variant as ProductVariant & { stock: number }).stock = wId
                 ? (stockMap.get(`${variant.id}:${wId}`) ?? 0)
                 : 0;
             }
@@ -156,8 +158,7 @@ export class StorefrontService {
       search?: string;
     },
   ) {
-    const { tenantId, settings } = await this.resolveTenant(tenantSlug);
-    const warehouseId = settings.defaultWarehouseId;
+    const { tenantId } = await this.resolveTenant(tenantSlug);
 
     const qb = this.productRepo
       .createQueryBuilder('p')
@@ -194,12 +195,16 @@ export class StorefrontService {
         // Sum stock across all warehouses per variant
         const stockMap = new Map<string, number>();
         for (const s of stocks) {
-          stockMap.set(s.variantId, (stockMap.get(s.variantId) ?? 0) + Number(s.quantity));
+          stockMap.set(
+            s.variantId,
+            (stockMap.get(s.variantId) ?? 0) + Number(s.quantity),
+          );
         }
 
         for (const product of products) {
           for (const variant of product.variants) {
-            (variant as any).stock = stockMap.get(variant.id) ?? 0;
+            (variant as ProductVariant & { stock: number }).stock =
+              stockMap.get(variant.id) ?? 0;
           }
         }
       }
@@ -209,7 +214,7 @@ export class StorefrontService {
   }
 
   async getProductBySlug(tenantSlug: string, productSlug: string) {
-    const { tenantId, settings } = await this.resolveTenant(tenantSlug);
+    const { tenantId } = await this.resolveTenant(tenantSlug);
 
     const product = await this.productRepo.findOne({
       where: {
@@ -236,11 +241,15 @@ export class StorefrontService {
 
       const stockMap = new Map<string, number>();
       for (const s of stocks) {
-        stockMap.set(s.variantId, (stockMap.get(s.variantId) ?? 0) + Number(s.quantity));
+        stockMap.set(
+          s.variantId,
+          (stockMap.get(s.variantId) ?? 0) + Number(s.quantity),
+        );
       }
 
       for (const variant of product.variants) {
-        (variant as any).stock = stockMap.get(variant.id) ?? 0;
+        (variant as ProductVariant & { stock: number }).stock =
+          stockMap.get(variant.id) ?? 0;
       }
     }
 
@@ -267,7 +276,10 @@ export class StorefrontService {
       .getRawMany();
 
     const countMap = new Map(
-      counts.map((c) => [c.categoryId, parseInt(c.count)]),
+      counts.map((c: { categoryId: string; count: string }) => [
+        c.categoryId,
+        parseInt(c.count),
+      ]),
     );
 
     return categories.map((cat) => ({
@@ -441,6 +453,31 @@ export class StorefrontService {
     const whatsappUrl = dto.customerPhone
       ? `https://wa.me/${settings.whatsappNumber}?text=${encodeURIComponent(message)}`
       : null;
+
+    // Send order confirmation email (fire-and-forget)
+    if (dto.customerEmail) {
+      this.invoiceEmailService
+        .sendInvoice(tenantId, {
+          orderNumber: savedOrder.orderNumber,
+          storeName: settings.storeName || 'MiPinta',
+          customerName: dto.customerName,
+          customerEmail: dto.customerEmail,
+          items: variantData.map((d) => ({
+            productName:
+              d.variant.product.displayName || d.variant.product.name,
+            variantInfo: `${d.variant.size} / ${d.variant.color}`,
+            quantity: d.quantity,
+            unitPrice: d.lineCalc.unitPrice,
+            lineTotal: d.lineCalc.lineTotal,
+          })),
+          subtotal: saleTotals.subtotal,
+          discountAmount: saleTotals.discountAmount,
+          taxAmount: saleTotals.taxAmount,
+          total: saleTotals.total,
+          date: new Date(),
+        })
+        .catch(() => {});
+    }
 
     return {
       orderNumber: savedOrder.orderNumber,

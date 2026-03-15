@@ -81,4 +81,9 @@ export class UpdateStoreSettingsDto {
   @IsOptional()
   @IsString()
   brevoApiKey?: string;
+
+  @ApiPropertyOptional({ example: 'mipinta.shop@gmail.com' })
+  @IsOptional()
+  @IsString()
+  brevoSenderEmail?: string;
 }

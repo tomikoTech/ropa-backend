@@ -147,7 +147,8 @@ export class PosService {
           return Number(b.quantity) - Number(a.quantity);
         });
         const totalAvailable = itemStocks.reduce(
-          (sum, s) => sum + Number(s.quantity), 0,
+          (sum, s) => sum + Number(s.quantity),
+          0,
         );
         if (totalAvailable < item.quantity) {
           throw new BadRequestException(
@@ -372,6 +373,42 @@ export class PosService {
     }
 
     return fullSale;
+  }
+
+  async sendSaleInvoice(
+    saleId: string,
+    email: string,
+    tenantId: string,
+  ): Promise<{ success: boolean }> {
+    const sale = await this.findOne(saleId, tenantId);
+    const settings = await this.storeSettingsRepo.findOne({
+      where: { tenantId },
+    });
+
+    const sent = await this.invoiceEmailService.sendInvoice(tenantId, {
+      invoiceNumber: sale.invoiceNumber,
+      orderNumber: sale.saleNumber,
+      storeName: settings?.storeName || 'MiPinta',
+      customerName: sale.client
+        ? `${sale.client.firstName} ${sale.client.lastName}`
+        : 'Consumidor Final',
+      customerEmail: email,
+      items: sale.items.map((i) => ({
+        productName: i.productName,
+        variantInfo: `${i.variantSize} / ${i.variantColor}`,
+        quantity: i.quantity,
+        unitPrice: Number(i.unitPrice),
+        lineTotal: Number(i.lineTotal),
+      })),
+      subtotal: Number(sale.subtotal),
+      discountAmount: Number(sale.discountAmount),
+      taxAmount: Number(sale.taxAmount),
+      total: Number(sale.total),
+      paymentMethod: sale.payments?.[0]?.method,
+      date: sale.createdAt,
+    });
+
+    return { success: sent };
   }
 
   async findAll(

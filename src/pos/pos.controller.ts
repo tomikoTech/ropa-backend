@@ -11,6 +11,7 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { PosService } from './pos.service.js';
 import { CreateSaleDto } from './dto/create-sale.dto.js';
 import { RecordArPaymentDto } from './dto/record-ar-payment.dto.js';
+import { SendInvoiceDto } from './dto/send-invoice.dto.js';
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
 import { TenantId } from '../common/decorators/tenant-id.decorator.js';
 import { SaleStatus } from '../common/enums/sale-status.enum.js';
@@ -118,6 +119,16 @@ export class PosController {
     @TenantId() tenantId: string,
   ) {
     return this.posService.getReceipt(id, tenantId);
+  }
+
+  @Post('sales/:id/send-invoice')
+  @ApiOperation({ summary: 'Enviar factura por email' })
+  sendInvoice(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SendInvoiceDto,
+    @TenantId() tenantId: string,
+  ) {
+    return this.posService.sendSaleInvoice(id, dto.email, tenantId);
   }
 
   @Post('sales/:id/cancel')

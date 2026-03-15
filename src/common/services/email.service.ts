@@ -38,7 +38,9 @@ export class EmailService {
         body: JSON.stringify({
           sender: {
             name: settings.storeName || 'MiPinta',
-            email: `noreply@${settings.storeSlug}.mipinta.shop`,
+            email:
+              settings.brevoSenderEmail ||
+              `noreply@${settings.storeSlug}.mipinta.shop`,
           },
           to: [{ email: to.email, name: to.name || to.email }],
           subject,
