@@ -1,0 +1,87 @@
+/**
+ * Force local database for E2E tests (overrides .env which may point to cloud).
+ * MUST run before any NestJS module is imported/compiled.
+ */
+if (!process.env.E2E_USE_CLOUD_DB) {
+  process.env.DB_HOST = process.env.DB_HOST_TEST || 'localhost';
+  process.env.DB_PORT = process.env.DB_PORT_TEST || '5432';
+  process.env.DB_USERNAME = process.env.DB_USERNAME_TEST || 'dylanbc1';
+  process.env.DB_PASSWORD = process.env.DB_PASSWORD_TEST || '';
+  process.env.DB_DATABASE = process.env.DB_DATABASE_TEST || 'ropa_pos';
+}
+
+import { Test, TestingModule } from '@nestjs/testing';
+import { INestApplication, ValidationPipe } from '@nestjs/common';
+import request from 'supertest';
+import { AppModule } from '../../src/app.module';
+import { HttpExceptionFilter } from '../../src/common/filters/http-exception.filter';
+import { TransformResponseInterceptor } from '../../src/common/interceptors/transform-response.interceptor';
+
+let app: INestApplication;
+let accessToken: string;
+
+/**
+ * Creates and configures the NestJS app for E2E testing.
+ * Mirrors the setup in main.ts (prefix, pipes, filters, interceptors).
+ */
+export async function setupTestApp(): Promise<INestApplication> {
+  const moduleFixture: TestingModule = await Test.createTestingModule({
+    imports: [AppModule],
+  }).compile();
+
+  app = moduleFixture.createNestApplication();
+
+  app.setGlobalPrefix('api');
+
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    }),
+  );
+
+  app.useGlobalFilters(new HttpExceptionFilter());
+  app.useGlobalInterceptors(new TransformResponseInterceptor());
+
+  await app.init();
+  return app;
+}
+
+/**
+ * Logs in as admin and returns the JWT access token.
+ */
+export async function loginAsAdmin(
+  application: INestApplication,
+): Promise<string> {
+  const res = await request(application.getHttpServer())
+    .post('/api/auth/login')
+    .send({ email: 'admin@mipinta.co', password: 'admin123' })
+    .expect(201);
+
+  accessToken = res.body.data.accessToken;
+  return accessToken;
+}
+
+/**
+ * Returns the cached access token (call loginAsAdmin first).
+ */
+export function getAccessToken(): string {
+  return accessToken;
+}
+
+/**
+ * Returns the app instance.
+ */
+export function getApp(): INestApplication {
+  return app;
+}
+
+/**
+ * Closes the app gracefully.
+ */
+export async function teardownTestApp(): Promise<void> {
+  if (app) {
+    await app.close();
+  }
+}
