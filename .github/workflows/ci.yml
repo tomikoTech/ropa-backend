@@ -52,7 +52,13 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - name: Build and seed
-        run: npm run build && node dist/seeds/seed.js || true
+      - name: Build
+        run: npm run build
+      - name: Debug DB connection
+        run: |
+          echo "DB_HOST=$DB_HOST DB_PORT=$DB_PORT DB_USERNAME=$DB_USERNAME DB_DATABASE=$DB_DATABASE"
+          PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -p $DB_PORT -U $DB_USERNAME -d $DB_DATABASE -c "SELECT 1;" || echo "psql connection failed"
+      - name: Run seed
+        run: node dist/seeds/seed.js
       - name: Run E2E tests
         run: npm run test:e2e -- --runInBand --forceExit

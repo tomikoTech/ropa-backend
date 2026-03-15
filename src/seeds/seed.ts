@@ -18,6 +18,7 @@ import { Supplier } from '../suppliers/entities/supplier.entity.js';
 import { PurchaseOrder } from '../purchases/entities/purchase-order.entity.js';
 import { PurchaseOrderItem } from '../purchases/entities/purchase-order-item.entity.js';
 import { AccountsPayable } from '../purchases/entities/accounts-payable.entity.js';
+import { AccountsPayablePayment } from '../purchases/entities/accounts-payable-payment.entity.js';
 import { Promotion } from '../promotions/entities/promotion.entity.js';
 import { Return } from '../returns/entities/return.entity.js';
 import { ReturnItem } from '../returns/entities/return-item.entity.js';
@@ -62,6 +63,7 @@ const dataSource = new DataSource({
     PurchaseOrder,
     PurchaseOrderItem,
     AccountsPayable,
+    AccountsPayablePayment,
     Promotion,
     Return,
     ReturnItem,
