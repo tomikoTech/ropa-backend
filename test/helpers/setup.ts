@@ -1,13 +1,19 @@
 /**
- * Force local database for E2E tests (overrides .env which may point to cloud).
+ * Force local/CI database for E2E tests.
+ * In CI, DB_* env vars are set by the workflow → use them as-is.
+ * Locally, fallback to dev defaults (dylanbc1, no password, ropa_pos).
  * MUST run before any NestJS module is imported/compiled.
  */
 if (!process.env.E2E_USE_CLOUD_DB) {
-  process.env.DB_HOST = process.env.DB_HOST_TEST || 'localhost';
-  process.env.DB_PORT = process.env.DB_PORT_TEST || '5432';
-  process.env.DB_USERNAME = process.env.DB_USERNAME_TEST || 'dylanbc1';
-  process.env.DB_PASSWORD = process.env.DB_PASSWORD_TEST || '';
-  process.env.DB_DATABASE = process.env.DB_DATABASE_TEST || 'ropa_pos';
+  // Only override if not already set by CI
+  if (!process.env.DB_HOST) process.env.DB_HOST = 'localhost';
+  if (!process.env.DB_PORT) process.env.DB_PORT = '5432';
+  if (!process.env.DB_USERNAME) process.env.DB_USERNAME = 'dylanbc1';
+  if (!process.env.DB_PASSWORD) process.env.DB_PASSWORD = '';
+  if (!process.env.DB_DATABASE) process.env.DB_DATABASE = 'ropa_pos';
+  if (!process.env.JWT_SECRET) process.env.JWT_SECRET = 'test-secret';
+  if (!process.env.JWT_REFRESH_SECRET)
+    process.env.JWT_REFRESH_SECRET = 'test-refresh';
 }
 
 import { Test, TestingModule } from '@nestjs/testing';

@@ -11,5 +11,6 @@
   },
   "transformIgnorePatterns": [
     "node_modules/(?!uuid/)"
-  ]
+  ],
+  "setupFiles": ["./setup-env.ts"]
 }
