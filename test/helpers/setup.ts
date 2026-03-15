@@ -57,7 +57,7 @@ export async function loginAsAdmin(
 ): Promise<string> {
   const res = await request(application.getHttpServer())
     .post('/api/auth/login')
-    .send({ email: 'admin@mipinta.co', password: 'admin123' })
+    .send({ email: 'tuchapato@gmail.com', password: 'tuchapato123' })
     .expect(201);
 
   accessToken = res.body.accessToken;
