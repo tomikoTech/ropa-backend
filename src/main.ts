@@ -10,7 +10,7 @@ import { TransformResponseInterceptor } from './common/interceptors/transform-re
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
-  // Serve uploaded files
+  // Serve uploaded files test
   app.useStaticAssets(join(process.cwd(), 'uploads'), { prefix: '/uploads/' });
 
   app.setGlobalPrefix('api');
