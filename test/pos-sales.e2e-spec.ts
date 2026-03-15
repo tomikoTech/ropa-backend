@@ -1,10 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import {
-  setupTestApp,
-  loginAsAdmin,
-  teardownTestApp,
-} from './helpers/setup';
+import { setupTestApp, loginAsAdmin, teardownTestApp } from './helpers/setup';
 
 describe('POS Sales & Accounts Receivable (e2e)', () => {
   let app: INestApplication;
@@ -12,14 +8,14 @@ describe('POS Sales & Accounts Receivable (e2e)', () => {
   const uniqueSuffix = Date.now();
 
   // Shared state across tests
-  let productId: string;
+  let _productId: string;
   let variant1Id: string;
   let variant2Id: string;
   let warehouseId: string;
   let clientId: string;
   let cashSaleId: string;
-  let cashSaleTotal: number;
-  let cashSaleItemId: string;
+  let _cashSaleTotal: number;
+  let _cashSaleItemId: string;
   let creditSaleId: string;
   let arId: string;
   let arTotalAmount: number;
@@ -46,7 +42,7 @@ describe('POS Sales & Accounts Receivable (e2e)', () => {
       .expect(201);
 
     const product = productRes.body.data;
-    productId = product.id;
+    _productId = product.id;
     variant1Id = product.variants[0].id;
     variant2Id = product.variants[1].id;
 
@@ -141,8 +137,8 @@ describe('POS Sales & Accounts Receivable (e2e)', () => {
     expect(Number(sale.total)).toBeGreaterThan(0);
 
     cashSaleId = sale.id;
-    cashSaleTotal = Number(sale.total);
-    cashSaleItemId = sale.items[0].id;
+    _cashSaleTotal = Number(sale.total);
+    _cashSaleItemId = sale.items[0].id;
   });
 
   // ─── VERIFY STOCK DECREASED ───

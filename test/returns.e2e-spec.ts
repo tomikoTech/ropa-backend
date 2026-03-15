@@ -1,10 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import {
-  setupTestApp,
-  loginAsAdmin,
-  teardownTestApp,
-} from './helpers/setup';
+import { setupTestApp, loginAsAdmin, teardownTestApp } from './helpers/setup';
 
 describe('Returns (e2e)', () => {
   let app: INestApplication;
@@ -12,13 +8,13 @@ describe('Returns (e2e)', () => {
   const uniqueSuffix = Date.now();
 
   // Shared state
-  let productId: string;
+  let _productId: string;
   let variantId: string;
   let warehouseId: string;
   let clientId: string;
   let saleId: string;
   let saleItemId: string;
-  let saleItemQuantity: number;
+  let _saleItemQuantity: number;
   let returnId: string;
   let stockBeforeReturn: number;
 
@@ -41,7 +37,7 @@ describe('Returns (e2e)', () => {
       .expect(201);
 
     const product = productRes.body.data;
-    productId = product.id;
+    _productId = product.id;
     variantId = product.variants[0].id;
 
     // ── Create a warehouse ──
@@ -109,7 +105,7 @@ describe('Returns (e2e)', () => {
     const sale = saleRes.body.data;
     saleId = sale.id;
     saleItemId = sale.items[0].id;
-    saleItemQuantity = sale.items[0].quantity;
+    _saleItemQuantity = sale.items[0].quantity;
 
     // ── Record stock after sale (before return) ──
 

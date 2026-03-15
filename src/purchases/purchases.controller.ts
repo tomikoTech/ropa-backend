@@ -111,7 +111,14 @@ export class PurchasesController {
   @ApiOperation({ summary: 'Registrar abono a cuenta por pagar' })
   addApPayment(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: { amount: number; method: string; reference?: string; receiptImageUrl?: string; notes?: string },
+    @Body()
+    body: {
+      amount: number;
+      method: string;
+      reference?: string;
+      receiptImageUrl?: string;
+      notes?: string;
+    },
     @TenantId() tenantId: string,
   ) {
     return this.purchasesService.addApPayment(id, body, tenantId);

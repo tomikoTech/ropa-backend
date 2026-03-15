@@ -10,7 +10,7 @@ describe('Purchases & Accounts Payable (e2e)', () => {
   // Setup entities
   let supplierId: string;
   let warehouseId: string;
-  let productId: string;
+  let _productId: string;
   let variantId: string;
 
   // Purchase order
@@ -70,7 +70,7 @@ describe('Purchases & Accounts Payable (e2e)', () => {
         costPrice: 25000,
         variants: [{ size: 'M', color: 'Negro' }],
       });
-    productId = productRes.body.id;
+    _productId = productRes.body.id;
     variantId = productRes.body.variants[0].id;
 
     // Set initial stock to 0 via adjustment (IN with quantity 0 creates the row)
@@ -141,7 +141,9 @@ describe('Purchases & Accounts Payable (e2e)', () => {
     expect(res.body.id).toBe(purchaseOrderId);
     expect(res.body.items[0].variant).toBeDefined();
     expect(res.body.items[0].variant.product).toBeDefined();
-    expect(res.body.items[0].variant.product.name).toContain('E2E Purchase Product');
+    expect(res.body.items[0].variant.product.name).toContain(
+      'E2E Purchase Product',
+    );
   });
 
   // ─── Purchase Order Lifecycle ───
@@ -162,9 +164,9 @@ describe('Purchases & Accounts Payable (e2e)', () => {
     const stockBefore = await request(app.getHttpServer())
       .get(`/api/inventory/stock/variant/${variantId}`)
       .set('Authorization', `Bearer ${authToken}`);
-    const qtyBefore = stockBefore.body.find(
-      (s: any) => s.warehouseId === warehouseId,
-    )?.quantity ?? 0;
+    const qtyBefore =
+      stockBefore.body.find((s: any) => s.warehouseId === warehouseId)
+        ?.quantity ?? 0;
 
     const res = await request(app.getHttpServer())
       .post(`/api/purchases/${purchaseOrderId}/receive`)
@@ -180,9 +182,9 @@ describe('Purchases & Accounts Payable (e2e)', () => {
     const stockAfter = await request(app.getHttpServer())
       .get(`/api/inventory/stock/variant/${variantId}`)
       .set('Authorization', `Bearer ${authToken}`);
-    const qtyAfter = stockAfter.body.find(
-      (s: any) => s.warehouseId === warehouseId,
-    )?.quantity ?? 0;
+    const qtyAfter =
+      stockAfter.body.find((s: any) => s.warehouseId === warehouseId)
+        ?.quantity ?? 0;
 
     expect(Number(qtyAfter)).toBe(Number(qtyBefore) + halfQuantity);
   });

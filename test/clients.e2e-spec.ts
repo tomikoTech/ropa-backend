@@ -1,10 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import {
-  setupTestApp,
-  loginAsAdmin,
-  teardownTestApp,
-} from './helpers/setup';
+import { setupTestApp, loginAsAdmin, teardownTestApp } from './helpers/setup';
 
 describe('Clients (e2e)', () => {
   let app: INestApplication;

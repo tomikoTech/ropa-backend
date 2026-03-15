@@ -343,7 +343,13 @@ export class PurchasesService {
 
   async addApPayment(
     apId: string,
-    dto: { amount: number; method: string; reference?: string; receiptImageUrl?: string; notes?: string },
+    dto: {
+      amount: number;
+      method: string;
+      reference?: string;
+      receiptImageUrl?: string;
+      notes?: string;
+    },
     tenantId: string,
   ): Promise<AccountsPayable> {
     const ap = await this.apRepository.findOne({
@@ -351,11 +357,14 @@ export class PurchasesService {
       relations: ['payments', 'purchaseOrder', 'purchaseOrder.supplier'],
     });
     if (!ap) throw new NotFoundException('Cuenta por pagar no encontrada');
-    if (ap.isPaid) throw new BadRequestException('Esta cuenta ya fue pagada completamente');
+    if (ap.isPaid)
+      throw new BadRequestException('Esta cuenta ya fue pagada completamente');
 
     const remaining = Number(ap.amount) - Number(ap.paidAmount);
     if (dto.amount > remaining) {
-      throw new BadRequestException(`El monto excede el saldo pendiente de ${remaining}`);
+      throw new BadRequestException(
+        `El monto excede el saldo pendiente de ${remaining}`,
+      );
     }
 
     const payment = this.apPaymentRepository.create({

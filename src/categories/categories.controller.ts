@@ -40,7 +40,10 @@ export class CategoriesController {
 
   @Patch('reorder')
   @ApiOperation({ summary: 'Reordenar categorías' })
-  reorder(@Body() body: { orderedIds: string[] }, @TenantId() tenantId: string) {
+  reorder(
+    @Body() body: { orderedIds: string[] },
+    @TenantId() tenantId: string,
+  ) {
     return this.categoriesService.reorder(body.orderedIds, tenantId);
   }
 

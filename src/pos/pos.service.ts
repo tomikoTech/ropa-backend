@@ -558,7 +558,9 @@ export class PosService {
         { id: arId, tenantId },
         {
           paidAmount: newPaidAmount,
-          ...(isFullyPaid ? { isFullyPaid: true, fullyPaidAt: new Date() } : {}),
+          ...(isFullyPaid
+            ? { isFullyPaid: true, fullyPaidAt: new Date() }
+            : {}),
         },
       );
 
