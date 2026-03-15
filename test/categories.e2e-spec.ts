@@ -87,13 +87,21 @@ describe('Categories (e2e)', () => {
 
   describe('PATCH /api/categories/reorder', () => {
     it('should reorder categories', async () => {
-      const res = await request(app.getHttpServer())
+      await request(app.getHttpServer())
         .patch('/api/categories/reorder')
         .set('Authorization', `Bearer ${token}`)
         .send({ orderedIds: [categoryId2, categoryId1] })
         .expect(200);
 
-      expect(res.body.statusCode).toBe(200);
+      // Verify the new order by fetching categories
+      const listRes = await request(app.getHttpServer())
+        .get('/api/categories')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+
+      const cat2 = listRes.body.find((c: any) => c.id === categoryId2);
+      const cat1 = listRes.body.find((c: any) => c.id === categoryId1);
+      expect(cat2.sortOrder).toBeLessThan(cat1.sortOrder);
     });
   });
 
