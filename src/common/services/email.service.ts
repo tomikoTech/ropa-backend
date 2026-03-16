@@ -44,8 +44,14 @@ export class EmailService {
         settings.brevoSenderEmail ||
         `noreply@${settings.storeSlug}.mipinta.shop`;
 
+      const keyPreview = settings.brevoApiKey.length > 6
+        ? `${settings.brevoApiKey.slice(0, 4)}...${settings.brevoApiKey.slice(-4)}`
+        : '***';
+
       this.logger.log(
-        `Sending email to ${to.email} from ${senderEmail} (tenant: ${tenantId})`,
+        `[EMAIL] tenant=${tenantId} | store=${settings.storeName} | ` +
+        `to=${to.email} | from=${senderEmail} | ` +
+        `apiKey=${keyPreview} (${settings.brevoApiKey.length} chars)`,
       );
 
       const response = await fetch('https://api.brevo.com/v3/smtp/email', {
