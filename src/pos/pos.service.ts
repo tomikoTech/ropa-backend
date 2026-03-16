@@ -379,13 +379,13 @@ export class PosService {
     saleId: string,
     email: string,
     tenantId: string,
-  ): Promise<{ success: boolean }> {
+  ): Promise<{ success: boolean; error?: string }> {
     const sale = await this.findOne(saleId, tenantId);
     const settings = await this.storeSettingsRepo.findOne({
       where: { tenantId },
     });
 
-    const sent = await this.invoiceEmailService.sendInvoice(tenantId, {
+    const result = await this.invoiceEmailService.sendInvoice(tenantId, {
       invoiceNumber: sale.invoiceNumber,
       orderNumber: sale.saleNumber,
       storeName: settings?.storeName || 'MiPinta',
@@ -408,7 +408,7 @@ export class PosService {
       date: sale.createdAt,
     });
 
-    return { success: sent };
+    return result;
   }
 
   async findAll(

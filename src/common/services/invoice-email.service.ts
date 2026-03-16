@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { EmailService } from './email.service.js';
+import { EmailService, EmailResult } from './email.service.js';
 
 export interface InvoiceData {
   invoiceNumber?: string;
@@ -26,7 +26,7 @@ export interface InvoiceData {
 export class InvoiceEmailService {
   constructor(private readonly emailService: EmailService) {}
 
-  async sendInvoice(tenantId: string, data: InvoiceData): Promise<boolean> {
+  async sendInvoice(tenantId: string, data: InvoiceData): Promise<EmailResult> {
     const html = this.generateInvoiceHtml(data);
     return this.emailService.sendEmail(
       tenantId,
