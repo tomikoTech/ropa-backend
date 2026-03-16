@@ -38,6 +38,9 @@ export class Payment extends TenantAwareEntity {
   @Column({ nullable: true })
   reference: string;
 
+  @Column({ name: 'receipt_image_url', nullable: true })
+  receiptImageUrl: string;
+
   @Column({
     name: 'received_amount',
     type: 'decimal',

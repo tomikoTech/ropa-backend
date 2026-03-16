@@ -42,6 +42,10 @@ export class PaymentDto {
   @Min(0)
   @IsOptional()
   receivedAmount?: number;
+
+  @IsString()
+  @IsOptional()
+  receiptImageUrl?: string;
 }
 
 export class CreateSaleDto {

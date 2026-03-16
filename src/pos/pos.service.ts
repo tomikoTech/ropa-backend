@@ -303,6 +303,7 @@ export class PosService {
           method: p.method,
           amount: p.amount,
           reference: p.reference,
+          receiptImageUrl: p.receiptImageUrl,
           receivedAmount,
           changeAmount,
           tenantId,
