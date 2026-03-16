@@ -30,6 +30,10 @@ export declare class PosService {
     private readonly invoiceEmailService;
     constructor(saleRepository: Repository<Sale>, saleItemRepository: Repository<SaleItem>, paymentRepository: Repository<Payment>, arRepository: Repository<AccountsReceivable>, arPaymentRepository: Repository<AccountsReceivablePayment>, variantRepository: Repository<ProductVariant>, stockRepository: Repository<Stock>, storeSettingsRepo: Repository<StoreSettings>, dataSource: DataSource, taxService: TaxService, invoiceService: InvoiceService, receiptService: ReceiptService, invoiceEmailService: InvoiceEmailService);
     createSale(dto: CreateSaleDto, userId: string, tenantId: string): Promise<Sale>;
+    sendSaleInvoice(saleId: string, email: string, tenantId: string): Promise<{
+        success: boolean;
+        error?: string;
+    }>;
     findAll(filters: {
         status?: SaleStatus;
         warehouseId?: string;

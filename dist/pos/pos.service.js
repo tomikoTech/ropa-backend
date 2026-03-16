@@ -235,6 +235,7 @@ let PosService = class PosService {
                     method: p.method,
                     amount: p.amount,
                     reference: p.reference,
+                    receiptImageUrl: p.receiptImageUrl,
                     receivedAmount,
                     changeAmount,
                     tenantId,
@@ -298,6 +299,35 @@ let PosService = class PosService {
                 .catch(() => { });
         }
         return fullSale;
+    }
+    async sendSaleInvoice(saleId, email, tenantId) {
+        const sale = await this.findOne(saleId, tenantId);
+        const settings = await this.storeSettingsRepo.findOne({
+            where: { tenantId },
+        });
+        const result = await this.invoiceEmailService.sendInvoice(tenantId, {
+            invoiceNumber: sale.invoiceNumber,
+            orderNumber: sale.saleNumber,
+            storeName: settings?.storeName || 'MiPinta',
+            customerName: sale.client
+                ? `${sale.client.firstName} ${sale.client.lastName}`
+                : 'Consumidor Final',
+            customerEmail: email,
+            items: sale.items.map((i) => ({
+                productName: i.productName,
+                variantInfo: `${i.variantSize} / ${i.variantColor}`,
+                quantity: i.quantity,
+                unitPrice: Number(i.unitPrice),
+                lineTotal: Number(i.lineTotal),
+            })),
+            subtotal: Number(sale.subtotal),
+            discountAmount: Number(sale.discountAmount),
+            taxAmount: Number(sale.taxAmount),
+            total: Number(sale.total),
+            paymentMethod: sale.payments?.[0]?.method,
+            date: sale.createdAt,
+        });
+        return result;
     }
     async findAll(filters, tenantId) {
         const where = { tenantId };

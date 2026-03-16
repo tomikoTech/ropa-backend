@@ -21,6 +21,7 @@ let Payment = class Payment extends tenant_aware_entity_js_1.TenantAwareEntity {
     method;
     amount;
     reference;
+    receiptImageUrl;
     receivedAmount;
     changeAmount;
     createdAt;
@@ -58,6 +59,10 @@ __decorate([
     (0, typeorm_1.Column)({ nullable: true }),
     __metadata("design:type", String)
 ], Payment.prototype, "reference", void 0);
+__decorate([
+    (0, typeorm_1.Column)({ name: 'receipt_image_url', nullable: true }),
+    __metadata("design:type", String)
+], Payment.prototype, "receiptImageUrl", void 0);
 __decorate([
     (0, typeorm_1.Column)({
         name: 'received_amount',

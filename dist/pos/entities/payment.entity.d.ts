@@ -8,6 +8,7 @@ export declare class Payment extends TenantAwareEntity {
     method: PaymentMethod;
     amount: number;
     reference: string;
+    receiptImageUrl: string;
     receivedAmount: number;
     changeAmount: number;
     createdAt: Date;

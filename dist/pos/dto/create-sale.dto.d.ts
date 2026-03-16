@@ -9,6 +9,7 @@ export declare class PaymentDto {
     amount: number;
     reference?: string;
     receivedAmount?: number;
+    receiptImageUrl?: string;
 }
 export declare class CreateSaleDto {
     clientId?: string;

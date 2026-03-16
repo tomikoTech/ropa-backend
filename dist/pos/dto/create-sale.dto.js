@@ -39,6 +39,7 @@ class PaymentDto {
     amount;
     reference;
     receivedAmount;
+    receiptImageUrl;
 }
 exports.PaymentDto = PaymentDto;
 __decorate([
@@ -61,6 +62,11 @@ __decorate([
     (0, class_validator_1.IsOptional)(),
     __metadata("design:type", Number)
 ], PaymentDto.prototype, "receivedAmount", void 0);
+__decorate([
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.IsOptional)(),
+    __metadata("design:type", String)
+], PaymentDto.prototype, "receiptImageUrl", void 0);
 class CreateSaleDto {
     clientId;
     warehouseId;
