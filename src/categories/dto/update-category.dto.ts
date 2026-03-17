@@ -13,6 +13,11 @@ export class UpdateCategoryDto {
   @IsString()
   name?: string;
 
+  @ApiPropertyOptional({ example: 'Camisetas Urbanas' })
+  @IsOptional()
+  @IsString()
+  displayName?: string;
+
   @ApiPropertyOptional({ example: 'Camisetas actualizadas' })
   @IsOptional()
   @IsString()
@@ -32,4 +37,9 @@ export class UpdateCategoryDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @ApiPropertyOptional({ example: false })
+  @IsOptional()
+  @IsBoolean()
+  isPublished?: boolean;
 }

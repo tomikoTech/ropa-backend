@@ -58,7 +58,7 @@ describe('Storefront & E-commerce (e2e)', () => {
     const catRes = await request(app.getHttpServer())
       .post('/api/categories')
       .set('Authorization', `Bearer ${authToken}`)
-      .send({ name: `E2E Storefront Cat ${ts}` });
+      .send({ name: `E2E Storefront Cat ${ts}`, isPublished: true });
     categoryId = catRes.body.id;
 
     // Create product with variant

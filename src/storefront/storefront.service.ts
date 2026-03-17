@@ -260,7 +260,7 @@ export class StorefrontService {
     const { tenantId } = await this.resolveTenant(tenantSlug);
 
     const categories = await this.categoryRepo.find({
-      where: { tenantId, isActive: true },
+      where: { tenantId, isActive: true, isPublished: true },
       order: { sortOrder: 'ASC', name: 'ASC' },
     });
 

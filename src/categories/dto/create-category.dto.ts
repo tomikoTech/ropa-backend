@@ -14,6 +14,11 @@ export class CreateCategoryDto {
   @IsNotEmpty()
   name: string;
 
+  @ApiPropertyOptional({ example: 'Camisetas Urbanas' })
+  @IsOptional()
+  @IsString()
+  displayName?: string;
+
   @ApiPropertyOptional({ example: 'Camisetas para hombre y mujer' })
   @IsOptional()
   @IsString()
@@ -33,4 +38,9 @@ export class CreateCategoryDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @ApiPropertyOptional({ example: false })
+  @IsOptional()
+  @IsBoolean()
+  isPublished?: boolean;
 }

@@ -49,11 +49,13 @@ export class CategoriesService {
 
     const category = this.categoryRepository.create({
       name: dto.name,
+      displayName: dto.displayName,
       slug,
       description: dto.description,
       parentId: dto.parentId || null,
       sortOrder: dto.sortOrder ?? 0,
       isActive: dto.isActive ?? true,
+      isPublished: dto.isPublished ?? false,
       tenantId,
     });
 
@@ -126,9 +128,11 @@ export class CategoriesService {
       category.parentId = dto.parentId;
     }
 
+    if (dto.displayName !== undefined) category.displayName = dto.displayName;
     if (dto.description !== undefined) category.description = dto.description;
     if (dto.sortOrder !== undefined) category.sortOrder = dto.sortOrder;
     if (dto.isActive !== undefined) category.isActive = dto.isActive;
+    if (dto.isPublished !== undefined) category.isPublished = dto.isPublished;
 
     return this.categoryRepository.save(category);
   }

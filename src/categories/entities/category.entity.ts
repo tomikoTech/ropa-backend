@@ -21,6 +21,9 @@ export class Category extends TenantAwareEntity {
   @Column()
   name: string;
 
+  @Column({ name: 'display_name', nullable: true })
+  displayName: string;
+
   @Column()
   slug: string;
 
@@ -45,6 +48,9 @@ export class Category extends TenantAwareEntity {
 
   @Column({ name: 'is_active', default: true })
   isActive: boolean;
+
+  @Column({ name: 'is_published', default: false })
+  isPublished: boolean;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
