@@ -103,7 +103,8 @@ export class ProductsService {
       gender: dto.gender,
       categoryId: dto.categoryId,
       taxRate: dto.taxRate ?? 19,
-      imageUrl: dto.imageUrl,
+      imageUrl: dto.imageUrl || dto.imageUrls?.[0],
+      imageUrls: dto.imageUrls ?? [],
       tenantId,
     });
 

@@ -77,6 +77,12 @@ export class CreateProductDto {
   @IsString()
   imageUrl?: string;
 
+  @ApiPropertyOptional({ type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  imageUrls?: string[];
+
   @ApiProperty({ type: [CreateVariantDto] })
   @IsArray()
   @ValidateNested({ each: true })
