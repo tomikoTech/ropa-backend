@@ -84,6 +84,8 @@ export class StorefrontService {
       storeName: s.storeName,
       storeSlug: s.storeSlug,
       logoUrl: s.logoUrl,
+      miniLogoUrl: s.miniLogoUrl,
+      bannerUrl: s.bannerUrl,
       aboutText: s.aboutText,
       accentColor: s.accentColor,
     }));
