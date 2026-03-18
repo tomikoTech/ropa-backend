@@ -82,6 +82,7 @@ export class ReportsController {
     @Query('to') to: string,
     @Query('warehouseId') warehouseId: string | undefined,
     @Res() res: Response,
+    @Query('format') format?: string,
   ) {
     if (!from || !to) {
       throw new BadRequestException('Parámetros from y to son requeridos');
@@ -160,6 +161,34 @@ export class ReportsController {
     }
     top.getRow(1).font = { bold: true };
 
+    if (format === 'csv') {
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename=reporte-ventas-${from}-${to}.csv`,
+      );
+      res.write('\uFEFF');
+      // For CSV, create a single-sheet workbook with daily breakdown + summary
+      const csvWorkbook = new ExcelJS.Workbook();
+      const csvSheet = csvWorkbook.addWorksheet('Ventas');
+      csvSheet.columns = [
+        { header: 'Fecha', key: 'date', width: 15 },
+        { header: 'Ventas', key: 'sales', width: 10 },
+        { header: 'Monto', key: 'amount', width: 20 },
+      ];
+      for (const d of report.dailyBreakdown) {
+        csvSheet.addRow({ date: d.date, sales: d.sales, amount: d.amount });
+      }
+      csvSheet.addRow({});
+      csvSheet.addRow({ date: 'RESUMEN', sales: '', amount: '' });
+      csvSheet.addRow({ date: 'Total Ventas', sales: report.totalSales, amount: '' });
+      csvSheet.addRow({ date: 'Monto Total', sales: '', amount: report.totalAmount });
+      csvSheet.addRow({ date: 'Ticket Promedio', sales: '', amount: report.averageTicket });
+      await csvWorkbook.csv.write(res);
+      res.end();
+      return;
+    }
+
     res.setHeader(
       'Content-Type',
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -167,6 +196,81 @@ export class ReportsController {
     res.setHeader(
       'Content-Disposition',
       `attachment; filename=reporte-ventas-${from}-${to}.xlsx`,
+    );
+
+    await workbook.xlsx.write(res);
+    res.end();
+  }
+
+  @Get('inventory/export')
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Exportar inventario a Excel/CSV' })
+  async exportInventory(
+    @TenantId() tenantId: string,
+    @Query('warehouseId') warehouseId: string | undefined,
+    @Res() res: Response,
+    @Query('format') format?: string,
+  ) {
+    const inventory = await this.reportsService.getInventoryValuation(warehouseId, tenantId);
+
+    const workbook = new ExcelJS.Workbook();
+
+    // Summary sheet
+    const summary = workbook.addWorksheet('Resumen');
+    summary.columns = [
+      { header: 'Métrica', key: 'metric', width: 30 },
+      { header: 'Valor', key: 'value', width: 25 },
+    ];
+    summary.addRows([
+      { metric: 'Total Items', value: inventory.totalItems },
+      { metric: 'Valor Costo Total', value: inventory.totalCostValue },
+      { metric: 'Valor Retail Total', value: inventory.totalRetailValue },
+      { metric: 'Items Stock Bajo', value: inventory.lowStockCount },
+    ]);
+    summary.getRow(1).font = { bold: true };
+
+    // Items detail sheet
+    const items = workbook.addWorksheet('Inventario Detallado');
+    items.columns = [
+      { header: 'SKU', key: 'sku', width: 20 },
+      { header: 'Producto', key: 'productName', width: 30 },
+      { header: 'Talla', key: 'size', width: 10 },
+      { header: 'Color', key: 'color', width: 15 },
+      { header: 'Bodega', key: 'warehouse', width: 20 },
+      { header: 'Cantidad', key: 'quantity', width: 12 },
+      { header: 'Precio Costo', key: 'costPrice', width: 15 },
+      { header: 'Precio Retail', key: 'retailPrice', width: 15 },
+      { header: 'Valor Costo', key: 'costValue', width: 15 },
+      { header: 'Valor Retail', key: 'retailValue', width: 15 },
+    ];
+    for (const item of inventory.items) {
+      items.addRow(item);
+    }
+    items.getRow(1).font = { bold: true };
+
+    if (format === 'csv') {
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', 'attachment; filename=inventario.csv');
+      res.write('\uFEFF');
+      // For CSV, create a single-sheet workbook with items data
+      const csvWorkbook = new ExcelJS.Workbook();
+      const csvSheet = csvWorkbook.addWorksheet('Inventario');
+      csvSheet.columns = items.columns;
+      for (const item of inventory.items) {
+        csvSheet.addRow(item);
+      }
+      await csvWorkbook.csv.write(res);
+      res.end();
+      return;
+    }
+
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename=inventario.xlsx',
     );
 
     await workbook.xlsx.write(res);
