@@ -53,6 +53,8 @@ export class StoreSettingsService {
     if (dto.whatsappNumber !== undefined)
       settings.whatsappNumber = dto.whatsappNumber;
     if (dto.logoUrl !== undefined) settings.logoUrl = dto.logoUrl;
+    if (dto.heroLogoUrl !== undefined) settings.heroLogoUrl = dto.heroLogoUrl;
+    if (dto.miniLogoUrl !== undefined) settings.miniLogoUrl = dto.miniLogoUrl;
     if (dto.bannerUrl !== undefined) settings.bannerUrl = dto.bannerUrl;
     if (dto.aboutText !== undefined) settings.aboutText = dto.aboutText;
     if (dto.instagramUrl !== undefined)

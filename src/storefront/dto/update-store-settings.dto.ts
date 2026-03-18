@@ -17,6 +17,16 @@ export class UpdateStoreSettingsDto {
   @IsString()
   logoUrl?: string;
 
+  @ApiPropertyOptional({ example: 'https://example.com/hero-logo.png' })
+  @IsOptional()
+  @IsString()
+  heroLogoUrl?: string;
+
+  @ApiPropertyOptional({ example: 'https://example.com/mini-logo.png' })
+  @IsOptional()
+  @IsString()
+  miniLogoUrl?: string;
+
   @ApiPropertyOptional({ example: 'https://example.com/banner.jpg' })
   @IsOptional()
   @IsString()

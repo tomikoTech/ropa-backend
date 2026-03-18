@@ -61,6 +61,8 @@ export class StorefrontService {
       storeSlug: settings.storeSlug,
       whatsappNumber: settings.whatsappNumber,
       logoUrl: settings.logoUrl,
+      heroLogoUrl: settings.heroLogoUrl,
+      miniLogoUrl: settings.miniLogoUrl,
       bannerUrl: settings.bannerUrl,
       aboutText: settings.aboutText,
       instagramUrl: settings.instagramUrl,
