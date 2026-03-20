@@ -39,6 +39,22 @@ export class ProductsService {
     return parts.join('-');
   }
 
+  private async ensureUniqueSku(
+    baseSku: string,
+    tenantId: string,
+  ): Promise<string> {
+    let candidate = baseSku;
+    let counter = 2;
+    while (true) {
+      const exists = await this.variantRepository.findOne({
+        where: { sku: candidate, tenantId },
+      });
+      if (!exists) return candidate;
+      candidate = `${baseSku}-${counter}`;
+      counter++;
+    }
+  }
+
   private generateBarcode(): string {
     const timestamp = Date.now().toString().slice(-8);
     const random = Math.floor(Math.random() * 10000)
@@ -112,19 +128,22 @@ export class ProductsService {
 
     // Create variants
     if (dto.variants && dto.variants.length > 0) {
-      const variants = dto.variants.map((v) => {
-        return this.variantRepository.create({
+      for (const v of dto.variants) {
+        const sku = await this.ensureUniqueSku(
+          this.generateSku(skuPrefix, v.size, v.color),
+          tenantId,
+        );
+        const variant = this.variantRepository.create({
           productId: saved.id,
-          sku: this.generateSku(skuPrefix, v.size, v.color),
+          sku,
           size: v.size || '',
           color: v.color || '',
           barcode: this.generateBarcode(),
           priceOverride: v.priceOverride || null,
           tenantId,
         });
-      });
-
-      await this.variantRepository.save(variants);
+        await this.variantRepository.save(variant);
+      }
     }
 
     return this.findOne(saved.id, tenantId);
@@ -198,19 +217,27 @@ export class ProductsService {
             if (v.isActive !== undefined) existing.isActive = v.isActive;
             // Regenerate SKU if size or color changed
             if (v.size || v.color) {
-              existing.sku = this.generateSku(
+              const baseSku = this.generateSku(
                 product.skuPrefix,
                 v.size || existing.size,
                 v.color || existing.color,
               );
+              // Only change if different from current, and ensure unique
+              if (baseSku !== existing.sku) {
+                existing.sku = await this.ensureUniqueSku(baseSku, tenantId);
+              }
             }
             await this.variantRepository.save(existing);
           }
         } else {
           // Create new variant
+          const sku = await this.ensureUniqueSku(
+            this.generateSku(product.skuPrefix, v.size, v.color),
+            tenantId,
+          );
           const newVariant = this.variantRepository.create({
             productId: id,
-            sku: this.generateSku(product.skuPrefix, v.size, v.color),
+            sku,
             size: v.size || '',
             color: v.color || '',
             barcode: this.generateBarcode(),
