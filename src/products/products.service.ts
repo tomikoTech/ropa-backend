@@ -26,13 +26,21 @@ export class ProductsService {
 
   private generateSku(prefix: string, size?: string, color?: string): string {
     const parts = [prefix];
-    if (size) parts.push(size.toUpperCase().slice(0, 3));
+    if (size)
+      parts.push(
+        size
+          .toUpperCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .replace(/[^A-Z0-9]/g, ''),
+      );
     if (color)
       parts.push(
         color
           .toUpperCase()
           .normalize('NFD')
           .replace(/[\u0300-\u036f]/g, '')
+          .replace(/[^A-Z0-9]/g, '')
           .slice(0, 3),
       );
     if (parts.length === 1) parts.push(this.generateBarcode().slice(-4));
