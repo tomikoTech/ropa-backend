@@ -150,6 +150,7 @@ export class StorefrontService {
         ...p,
         storeName: store?.storeName ?? '',
         storeSlug: store?.storeSlug ?? '',
+        accentColor: store?.accentColor ?? '#fff',
       };
     });
   }
