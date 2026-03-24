@@ -103,16 +103,22 @@ export class StorefrontService {
     const tenantIds = stores.map((s) => s.tenantId);
     const storeMap = new Map(stores.map((s) => [s.tenantId, s]));
 
-    const products = await this.productRepo
+    const allProducts = await this.productRepo
       .createQueryBuilder('p')
       .leftJoinAndSelect('p.variants', 'v', 'v.is_active = true')
       .leftJoinAndSelect('p.category', 'c')
       .where('p.tenant_id IN (:...tenantIds)', { tenantIds })
       .andWhere('p.is_published = true')
       .andWhere('p.status = :status', { status: ProductStatus.ACTIVE })
-      .orderBy('RANDOM()')
-      .take(limit)
+      .orderBy('p.createdAt', 'DESC')
       .getMany();
+
+    // Shuffle in memory to mix products from different stores
+    for (let i = allProducts.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [allProducts[i], allProducts[j]] = [allProducts[j], allProducts[i]];
+    }
+    const products = allProducts.slice(0, limit);
 
     // Load stock for each variant per store's defaultWarehouseId
     if (products.length > 0) {
