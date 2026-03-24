@@ -110,7 +110,7 @@ export class StorefrontService {
       .where('p.tenant_id IN (:...tenantIds)', { tenantIds })
       .andWhere('p.is_published = true')
       .andWhere('p.status = :status', { status: ProductStatus.ACTIVE })
-      .orderBy('p.createdAt', 'DESC')
+      .orderBy('RANDOM()')
       .take(limit)
       .getMany();
 
