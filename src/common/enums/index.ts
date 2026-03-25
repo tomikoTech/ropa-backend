@@ -8,3 +8,4 @@ export * from './product-status.enum.js';
 export * from './purchase-order-status.enum.js';
 export * from './discount-type.enum.js';
 export * from './return-status.enum.js';
+export * from './sale-channel.enum.js';

@@ -72,6 +72,8 @@ export class StoreSettingsService {
       settings.isStorefrontActive = dto.isStorefrontActive;
     if (dto.defaultWarehouseId !== undefined)
       settings.defaultWarehouseId = dto.defaultWarehouseId;
+    if (dto.ecommerceWarehouseId !== undefined)
+      settings.ecommerceWarehouseId = dto.ecommerceWarehouseId;
     if (dto.brevoApiKey !== undefined) settings.brevoApiKey = dto.brevoApiKey;
     if (dto.brevoSenderEmail !== undefined)
       settings.brevoSenderEmail = dto.brevoSenderEmail;

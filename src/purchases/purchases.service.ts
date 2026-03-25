@@ -51,14 +51,20 @@ export class PurchasesService {
     userId: string,
     tenantId: string,
   ): Promise<PurchaseOrder> {
-    // Validate variants exist
+    // Validate variants exist and collect product images
+    const variantImageMap = new Map<string, string | null>();
     for (const item of dto.items) {
       const variant = await this.variantRepository.findOne({
         where: { id: item.variantId, tenantId },
+        relations: ['product'],
       });
       if (!variant) {
         throw new NotFoundException(`Variante ${item.variantId} no encontrada`);
       }
+      variantImageMap.set(
+        item.variantId,
+        variant.product?.imageUrl || null,
+      );
     }
 
     const orderNumber = await this.generateOrderNumber(tenantId);
@@ -86,6 +92,7 @@ export class PurchasesService {
         variantId: i.variantId,
         quantityOrdered: i.quantityOrdered,
         unitCost: i.unitCost,
+        productImageUrl: variantImageMap.get(i.variantId) || undefined,
         tenantId,
       }),
     );

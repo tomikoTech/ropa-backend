@@ -129,6 +129,7 @@ export class ProductsService {
       taxRate: dto.taxRate ?? 19,
       imageUrl: dto.imageUrl || dto.imageUrls?.[0],
       imageUrls: dto.imageUrls ?? [],
+      videoUrl: dto.videoUrl,
       tenantId,
     });
 
@@ -202,6 +203,7 @@ export class ProductsService {
     if (dto.displayName !== undefined) product.displayName = dto.displayName;
     if (dto.imageUrl !== undefined) product.imageUrl = dto.imageUrl;
     if (dto.imageUrls !== undefined) product.imageUrls = dto.imageUrls;
+    if (dto.videoUrl !== undefined) product.videoUrl = dto.videoUrl;
     if (dto.isPublished !== undefined) {
       product.isPublished = dto.isPublished;
       product.publishedAt = dto.isPublished ? new Date() : null!;

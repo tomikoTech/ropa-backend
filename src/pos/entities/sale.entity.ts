@@ -16,6 +16,7 @@ import { SaleItem } from './sale-item.entity.js';
 import { Payment } from './payment.entity.js';
 import { AccountsReceivable } from './accounts-receivable.entity.js';
 import { SaleStatus } from '../../common/enums/sale-status.enum.js';
+import { SaleChannel } from '../../common/enums/sale-channel.enum.js';
 import { TenantAwareEntity } from '../../common/entities/tenant-aware.entity.js';
 
 @Entity('sales')
@@ -92,6 +93,14 @@ export class Sale extends TenantAwareEntity {
     default: SaleStatus.PENDING,
   })
   status: SaleStatus;
+
+  @Column({
+    name: 'sale_channel',
+    type: 'enum',
+    enum: SaleChannel,
+    default: SaleChannel.POS,
+  })
+  saleChannel: SaleChannel;
 
   @Column({ nullable: true })
   notes: string;

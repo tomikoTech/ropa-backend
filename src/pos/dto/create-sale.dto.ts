@@ -11,6 +11,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { PaymentMethod } from '../../common/enums/payment-method.enum.js';
+import { SaleChannel } from '../../common/enums/sale-channel.enum.js';
 
 export class SaleItemDto {
   @IsUUID()
@@ -79,4 +80,8 @@ export class CreateSaleDto {
   @IsString()
   @IsOptional()
   creditNotes?: string;
+
+  @IsEnum(SaleChannel)
+  @IsOptional()
+  saleChannel?: SaleChannel;
 }

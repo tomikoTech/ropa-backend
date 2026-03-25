@@ -100,6 +100,11 @@ export class UpdateProductDto {
   @IsString({ each: true })
   imageUrls?: string[];
 
+  @ApiPropertyOptional({ example: 'https://example.com/video.mp4' })
+  @IsOptional()
+  @IsString()
+  videoUrl?: string;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsBoolean()

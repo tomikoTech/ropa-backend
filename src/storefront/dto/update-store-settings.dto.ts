@@ -87,6 +87,11 @@ export class UpdateStoreSettingsDto {
   @IsUUID()
   defaultWarehouseId?: string;
 
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  ecommerceWarehouseId?: string;
+
   @ApiPropertyOptional({ example: 'xkeysib-...' })
   @IsOptional()
   @IsString()

@@ -120,13 +120,13 @@ export class StorefrontService {
     }
     const products = allProducts.slice(0, limit);
 
-    // Load stock for each variant per store's defaultWarehouseId
+    // Load stock for each variant per store's ecommerceWarehouseId (fallback to defaultWarehouseId)
     if (products.length > 0) {
       const variantIds = products.flatMap((p) => p.variants.map((v) => v.id));
       if (variantIds.length > 0) {
         const warehouseIds = stores
-          .filter((s) => s.defaultWarehouseId)
-          .map((s) => s.defaultWarehouseId);
+          .filter((s) => s.ecommerceWarehouseId || s.defaultWarehouseId)
+          .map((s) => s.ecommerceWarehouseId || s.defaultWarehouseId);
 
         if (warehouseIds.length > 0) {
           const stocks = await this.stockRepo.find({
@@ -139,7 +139,8 @@ export class StorefrontService {
 
           for (const product of products) {
             const store = storeMap.get(product.tenantId);
-            const wId = store?.defaultWarehouseId;
+            const wId =
+              store?.ecommerceWarehouseId || store?.defaultWarehouseId;
             for (const variant of product.variants) {
               (variant as ProductVariant & { stock: number }).stock = wId
                 ? (stockMap.get(`${variant.id}:${wId}`) ?? 0)
@@ -333,7 +334,8 @@ export class StorefrontService {
       throw new BadRequestException('La tienda no está activa');
     }
     const tenantId = settings.tenantId;
-    const warehouseId = settings.defaultWarehouseId;
+    const warehouseId =
+      settings.ecommerceWarehouseId || settings.defaultWarehouseId;
     if (!warehouseId) {
       throw new BadRequestException('La tienda no tiene bodega configurada');
     }

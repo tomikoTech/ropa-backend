@@ -68,6 +68,9 @@ export class StoreSettings extends TenantAwareEntity {
   @Column({ name: 'default_warehouse_id', type: 'uuid', nullable: true })
   defaultWarehouseId: string;
 
+  @Column({ name: 'ecommerce_warehouse_id', type: 'uuid', nullable: true })
+  ecommerceWarehouseId: string;
+
   @Column({ name: 'brevo_api_key', nullable: true })
   brevoApiKey: string;
 

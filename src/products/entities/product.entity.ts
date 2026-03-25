@@ -81,6 +81,9 @@ export class Product extends TenantAwareEntity {
   @Column({ name: 'image_urls', type: 'text', array: true, default: '{}' })
   imageUrls: string[];
 
+  @Column({ name: 'video_url', nullable: true })
+  videoUrl: string;
+
   @Column({ name: 'is_published', default: false })
   isPublished: boolean;
 

@@ -36,4 +36,7 @@ export class PurchaseOrderItem extends TenantAwareEntity {
 
   @Column({ name: 'unit_cost', type: 'decimal', precision: 14, scale: 2 })
   unitCost: number;
+
+  @Column({ name: 'product_image_url', nullable: true })
+  productImageUrl: string;
 }

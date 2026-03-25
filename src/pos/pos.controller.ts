@@ -40,6 +40,7 @@ export class PosController {
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('limit') limit?: string,
+    @Query('saleChannel') saleChannel?: string,
   ) {
     return this.posService.findAll(
       {
@@ -49,6 +50,7 @@ export class PosController {
         from,
         to,
         limit: limit ? parseInt(limit, 10) : undefined,
+        saleChannel,
       },
       tenantId,
     );

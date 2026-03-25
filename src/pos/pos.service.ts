@@ -23,6 +23,7 @@ import { ReceiptService, ReceiptData } from './services/receipt.service.js';
 import { InvoiceEmailService } from '../common/services/invoice-email.service.js';
 import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
 import { SaleStatus } from '../common/enums/sale-status.enum.js';
+import { SaleChannel } from '../common/enums/sale-channel.enum.js';
 import { PaymentMethod } from '../common/enums/payment-method.enum.js';
 import { MovementType } from '../common/enums/movement-type.enum.js';
 
@@ -238,6 +239,7 @@ export class PosService {
         taxAmount: saleTotals.taxAmount,
         total: saleTotals.total,
         status: SaleStatus.COMPLETED,
+        saleChannel: dto.saleChannel || SaleChannel.POS,
         notes: dto.notes,
         tenantId,
       });
@@ -421,6 +423,7 @@ export class PosService {
           from?: string;
           to?: string;
           limit?: number;
+          saleChannel?: string;
         }
       | undefined,
     tenantId: string,
@@ -429,6 +432,7 @@ export class PosService {
     if (filters?.status) where.status = filters.status;
     if (filters?.warehouseId) where.warehouseId = filters.warehouseId;
     if (filters?.userId) where.userId = filters.userId;
+    if (filters?.saleChannel) where.saleChannel = filters.saleChannel;
 
     return this.saleRepository.find({
       where,
