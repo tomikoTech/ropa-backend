@@ -77,6 +77,8 @@ export class StoreSettingsService {
     if (dto.brevoApiKey !== undefined) settings.brevoApiKey = dto.brevoApiKey;
     if (dto.brevoSenderEmail !== undefined)
       settings.brevoSenderEmail = dto.brevoSenderEmail;
+    if (dto.wavaMerchantKey !== undefined)
+      settings.wavaMerchantKey = dto.wavaMerchantKey;
 
     return this.settingsRepo.save(settings);
   }

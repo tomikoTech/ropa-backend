@@ -72,6 +72,7 @@ export class StorefrontService {
       heroTitle: settings.heroTitle,
       heroSubtitle: settings.heroSubtitle,
       accentColor: settings.accentColor,
+      wavaEnabled: !!settings.wavaMerchantKey,
     };
   }
 
@@ -407,6 +408,7 @@ export class StorefrontService {
       taxAmount: saleTotals.taxAmount,
       total: saleTotals.total,
       status: EcommerceOrderStatus.PENDING,
+      paymentMethod: dto.paymentMethod || 'whatsapp',
       warehouseId,
       tenantId,
     });
@@ -493,6 +495,7 @@ export class StorefrontService {
     }
 
     return {
+      orderId: savedOrder.id,
       orderNumber: savedOrder.orderNumber,
       total: savedOrder.total,
       whatsappUrl,

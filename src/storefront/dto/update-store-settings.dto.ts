@@ -101,4 +101,9 @@ export class UpdateStoreSettingsDto {
   @IsOptional()
   @IsString()
   brevoSenderEmail?: string;
+
+  @ApiPropertyOptional({ example: 'wava_mk_...' })
+  @IsOptional()
+  @IsString()
+  wavaMerchantKey?: string;
 }

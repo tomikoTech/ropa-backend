@@ -20,6 +20,7 @@ import { ReportsModule } from './reports/reports.module.js';
 import { AuditModule } from './audit/audit.module.js';
 import { TenantsModule } from './tenants/tenants.module.js';
 import { StorefrontModule } from './storefront/storefront.module.js';
+import { PaymentsModule } from './payments/payments.module.js';
 import { CommonModule } from './common/common.module.js';
 import { AuditInterceptor } from './audit/audit.interceptor.js';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard.js';
@@ -50,6 +51,7 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard.js';
     AuditModule,
     TenantsModule,
     StorefrontModule,
+    PaymentsModule,
     CommonModule,
   ],
   providers: [

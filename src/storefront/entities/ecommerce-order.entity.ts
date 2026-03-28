@@ -66,6 +66,18 @@ export class EcommerceOrder extends TenantAwareEntity {
   @Column({ name: 'whatsapp_message_sent', default: false })
   whatsappMessageSent: boolean;
 
+  @Column({ name: 'payment_method', nullable: true })
+  paymentMethod: string;
+
+  @Column({ name: 'wava_order_id', nullable: true })
+  wavaOrderId: string;
+
+  @Column({ name: 'wava_payment_status', nullable: true })
+  wavaPaymentStatus: string;
+
+  @Column({ name: 'wava_payment_url', nullable: true })
+  wavaPaymentUrl: string;
+
   @Column({ name: 'admin_notes', type: 'text', nullable: true })
   adminNotes: string;
 

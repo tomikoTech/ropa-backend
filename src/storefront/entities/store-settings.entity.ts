@@ -77,6 +77,9 @@ export class StoreSettings extends TenantAwareEntity {
   @Column({ name: 'brevo_sender_email', nullable: true })
   brevoSenderEmail: string;
 
+  @Column({ name: 'wava_merchant_key', nullable: true })
+  wavaMerchantKey: string;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 

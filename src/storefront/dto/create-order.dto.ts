@@ -48,6 +48,11 @@ export class CreateOrderDto {
   @IsString()
   ecommerceBaseUrl?: string;
 
+  @ApiPropertyOptional({ example: 'whatsapp' })
+  @IsOptional()
+  @IsString()
+  paymentMethod?: string;
+
   @ApiProperty({ type: [CreateOrderItemDto] })
   @IsArray()
   @ArrayMinSize(1)
