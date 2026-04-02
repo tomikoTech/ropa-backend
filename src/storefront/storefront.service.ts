@@ -470,7 +470,8 @@ export class StorefrontService {
       : null;
 
     // Send order confirmation email (fire-and-forget)
-    if (dto.customerEmail) {
+    // Skip for Wava payments — email sent after payment confirmation via webhook
+    if (dto.customerEmail && dto.paymentMethod !== 'wava') {
       this.invoiceEmailService
         .sendInvoice(tenantId, {
           orderNumber: savedOrder.orderNumber,

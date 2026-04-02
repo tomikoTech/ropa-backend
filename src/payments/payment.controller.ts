@@ -4,6 +4,7 @@ import {
   Post,
   Body,
   Param,
+  Logger,
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
@@ -18,6 +19,8 @@ import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
 @ApiTags('Payments')
 @Controller('storefront/:tenantSlug/payment')
 export class PaymentController {
+  private readonly logger = new Logger(PaymentController.name);
+
   constructor(
     private readonly wavaService: WavaService,
     @InjectRepository(EcommerceOrder)
@@ -68,18 +71,35 @@ export class PaymentController {
         'Pagos en linea no configurados para esta tienda',
       );
 
+    this.logger.log(`Creating payment for order ${body.orderId} in tenant ${tenantSlug}`);
+
     const order = await this.orderRepo.findOne({
       where: { id: body.orderId, tenantId: settings.tenantId },
     });
-    if (!order) throw new NotFoundException('Orden no encontrada');
+    if (!order) {
+      this.logger.warn(`Order ${body.orderId} not found for tenant ${settings.tenantId}`);
+      throw new NotFoundException('Orden no encontrada');
+    }
 
     if (order.wavaPaymentUrl) {
+      this.logger.log(`Order ${order.orderNumber} already has payment URL, returning existing`);
       return {
         paymentUrl: order.wavaPaymentUrl,
         wavaOrderId: order.wavaOrderId,
       };
     }
 
+    // Wava requires HTTPS URLs — replace localhost with production ecommerce URL
+    const ECOMMERCE_BASE = process.env.ECOMMERCE_BASE_URL || 'https://mipinta.shop';
+    const sanitize = (url: string) =>
+      url.startsWith('http://localhost') ? url.replace(/http:\/\/localhost:\d+/, ECOMMERCE_BASE) : url;
+
+    const successUrl = sanitize(body.successUrl);
+    const cancelUrl = sanitize(body.cancelUrl);
+    const failureUrl = sanitize(body.failureUrl || body.cancelUrl);
+
+    this.logger.log(`Calling Wava createPaymentLink for ${order.orderNumber}, total: ${order.total}`);
+    this.logger.log(`Redirect URLs: success=${successUrl}, cancel=${cancelUrl}`);
     const link = await this.wavaService.createPaymentLink(
       settings.wavaMerchantKey,
       {
@@ -87,22 +107,27 @@ export class PaymentController {
         amount: Number(order.total),
         currency: 'COP',
         order_key: order.orderNumber,
-        redirect_link: body.successUrl,
-        redirect_link_cancel: body.cancelUrl,
-        redirect_link_failure: body.failureUrl || body.cancelUrl,
+        redirect_link: successUrl,
+        redirect_link_cancel: cancelUrl,
+        redirect_link_failure: failureUrl,
       },
     );
+    this.logger.log(`Wava link created: ${JSON.stringify(link)}`);
+
+    // Wava returns { link: "https://pay.dev.wava.co/...", hash: "..." }
+    const paymentUrl = link.link || link.payment_url;
+    const wavaId = link.hash || link.payment_link_id || link.id || '';
 
     await this.orderRepo.update(order.id, {
-      wavaOrderId: String(link.payment_link_id || link.id),
+      wavaOrderId: String(wavaId),
       wavaPaymentStatus: 'pending',
-      wavaPaymentUrl: link.payment_url,
+      wavaPaymentUrl: paymentUrl,
       paymentMethod: 'wava_link',
     });
 
     return {
-      paymentUrl: link.payment_url,
-      wavaOrderId: link.payment_link_id || link.id,
+      paymentUrl,
+      wavaOrderId: wavaId,
     };
   }
 

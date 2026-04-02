@@ -5,6 +5,8 @@ export class WavaService {
   private readonly logger = new Logger(WavaService.name);
   private readonly baseUrl =
     process.env.WAVA_API_BASE_URL || 'https://api.dev.wava.co/v1';
+  private readonly partnerApiKey = process.env.WAVA_PARTNER_API_KEY || '';
+  private readonly partnerSecret = process.env.WAVA_PARTNER_SECRET || '';
 
   private async request<T>(
     method: string,
@@ -12,20 +14,48 @@ export class WavaService {
     merchantKey: string,
     body?: unknown,
   ): Promise<T> {
-    const res = await fetch(`${this.baseUrl}${path}`, {
-      method,
-      headers: {
-        'Content-Type': 'application/json',
-        'merchant-key': merchantKey,
-      },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    const json = await res.json();
-    if (!res.ok) {
-      this.logger.error(`Wava ${method} ${path} failed: ${JSON.stringify(json)}`);
-      throw new Error(json.message || json.description || 'Wava API error');
+    const url = `${this.baseUrl}${path}`;
+    this.logger.log(`Wava ${method} ${url}`);
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'merchant-key': merchantKey,
+    };
+
+    // Add partner headers if configured (multi-store mode)
+    if (this.partnerApiKey && this.partnerSecret) {
+      headers['X-API-Key'] = this.partnerApiKey;
+      headers['X-API-Secret'] = this.partnerSecret;
     }
-    return json.data ?? json;
+
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+    } catch (err) {
+      this.logger.error(`Wava ${method} ${path} network error: ${err}`);
+      throw new Error('No se pudo conectar con el servicio de pagos. Intenta de nuevo.');
+    }
+
+    const text = await res.text();
+
+    let json: any;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      this.logger.error(`Wava ${method} ${path} non-JSON (HTTP ${res.status}): ${text.slice(0, 300)}`);
+      throw new Error(`Servicio de pagos no disponible (HTTP ${res.status}). Intenta más tarde.`);
+    }
+
+    if (!res.ok) {
+      this.logger.error(`Wava ${method} ${path} failed (HTTP ${res.status}): ${JSON.stringify(json)}`);
+      throw new Error(json.message || json.description || `Error del servicio de pagos (${res.status})`);
+    }
+
+    return json.result ?? json.data ?? json;
   }
 
   async getPaymentGateways(merchantKey: string) {
