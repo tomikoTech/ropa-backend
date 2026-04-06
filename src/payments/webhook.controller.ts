@@ -29,20 +29,47 @@ export class WebhookController {
   async handleWebhook(@Body() body: any) {
     this.logger.log(`Wava webhook received: ${JSON.stringify(body)}`);
 
-    const wavaOrderId = String(
-      body?.data?.id_order || body?.data?.id || body?.id_order || body?.data?.hash || '',
-    );
-    if (!wavaOrderId) {
+    // Wava webhook can send id_order (numeric) or hash — try all possible IDs
+    const possibleIds = [
+      body?.data?.id_order,
+      body?.data?.id,
+      body?.id_order,
+      body?.data?.hash,
+      body?.data?.payment_link_hash,
+    ].filter(Boolean).map(String);
+
+    if (possibleIds.length === 0) {
       this.logger.warn('Webhook missing order ID');
       return { received: true };
     }
 
-    const order = await this.orderRepo.findOne({
-      where: { wavaOrderId },
-      relations: ['items'],
-    });
+    this.logger.log(`Looking for order with wavaOrderId in: ${JSON.stringify(possibleIds)}`);
+
+    // Also try matching by order_key (our orderNumber) stored in Wava
+    const orderKey = body?.data?.order_key || body?.data?.id_external || '';
+
+    let order: EcommerceOrder | null = null;
+    for (const id of possibleIds) {
+      order = await this.orderRepo.findOne({
+        where: { wavaOrderId: id },
+        relations: ['items'],
+      });
+      if (order) break;
+    }
+
+    // Fallback: search by orderNumber if Wava sends order_key
+    if (!order && orderKey) {
+      order = await this.orderRepo.findOne({
+        where: { orderNumber: String(orderKey) },
+        relations: ['items'],
+      });
+      if (order) {
+        this.logger.log(`Found order by orderNumber: ${orderKey}`);
+      }
+    }
+
     if (!order) {
-      this.logger.warn(`Order not found for wavaOrderId: ${wavaOrderId}`);
+      this.logger.warn(`Order not found for wavaOrderIds: ${JSON.stringify(possibleIds)}, orderKey: ${orderKey}`);
       return { received: true };
     }
 
@@ -55,11 +82,25 @@ export class WebhookController {
     }
 
     try {
-      const verified = await this.wavaService.getOrder(
-        settings.wavaMerchantKey,
-        wavaOrderId,
-      );
-      const status = verified.status || verified.data?.status || '';
+      // Determine status: try webhook body first, then verify with API
+      const webhookStatus = body?.data?.status || body?.status || '';
+      let status = webhookStatus;
+
+      // Try to verify with Wava API using any available ID
+      for (const id of possibleIds) {
+        try {
+          const verified = await this.wavaService.getOrder(settings.wavaMerchantKey, id);
+          status = verified.status || verified.data?.status || webhookStatus;
+          break;
+        } catch {
+          // Try next ID
+        }
+      }
+
+      if (!status) {
+        this.logger.warn(`Could not determine status for order ${order.orderNumber}`);
+        return { received: true };
+      }
 
       await this.orderRepo.update(order.id, { wavaPaymentStatus: status });
 
@@ -105,7 +146,7 @@ export class WebhookController {
         );
       }
     } catch (err) {
-      this.logger.error(`Failed to verify Wava order ${wavaOrderId}: ${err}`);
+      this.logger.error(`Failed to verify Wava order ${order.orderNumber}: ${err}`);
     }
 
     return { received: true };
