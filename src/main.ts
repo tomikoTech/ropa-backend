@@ -22,6 +22,8 @@ async function bootstrap() {
       'https://ecommerce-frontend-production-964f.up.railway.app',
       'https://ropa-frontend-production.up.railway.app',
       'https://mipintapos.up.railway.app',
+      'https://mipinta.shop',
+      'https://www.mipinta.shop',
     ],
     credentials: true,
   });
