@@ -144,29 +144,11 @@ export class PaymentController {
     @Param('tenantSlug') tenantSlug: string,
     @Param('orderId') orderId: string,
   ) {
+    // Only check our DB — Wava webhook updates the status.
+    // We can't poll Wava API because we store the payment link hash,
+    // not the numeric order ID that /orders/{id} expects.
     const order = await this.orderRepo.findOne({ where: { id: orderId } });
     if (!order) throw new NotFoundException('Orden no encontrada');
-
-    if (order.wavaOrderId) {
-      const settings = await this.getSettings(tenantSlug);
-      if (settings.wavaMerchantKey) {
-        try {
-          const wavaOrder = await this.wavaService.getOrder(
-            settings.wavaMerchantKey,
-            order.wavaOrderId,
-          );
-          const newStatus = wavaOrder.status || wavaOrder.data?.status;
-          if (newStatus && newStatus !== order.wavaPaymentStatus) {
-            await this.orderRepo.update(order.id, {
-              wavaPaymentStatus: newStatus,
-            });
-            order.wavaPaymentStatus = newStatus;
-          }
-        } catch {
-          // Silently fail - return what we have
-        }
-      }
-    }
 
     return {
       orderId: order.id,
