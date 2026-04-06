@@ -136,4 +136,9 @@ export class UpdateStoreSettingsDto {
   @IsOptional()
   @IsString()
   customHeroHtml?: string;
+
+  @ApiPropertyOptional({ description: 'Google Font family name', example: 'Playfair Display' })
+  @IsOptional()
+  @IsString()
+  storeFontFamily?: string;
 }

@@ -116,6 +116,9 @@ export class StoreSettings extends TenantAwareEntity {
   @Column({ name: 'custom_hero_html', type: 'text', nullable: true })
   customHeroHtml: string;
 
+  @Column({ name: 'store_font_family', nullable: true })
+  storeFontFamily: string;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 

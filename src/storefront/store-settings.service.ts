@@ -91,6 +91,8 @@ export class StoreSettingsService {
       settings.storeCityName = dto.storeCityName;
     if (dto.customHeroHtml !== undefined)
       settings.customHeroHtml = dto.customHeroHtml;
+    if (dto.storeFontFamily !== undefined)
+      settings.storeFontFamily = dto.storeFontFamily;
 
     return this.settingsRepo.save(settings);
   }

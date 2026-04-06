@@ -82,6 +82,7 @@ export class StorefrontService {
         : null,
       storeCityName: settings.storeCityName,
       customHeroHtml: settings.customHeroHtml || null,
+      storeFontFamily: settings.storeFontFamily || null,
     };
   }
 
