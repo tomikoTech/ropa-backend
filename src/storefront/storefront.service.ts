@@ -18,6 +18,7 @@ import { CreateOrderDto } from './dto/create-order.dto.js';
 import { InvoiceEmailService } from '../common/services/invoice-email.service.js';
 import { EcommerceOrderStatus } from '../common/enums/ecommerce-order-status.enum.js';
 import { ProductStatus } from '../common/enums/product-status.enum.js';
+import { ShippingStatus } from '../common/enums/shipping-status.enum.js';
 
 @Injectable()
 export class StorefrontService {
@@ -73,6 +74,14 @@ export class StorefrontService {
       heroSubtitle: settings.heroSubtitle,
       accentColor: settings.accentColor,
       wavaEnabled: !!settings.wavaMerchantKey,
+      codEnabled: settings.codEnabled,
+      shippingCostLocal: Number(settings.shippingCostLocal),
+      shippingCostNational: Number(settings.shippingCostNational),
+      freeShippingThreshold: settings.freeShippingThreshold
+        ? Number(settings.freeShippingThreshold)
+        : null,
+      storeCityName: settings.storeCityName,
+      customHeroHtml: settings.customHeroHtml || null,
     };
   }
 
@@ -390,6 +399,23 @@ export class StorefrontService {
 
     const saleTotals = this.taxService.calculateSaleTotals(lineCalcs);
 
+    // Calculate shipping cost
+    let shippingCost = 0;
+    if (dto.shippingAddress) {
+      const subtotal = saleTotals.total;
+      if (
+        settings.freeShippingThreshold &&
+        subtotal >= Number(settings.freeShippingThreshold)
+      ) {
+        shippingCost = 0;
+      } else {
+        shippingCost =
+          dto.shippingType === 'local'
+            ? Number(settings.shippingCostLocal)
+            : Number(settings.shippingCostNational);
+      }
+    }
+
     // Generate order number
     const today = new Date();
     const dateStr = today.toISOString().slice(0, 10).replace(/-/g, '');
@@ -397,7 +423,7 @@ export class StorefrontService {
     const orderNumber = `EC-${dateStr}-${String(todayCount + 1).padStart(4, '0')}`;
 
     // Create order (PENDING — no stock deducted yet)
-    const order = this.orderRepo.create({
+    const orderData: Partial<EcommerceOrder> = {
       orderNumber,
       customerName: dto.customerName,
       customerPhone: dto.customerPhone,
@@ -407,11 +433,19 @@ export class StorefrontService {
       discountAmount: saleTotals.discountAmount,
       taxAmount: saleTotals.taxAmount,
       total: saleTotals.total,
+      shippingCity: dto.shippingCity || undefined,
+      shippingAddress: dto.shippingAddress || undefined,
+      shippingAddressDetails: dto.shippingAddressDetails || undefined,
+      shippingCost,
+      shippingStatus: dto.shippingAddress
+        ? ShippingStatus.PENDING_SHIPMENT
+        : undefined,
       status: EcommerceOrderStatus.PENDING,
       paymentMethod: dto.paymentMethod || 'whatsapp',
       warehouseId,
       tenantId,
-    });
+    };
+    const order = this.orderRepo.create(orderData as EcommerceOrder);
     const savedOrder = await this.orderRepo.save(order);
 
     // Create order items (snapshot product info)
@@ -499,6 +533,7 @@ export class StorefrontService {
       orderId: savedOrder.id,
       orderNumber: savedOrder.orderNumber,
       total: savedOrder.total,
+      shippingCost,
       whatsappUrl,
     };
   }

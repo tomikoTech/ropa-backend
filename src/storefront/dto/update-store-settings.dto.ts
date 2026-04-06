@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsBoolean, IsUUID } from 'class-validator';
+import { IsString, IsOptional, IsBoolean, IsUUID, IsNumber } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class UpdateStoreSettingsDto {
@@ -106,4 +106,29 @@ export class UpdateStoreSettingsDto {
   @IsOptional()
   @IsString()
   wavaMerchantKey?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  codEnabled?: boolean;
+
+  @ApiPropertyOptional({ example: 8000 })
+  @IsOptional()
+  @IsNumber()
+  shippingCostLocal?: number;
+
+  @ApiPropertyOptional({ example: 15000 })
+  @IsOptional()
+  @IsNumber()
+  shippingCostNational?: number;
+
+  @ApiPropertyOptional({ example: 200000 })
+  @IsOptional()
+  @IsNumber()
+  freeShippingThreshold?: number;
+
+  @ApiPropertyOptional({ example: 'Bogotá' })
+  @IsOptional()
+  @IsString()
+  storeCityName?: string;
 }

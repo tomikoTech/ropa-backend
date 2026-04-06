@@ -80,6 +80,42 @@ export class StoreSettings extends TenantAwareEntity {
   @Column({ name: 'wava_merchant_key', nullable: true })
   wavaMerchantKey: string;
 
+  @Column({ name: 'cod_enabled', default: false })
+  codEnabled: boolean;
+
+  @Column({
+    name: 'shipping_cost_local',
+    type: 'decimal',
+    precision: 14,
+    scale: 2,
+    default: 0,
+  })
+  shippingCostLocal: number;
+
+  @Column({
+    name: 'shipping_cost_national',
+    type: 'decimal',
+    precision: 14,
+    scale: 2,
+    default: 0,
+  })
+  shippingCostNational: number;
+
+  @Column({
+    name: 'free_shipping_threshold',
+    type: 'decimal',
+    precision: 14,
+    scale: 2,
+    nullable: true,
+  })
+  freeShippingThreshold: number;
+
+  @Column({ name: 'store_city_name', nullable: true })
+  storeCityName: string;
+
+  @Column({ name: 'custom_hero_html', type: 'text', nullable: true })
+  customHeroHtml: string;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 

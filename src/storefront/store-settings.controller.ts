@@ -98,4 +98,28 @@ export class StoreSettingsController {
   ) {
     return this.storeSettingsService.cancelOrder(id, userId, tenantId);
   }
+
+  @Patch('orders/:id/shipping-status')
+  @ApiOperation({ summary: 'Actualizar estado de envío' })
+  updateShippingStatus(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body()
+    body: {
+      shippingStatus: string;
+      shippingTrackingCode?: string;
+      shippingCarrier?: string;
+    },
+    @TenantId() tenantId: string,
+  ) {
+    return this.storeSettingsService.updateShippingStatus(id, tenantId, body);
+  }
+
+  @Patch('orders/:id/confirm-cod')
+  @ApiOperation({ summary: 'Confirmar pago contraentrega' })
+  confirmCodPayment(
+    @Param('id', ParseUUIDPipe) id: string,
+    @TenantId() tenantId: string,
+  ) {
+    return this.storeSettingsService.confirmCodPayment(id, tenantId);
+  }
 }

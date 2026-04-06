@@ -98,13 +98,20 @@ export class PaymentController {
     const cancelUrl = sanitize(body.cancelUrl);
     const failureUrl = sanitize(body.failureUrl || body.cancelUrl);
 
-    this.logger.log(`Calling Wava createPaymentLink for ${order.orderNumber}, total: ${order.total}`);
+    // For COD orders, charge only shipping cost via Wava
+    const isCod = order.paymentMethod === 'contraentrega';
+    const chargeAmount = isCod ? Number(order.shippingCost) : Number(order.total);
+    const description = isCod
+      ? `Envio para pedido ${order.orderNumber} - ${settings.storeName}`
+      : `Pedido ${order.orderNumber} - ${settings.storeName}`;
+
+    this.logger.log(`Calling Wava createPaymentLink for ${order.orderNumber}, amount: ${chargeAmount} (COD: ${isCod})`);
     this.logger.log(`Redirect URLs: success=${successUrl}, cancel=${cancelUrl}`);
     const link = await this.wavaService.createPaymentLink(
       settings.wavaMerchantKey,
       {
-        description: `Pedido ${order.orderNumber} - ${settings.storeName}`,
-        amount: Number(order.total),
+        description,
+        amount: chargeAmount,
         currency: 'COP',
         order_key: order.orderNumber,
         redirect_link: successUrl,

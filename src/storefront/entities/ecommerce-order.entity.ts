@@ -9,6 +9,7 @@ import {
 } from 'typeorm';
 import { TenantAwareEntity } from '../../common/entities/tenant-aware.entity.js';
 import { EcommerceOrderStatus } from '../../common/enums/ecommerce-order-status.enum.js';
+import { ShippingStatus } from '../../common/enums/shipping-status.enum.js';
 import { EcommerceOrderItem } from './ecommerce-order-item.entity.js';
 
 @Entity('ecommerce_orders')
@@ -77,6 +78,44 @@ export class EcommerceOrder extends TenantAwareEntity {
 
   @Column({ name: 'wava_payment_url', nullable: true })
   wavaPaymentUrl: string;
+
+  @Column({ name: 'shipping_city', nullable: true })
+  shippingCity: string;
+
+  @Column({ name: 'shipping_address', nullable: true })
+  shippingAddress: string;
+
+  @Column({ name: 'shipping_address_details', type: 'text', nullable: true })
+  shippingAddressDetails: string;
+
+  @Column({
+    name: 'shipping_cost',
+    type: 'decimal',
+    precision: 14,
+    scale: 2,
+    default: 0,
+  })
+  shippingCost: number;
+
+  @Column({
+    name: 'shipping_status',
+    type: 'enum',
+    enum: ShippingStatus,
+    nullable: true,
+  })
+  shippingStatus: ShippingStatus;
+
+  @Column({ name: 'shipping_tracking_code', nullable: true })
+  shippingTrackingCode: string;
+
+  @Column({ name: 'shipping_carrier', nullable: true })
+  shippingCarrier: string;
+
+  @Column({ name: 'cod_payment_confirmed', default: false })
+  codPaymentConfirmed: boolean;
+
+  @Column({ name: 'cod_payment_confirmed_at', type: 'timestamptz', nullable: true })
+  codPaymentConfirmedAt: Date;
 
   @Column({ name: 'admin_notes', type: 'text', nullable: true })
   adminNotes: string;

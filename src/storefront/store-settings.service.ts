@@ -14,6 +14,7 @@ import { UpdateStoreSettingsDto } from './dto/update-store-settings.dto.js';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto.js';
 import { InvoiceEmailService } from '../common/services/invoice-email.service.js';
 import { EcommerceOrderStatus } from '../common/enums/ecommerce-order-status.enum.js';
+import { ShippingStatus } from '../common/enums/shipping-status.enum.js';
 import { MovementType } from '../common/enums/movement-type.enum.js';
 
 @Injectable()
@@ -79,6 +80,15 @@ export class StoreSettingsService {
       settings.brevoSenderEmail = dto.brevoSenderEmail;
     if (dto.wavaMerchantKey !== undefined)
       settings.wavaMerchantKey = dto.wavaMerchantKey;
+    if (dto.codEnabled !== undefined) settings.codEnabled = dto.codEnabled;
+    if (dto.shippingCostLocal !== undefined)
+      settings.shippingCostLocal = dto.shippingCostLocal;
+    if (dto.shippingCostNational !== undefined)
+      settings.shippingCostNational = dto.shippingCostNational;
+    if (dto.freeShippingThreshold !== undefined)
+      settings.freeShippingThreshold = dto.freeShippingThreshold;
+    if (dto.storeCityName !== undefined)
+      settings.storeCityName = dto.storeCityName;
 
     return this.settingsRepo.save(settings);
   }
@@ -297,6 +307,98 @@ export class StoreSettingsService {
 
     // No stock to restore — stock is only deducted on finalize
     order.status = EcommerceOrderStatus.CANCELLED;
+    await this.orderRepo.save(order);
+
+    return order;
+  }
+
+  async updateShippingStatus(
+    id: string,
+    tenantId: string,
+    body: {
+      shippingStatus: string;
+      shippingTrackingCode?: string;
+      shippingCarrier?: string;
+    },
+  ): Promise<{ order: EcommerceOrder; whatsappNotifyUrl: string | null }> {
+    const order = await this.findOneOrder(id, tenantId);
+
+    if (order.status === EcommerceOrderStatus.CANCELLED) {
+      throw new BadRequestException(
+        'No se puede actualizar envío de un pedido cancelado',
+      );
+    }
+
+    const status = body.shippingStatus as ShippingStatus;
+    if (!Object.values(ShippingStatus).includes(status)) {
+      throw new BadRequestException('Estado de envío inválido');
+    }
+
+    order.shippingStatus = status;
+    if (body.shippingTrackingCode !== undefined) {
+      order.shippingTrackingCode = body.shippingTrackingCode;
+    }
+    if (body.shippingCarrier !== undefined) {
+      order.shippingCarrier = body.shippingCarrier;
+    }
+
+    // Sync order status with shipping status
+    if (status === ShippingStatus.SHIPPED) {
+      order.status = EcommerceOrderStatus.SHIPPED;
+    } else if (status === ShippingStatus.DELIVERED) {
+      order.status = EcommerceOrderStatus.DELIVERED;
+    }
+
+    await this.orderRepo.save(order);
+
+    // Build WhatsApp notification URL if customer has phone
+    let whatsappNotifyUrl: string | null = null;
+    if (order.customerPhone) {
+      const settings = await this.settingsRepo.findOne({
+        where: { tenantId },
+      });
+      const storeName = settings?.storeName || 'MiPinta';
+
+      let message = '';
+      if (status === ShippingStatus.SHIPPED) {
+        message = `Hola ${order.customerName}! Tu pedido ${order.orderNumber} de ${storeName} ha sido enviado.`;
+        if (order.shippingCarrier) {
+          message += ` Transportadora: ${order.shippingCarrier}.`;
+        }
+        if (order.shippingTrackingCode) {
+          message += ` Código de rastreo: ${order.shippingTrackingCode}.`;
+        }
+      } else if (status === ShippingStatus.DELIVERED) {
+        message = `Hola ${order.customerName}! Tu pedido ${order.orderNumber} de ${storeName} ha sido entregado. Gracias por tu compra!`;
+      }
+
+      if (message) {
+        whatsappNotifyUrl = `https://wa.me/${order.customerPhone}?text=${encodeURIComponent(message)}`;
+      }
+    }
+
+    return { order, whatsappNotifyUrl };
+  }
+
+  async confirmCodPayment(
+    id: string,
+    tenantId: string,
+  ): Promise<EcommerceOrder> {
+    const order = await this.findOneOrder(id, tenantId);
+
+    if (order.paymentMethod !== 'contraentrega') {
+      throw new BadRequestException(
+        'Este pedido no es contra-entrega',
+      );
+    }
+    if (order.codPaymentConfirmed) {
+      throw new BadRequestException(
+        'El pago contra-entrega ya fue confirmado',
+      );
+    }
+
+    order.codPaymentConfirmed = true;
+    order.codPaymentConfirmedAt = new Date();
     await this.orderRepo.save(order);
 
     return order;

@@ -53,6 +53,26 @@ export class CreateOrderDto {
   @IsString()
   paymentMethod?: string;
 
+  @ApiPropertyOptional({ example: 'Bogotá' })
+  @IsOptional()
+  @IsString()
+  shippingCity?: string;
+
+  @ApiPropertyOptional({ example: 'Calle 100 #15-20' })
+  @IsOptional()
+  @IsString()
+  shippingAddress?: string;
+
+  @ApiPropertyOptional({ example: 'Apto 301, Torre B' })
+  @IsOptional()
+  @IsString()
+  shippingAddressDetails?: string;
+
+  @ApiPropertyOptional({ example: 'local' })
+  @IsOptional()
+  @IsString()
+  shippingType?: string;
+
   @ApiProperty({ type: [CreateOrderItemDto] })
   @IsArray()
   @ArrayMinSize(1)
