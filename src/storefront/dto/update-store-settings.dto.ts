@@ -131,4 +131,9 @@ export class UpdateStoreSettingsDto {
   @IsOptional()
   @IsString()
   storeCityName?: string;
+
+  @ApiPropertyOptional({ description: 'Custom hero HTML (developer-managed)' })
+  @IsOptional()
+  @IsString()
+  customHeroHtml?: string;
 }

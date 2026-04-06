@@ -89,6 +89,8 @@ export class StoreSettingsService {
       settings.freeShippingThreshold = dto.freeShippingThreshold;
     if (dto.storeCityName !== undefined)
       settings.storeCityName = dto.storeCityName;
+    if (dto.customHeroHtml !== undefined)
+      settings.customHeroHtml = dto.customHeroHtml;
 
     return this.settingsRepo.save(settings);
   }
