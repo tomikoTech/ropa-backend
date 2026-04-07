@@ -141,4 +141,9 @@ export class UpdateStoreSettingsDto {
   @IsOptional()
   @IsString()
   storeFontFamily?: string;
+
+  @ApiPropertyOptional({ description: 'Store theme: dark or light', example: 'light' })
+  @IsOptional()
+  @IsString()
+  storeTheme?: string;
 }

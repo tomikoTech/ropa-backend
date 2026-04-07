@@ -83,6 +83,7 @@ export class StorefrontService {
       storeCityName: settings.storeCityName,
       customHeroHtml: settings.customHeroHtml || null,
       storeFontFamily: settings.storeFontFamily || null,
+      storeTheme: settings.storeTheme || 'dark',
     };
   }
 

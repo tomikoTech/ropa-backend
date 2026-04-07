@@ -119,6 +119,9 @@ export class StoreSettings extends TenantAwareEntity {
   @Column({ name: 'store_font_family', nullable: true })
   storeFontFamily: string;
 
+  @Column({ name: 'store_theme', default: 'dark' })
+  storeTheme: string;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 

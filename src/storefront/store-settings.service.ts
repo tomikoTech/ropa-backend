@@ -93,6 +93,8 @@ export class StoreSettingsService {
       settings.customHeroHtml = dto.customHeroHtml;
     if (dto.storeFontFamily !== undefined)
       settings.storeFontFamily = dto.storeFontFamily;
+    if (dto.storeTheme !== undefined)
+      settings.storeTheme = dto.storeTheme;
 
     return this.settingsRepo.save(settings);
   }
