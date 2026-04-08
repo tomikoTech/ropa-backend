@@ -13,6 +13,7 @@ export class WavaService {
     path: string,
     merchantKey: string,
     body?: unknown,
+    retries = 2,
   ): Promise<T> {
     const url = `${this.baseUrl}${path}`;
     this.logger.log(`Wava ${method} ${url}`);
@@ -28,34 +29,57 @@ export class WavaService {
       headers['X-API-Secret'] = this.partnerSecret;
     }
 
-    let res: Response;
-    try {
-      res = await fetch(url, {
-        method,
-        headers,
-        body: body ? JSON.stringify(body) : undefined,
-      });
-    } catch (err) {
-      this.logger.error(`Wava ${method} ${path} network error: ${err}`);
-      throw new Error('No se pudo conectar con el servicio de pagos. Intenta de nuevo.');
+    let lastError: Error | null = null;
+
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      if (attempt > 0) {
+        const delay = attempt * 500; // 500ms, 1000ms
+        this.logger.log(`Wava retry ${attempt}/${retries} after ${delay}ms`);
+        await new Promise((r) => setTimeout(r, delay));
+      }
+
+      let res: Response;
+      try {
+        res = await fetch(url, {
+          method,
+          headers,
+          body: body ? JSON.stringify(body) : undefined,
+        });
+      } catch (err) {
+        this.logger.error(`Wava ${method} ${path} network error (attempt ${attempt + 1}): ${err}`);
+        lastError = new Error('No se pudo conectar con el servicio de pagos. Intenta de nuevo.');
+        continue; // retry on network errors
+      }
+
+      const text = await res.text();
+
+      let json: any;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        this.logger.error(`Wava ${method} ${path} non-JSON (HTTP ${res.status}): ${text.slice(0, 300)}`);
+        // Retry on 5xx with non-JSON (likely server issue)
+        if (res.status >= 500) {
+          lastError = new Error(`Servicio de pagos no disponible (HTTP ${res.status}). Intenta más tarde.`);
+          continue;
+        }
+        throw new Error(`Servicio de pagos no disponible (HTTP ${res.status}). Intenta más tarde.`);
+      }
+
+      if (!res.ok) {
+        this.logger.error(`Wava ${method} ${path} failed (HTTP ${res.status}): ${JSON.stringify(json)}`);
+        // Retry on 5xx server errors, not on 4xx client errors
+        if (res.status >= 500) {
+          lastError = new Error(json.message || json.description || `Error del servicio de pagos (${res.status})`);
+          continue;
+        }
+        throw new Error(json.message || json.description || `Error del servicio de pagos (${res.status})`);
+      }
+
+      return json.result ?? json.data ?? json;
     }
 
-    const text = await res.text();
-
-    let json: any;
-    try {
-      json = JSON.parse(text);
-    } catch {
-      this.logger.error(`Wava ${method} ${path} non-JSON (HTTP ${res.status}): ${text.slice(0, 300)}`);
-      throw new Error(`Servicio de pagos no disponible (HTTP ${res.status}). Intenta más tarde.`);
-    }
-
-    if (!res.ok) {
-      this.logger.error(`Wava ${method} ${path} failed (HTTP ${res.status}): ${JSON.stringify(json)}`);
-      throw new Error(json.message || json.description || `Error del servicio de pagos (${res.status})`);
-    }
-
-    return json.result ?? json.data ?? json;
+    throw lastError!;
   }
 
   async getPaymentGateways(merchantKey: string) {
