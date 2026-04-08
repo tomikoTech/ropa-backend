@@ -187,6 +187,16 @@ export class WebhookController {
 
       await this.orderRepo.update(order.id, { wavaPaymentStatus: normalizedStatus });
 
+      // Idempotency: skip if already in the target state (Wava sends 2 webhooks)
+      if (order.status === EcommerceOrderStatus.CONFIRMED && (normalizedStatus === 'confirmed' || normalizedStatus === 'completed' || normalizedStatus === 'approved')) {
+        this.logger.log(`[WEBHOOK] Order ${order.orderNumber} already CONFIRMED, skipping duplicate`);
+        return { received: true, matched: true, updated: false, reason: 'already_confirmed' };
+      }
+      if (order.status === EcommerceOrderStatus.CANCELLED && (normalizedStatus === 'cancelled' || normalizedStatus === 'failed' || normalizedStatus === 'rejected')) {
+        this.logger.log(`[WEBHOOK] Order ${order.orderNumber} already CANCELLED, skipping duplicate`);
+        return { received: true, matched: true, updated: false, reason: 'already_cancelled' };
+      }
+
       if (normalizedStatus === 'confirmed' || normalizedStatus === 'completed' || normalizedStatus === 'approved') {
         await this.orderRepo.update(order.id, {
           status: EcommerceOrderStatus.CONFIRMED,
