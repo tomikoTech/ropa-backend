@@ -84,6 +84,7 @@ export class StorefrontService {
       customHeroHtml: settings.customHeroHtml || null,
       storeFontFamily: settings.storeFontFamily || null,
       storeTheme: settings.storeTheme || 'dark',
+      storeBgColor: settings.storeBgColor || null,
     };
   }
 
