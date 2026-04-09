@@ -95,6 +95,8 @@ export class StoreSettingsService {
       settings.storeFontFamily = dto.storeFontFamily;
     if (dto.storeTheme !== undefined)
       settings.storeTheme = dto.storeTheme;
+    if (dto.storeBgColor !== undefined)
+      settings.storeBgColor = dto.storeBgColor;
 
     return this.settingsRepo.save(settings);
   }
