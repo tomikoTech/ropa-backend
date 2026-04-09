@@ -146,4 +146,9 @@ export class UpdateStoreSettingsDto {
   @IsOptional()
   @IsString()
   storeTheme?: string;
+
+  @ApiPropertyOptional({ description: 'Custom background color hex (overrides theme)', example: '#ffcc01' })
+  @IsOptional()
+  @IsString()
+  storeBgColor?: string;
 }
