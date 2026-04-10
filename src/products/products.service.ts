@@ -197,7 +197,7 @@ export class ProductsService {
     if (dto.basePrice !== undefined) product.basePrice = dto.basePrice;
     if (dto.costPrice !== undefined) product.costPrice = dto.costPrice;
     if (dto.gender !== undefined) product.gender = dto.gender;
-    if (dto.categoryId !== undefined) product.categoryId = dto.categoryId;
+    if (dto.categoryId !== undefined) product.categoryId = dto.categoryId as string;
     if (dto.status !== undefined) product.status = dto.status;
     if (dto.taxRate !== undefined) product.taxRate = dto.taxRate;
     if (dto.displayName !== undefined) product.displayName = dto.displayName;
