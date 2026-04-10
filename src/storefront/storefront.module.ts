@@ -1,8 +1,11 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { JwtModule } from '@nestjs/jwt';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { StoreSettings } from './entities/store-settings.entity.js';
 import { EcommerceOrder } from './entities/ecommerce-order.entity.js';
 import { EcommerceOrderItem } from './entities/ecommerce-order-item.entity.js';
+import { EcommerceCustomer } from './entities/ecommerce-customer.entity.js';
 import { Product } from '../products/entities/product.entity.js';
 import { ProductVariant } from '../products/entities/product-variant.entity.js';
 import { Category } from '../categories/entities/category.entity.js';
@@ -13,6 +16,9 @@ import { StorefrontController } from './storefront.controller.js';
 import { StorefrontService } from './storefront.service.js';
 import { StoreSettingsController } from './store-settings.controller.js';
 import { StoreSettingsService } from './store-settings.service.js';
+import { CustomerAuthController } from './customer-auth.controller.js';
+import { CustomerAuthService } from './customer-auth.service.js';
+import { JwtCustomerStrategy } from './strategies/jwt-customer.strategy.js';
 import { TaxService } from '../pos/services/tax.service.js';
 
 @Module({
@@ -21,6 +27,7 @@ import { TaxService } from '../pos/services/tax.service.js';
       StoreSettings,
       EcommerceOrder,
       EcommerceOrderItem,
+      EcommerceCustomer,
       Product,
       ProductVariant,
       Category,
@@ -28,9 +35,25 @@ import { TaxService } from '../pos/services/tax.service.js';
       StockMovement,
       Promotion,
     ]),
+    JwtModule.registerAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => ({
+        secret: configService.get<string>('jwt.secret')!,
+        signOptions: {
+          expiresIn: configService.get<string>('jwt.expiration')! as any,
+        },
+      }),
+    }),
   ],
-  controllers: [StorefrontController, StoreSettingsController],
-  providers: [StorefrontService, StoreSettingsService, TaxService],
+  controllers: [StorefrontController, StoreSettingsController, CustomerAuthController],
+  providers: [
+    StorefrontService,
+    StoreSettingsService,
+    CustomerAuthService,
+    JwtCustomerStrategy,
+    TaxService,
+  ],
   exports: [StoreSettingsService],
 })
 export class StorefrontModule {}

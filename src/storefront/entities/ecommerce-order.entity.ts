@@ -3,6 +3,8 @@ import {
   PrimaryGeneratedColumn,
   Column,
   OneToMany,
+  ManyToOne,
+  JoinColumn,
   CreateDateColumn,
   UpdateDateColumn,
   Unique,
@@ -11,6 +13,7 @@ import { TenantAwareEntity } from '../../common/entities/tenant-aware.entity.js'
 import { EcommerceOrderStatus } from '../../common/enums/ecommerce-order-status.enum.js';
 import { ShippingStatus } from '../../common/enums/shipping-status.enum.js';
 import { EcommerceOrderItem } from './ecommerce-order-item.entity.js';
+import { EcommerceCustomer } from './ecommerce-customer.entity.js';
 
 @Entity('ecommerce_orders')
 @Unique(['tenantId', 'orderNumber'])
@@ -122,6 +125,13 @@ export class EcommerceOrder extends TenantAwareEntity {
 
   @Column({ name: 'warehouse_id', type: 'uuid', nullable: true })
   warehouseId: string;
+
+  @Column({ name: 'customer_id', type: 'uuid', nullable: true })
+  customerId: string;
+
+  @ManyToOne(() => EcommerceCustomer, { nullable: true })
+  @JoinColumn({ name: 'customer_id' })
+  customer: EcommerceCustomer;
 
   @OneToMany(() => EcommerceOrderItem, (item) => item.order, {
     cascade: true,

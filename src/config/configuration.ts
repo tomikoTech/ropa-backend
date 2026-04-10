@@ -13,4 +13,7 @@ export default () => ({
     refreshSecret: process.env.JWT_REFRESH_SECRET || 'default-refresh-secret',
     refreshExpiration: process.env.JWT_REFRESH_EXPIRATION || '7d',
   },
+  google: {
+    clientId: process.env.GOOGLE_CLIENT_ID || '',
+  },
 });
