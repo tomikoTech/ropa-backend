@@ -81,6 +81,14 @@ export class StoreSettingsService {
     if (dto.wavaMerchantKey !== undefined)
       settings.wavaMerchantKey = dto.wavaMerchantKey;
     if (dto.codEnabled !== undefined) settings.codEnabled = dto.codEnabled;
+    if (dto.codRequireShippingUpfront !== undefined)
+      settings.codRequireShippingUpfront = dto.codRequireShippingUpfront;
+    if (dto.codUpfrontPercentage !== undefined)
+      settings.codUpfrontPercentage = dto.codUpfrontPercentage;
+    if (dto.codSurchargeType !== undefined)
+      settings.codSurchargeType = dto.codSurchargeType;
+    if (dto.codSurchargeValue !== undefined)
+      settings.codSurchargeValue = dto.codSurchargeValue;
     if (dto.shippingCostLocal !== undefined)
       settings.shippingCostLocal = dto.shippingCostLocal;
     if (dto.shippingCostNational !== undefined)

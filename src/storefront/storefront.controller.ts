@@ -3,6 +3,7 @@ import { ApiTags, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { Public } from '../common/decorators/public.decorator.js';
 import { StorefrontService } from './storefront.service.js';
 import { CreateOrderDto } from './dto/create-order.dto.js';
+import { CalculateCheckoutDto } from './dto/calculate-checkout.dto.js';
 
 @ApiTags('Storefront (Público)')
 @Controller('storefront')
@@ -74,6 +75,18 @@ export class StorefrontController {
   @ApiOperation({ summary: 'Promociones activas' })
   getPromotions(@Param('tenantSlug') tenantSlug: string) {
     return this.storefrontService.getPromotions(tenantSlug);
+  }
+
+  @Public()
+  @Post(':tenantSlug/checkout/calculate')
+  @ApiOperation({
+    summary: 'Preview de totales de checkout (incluye COD pricing)',
+  })
+  calculateCheckout(
+    @Param('tenantSlug') tenantSlug: string,
+    @Body() dto: CalculateCheckoutDto,
+  ) {
+    return this.storefrontService.calculateCheckout(tenantSlug, dto);
   }
 
   @Public()

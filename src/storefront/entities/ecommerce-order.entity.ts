@@ -114,6 +114,33 @@ export class EcommerceOrder extends TenantAwareEntity {
   @Column({ name: 'shipping_carrier', nullable: true })
   shippingCarrier: string;
 
+  @Column({
+    name: 'cod_upfront_amount',
+    type: 'decimal',
+    precision: 14,
+    scale: 2,
+    default: 0,
+  })
+  codUpfrontAmount: number;
+
+  @Column({
+    name: 'cod_remaining_amount',
+    type: 'decimal',
+    precision: 14,
+    scale: 2,
+    default: 0,
+  })
+  codRemainingAmount: number;
+
+  @Column({
+    name: 'cod_surcharge_amount',
+    type: 'decimal',
+    precision: 14,
+    scale: 2,
+    default: 0,
+  })
+  codSurchargeAmount: number;
+
   @Column({ name: 'cod_payment_confirmed', default: false })
   codPaymentConfirmed: boolean;
 

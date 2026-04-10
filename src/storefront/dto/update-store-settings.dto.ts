@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsBoolean, IsUUID, IsNumber } from 'class-validator';
+import { IsString, IsOptional, IsBoolean, IsUUID, IsNumber, IsIn, Min, Max } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class UpdateStoreSettingsDto {
@@ -111,6 +111,29 @@ export class UpdateStoreSettingsDto {
   @IsOptional()
   @IsBoolean()
   codEnabled?: boolean;
+
+  @ApiPropertyOptional({ description: 'Require shipping payment upfront for COD' })
+  @IsOptional()
+  @IsBoolean()
+  codRequireShippingUpfront?: boolean;
+
+  @ApiPropertyOptional({ description: 'Percentage of product total to pay upfront as abono', example: 10 })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  codUpfrontPercentage?: number;
+
+  @ApiPropertyOptional({ description: 'COD surcharge type', enum: ['percentage', 'fixed'], example: 'percentage' })
+  @IsOptional()
+  @IsIn(['percentage', 'fixed'])
+  codSurchargeType?: string;
+
+  @ApiPropertyOptional({ description: 'COD surcharge value (amount or percentage)', example: 5 })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  codSurchargeValue?: number;
 
   @ApiPropertyOptional({ example: 8000 })
   @IsOptional()

@@ -83,6 +83,30 @@ export class StoreSettings extends TenantAwareEntity {
   @Column({ name: 'cod_enabled', default: false })
   codEnabled: boolean;
 
+  @Column({ name: 'cod_require_shipping_upfront', default: false })
+  codRequireShippingUpfront: boolean;
+
+  @Column({
+    name: 'cod_upfront_percentage',
+    type: 'decimal',
+    precision: 5,
+    scale: 2,
+    default: 0,
+  })
+  codUpfrontPercentage: number;
+
+  @Column({ name: 'cod_surcharge_type', nullable: true })
+  codSurchargeType: string;
+
+  @Column({
+    name: 'cod_surcharge_value',
+    type: 'decimal',
+    precision: 14,
+    scale: 2,
+    default: 0,
+  })
+  codSurchargeValue: number;
+
   @Column({
     name: 'shipping_cost_local',
     type: 'decimal',

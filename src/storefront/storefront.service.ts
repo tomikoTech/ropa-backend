@@ -15,6 +15,7 @@ import { Stock } from '../inventory/entities/stock.entity.js';
 import { Promotion } from '../promotions/entities/promotion.entity.js';
 import { TaxService, LineCalculation } from '../pos/services/tax.service.js';
 import { CreateOrderDto } from './dto/create-order.dto.js';
+import { CalculateCheckoutDto } from './dto/calculate-checkout.dto.js';
 import { InvoiceEmailService } from '../common/services/invoice-email.service.js';
 import { EcommerceOrderStatus } from '../common/enums/ecommerce-order-status.enum.js';
 import { ProductStatus } from '../common/enums/product-status.enum.js';
@@ -75,6 +76,10 @@ export class StorefrontService {
       accentColor: settings.accentColor,
       wavaEnabled: !!settings.wavaMerchantKey,
       codEnabled: settings.codEnabled,
+      codRequireShippingUpfront: settings.codRequireShippingUpfront,
+      codUpfrontPercentage: Number(settings.codUpfrontPercentage),
+      codSurchargeType: settings.codSurchargeType || null,
+      codSurchargeValue: Number(settings.codSurchargeValue),
       shippingCostLocal: Number(settings.shippingCostLocal),
       shippingCostNational: Number(settings.shippingCostNational),
       freeShippingThreshold: settings.freeShippingThreshold
@@ -480,6 +485,14 @@ export class StorefrontService {
       }
     }
 
+    // Calculate COD pricing
+    const codPricing = this.calculateCodPricing(
+      dto.deliveryMethod,
+      saleTotals.total,
+      shippingCost,
+      settings,
+    );
+
     // Generate order number
     const today = new Date();
     const dateStr = today.toISOString().slice(0, 10).replace(/-/g, '');
@@ -508,6 +521,9 @@ export class StorefrontService {
       pickupDeadline,
       warehouseId,
       tenantId,
+      codUpfrontAmount: codPricing.codUpfrontAmount,
+      codRemainingAmount: codPricing.codRemainingAmount,
+      codSurchargeAmount: codPricing.codSurchargeAmount,
     };
     const order = this.orderRepo.create(orderData as EcommerceOrder);
     const savedOrder = await this.orderRepo.save(order);
@@ -598,7 +614,153 @@ export class StorefrontService {
       orderNumber: savedOrder.orderNumber,
       total: savedOrder.total,
       shippingCost,
+      codUpfrontAmount: codPricing.codUpfrontAmount,
+      codRemainingAmount: codPricing.codRemainingAmount,
+      codSurchargeAmount: codPricing.codSurchargeAmount,
       whatsappUrl,
+    };
+  }
+
+  /** Calculate COD surcharge and upfront/remaining amounts. */
+  private calculateCodPricing(
+    deliveryMethod: string | undefined,
+    productTotal: number,
+    shippingCost: number,
+    settings: StoreSettings,
+  ): {
+    codSurchargeAmount: number;
+    codUpfrontAmount: number;
+    codRemainingAmount: number;
+  } {
+    if (deliveryMethod !== 'cod') {
+      return { codSurchargeAmount: 0, codUpfrontAmount: 0, codRemainingAmount: 0 };
+    }
+
+    // 1. Calculate surcharge
+    let surcharge = 0;
+    const surchargeType = settings.codSurchargeType;
+    const surchargeValue = Number(settings.codSurchargeValue);
+    if (surchargeType === 'percentage' && surchargeValue > 0) {
+      surcharge = productTotal * surchargeValue / 100;
+    } else if (surchargeType === 'fixed' && surchargeValue > 0) {
+      surcharge = surchargeValue;
+    }
+    surcharge = Math.round(surcharge * 100) / 100;
+
+    // 2. Grand total (product total + surcharge)
+    const grandTotal = productTotal + surcharge;
+
+    // 3. Calculate upfront payment
+    let upfront = 0;
+    if (settings.codRequireShippingUpfront) {
+      upfront += shippingCost;
+    }
+    const upfrontPercentage = Number(settings.codUpfrontPercentage);
+    if (upfrontPercentage > 0) {
+      upfront += grandTotal * upfrontPercentage / 100;
+    }
+    upfront = Math.round(upfront * 100) / 100;
+
+    // 4. Remaining = grandTotal + shippingCost - upfront
+    const remaining = Math.round((grandTotal + shippingCost - upfront) * 100) / 100;
+
+    return {
+      codSurchargeAmount: surcharge,
+      codUpfrontAmount: upfront,
+      codRemainingAmount: remaining,
+    };
+  }
+
+  /** Preview checkout totals including COD pricing. */
+  async calculateCheckout(
+    tenantSlug: string,
+    dto: CalculateCheckoutDto,
+  ) {
+    const { tenantId, settings } = await this.resolveTenant(tenantSlug);
+
+    // Validate variants and calculate line totals
+    const lineCalcs: LineCalculation[] = [];
+
+    for (const item of dto.items) {
+      const variant = await this.variantRepo.findOne({
+        where: { id: item.variantId },
+        relations: ['product'],
+      });
+      if (!variant) {
+        throw new NotFoundException(`Variante ${item.variantId} no encontrada`);
+      }
+      if (variant.tenantId !== tenantId) {
+        throw new NotFoundException(`Variante ${item.variantId} no encontrada`);
+      }
+
+      const unitPrice = variant.priceOverride
+        ? Number(variant.priceOverride)
+        : Number(variant.product.basePrice);
+      const taxRate = Number(variant.product.taxRate);
+
+      const lineCalc = this.taxService.calculateLine(
+        unitPrice,
+        item.quantity,
+        0,
+        taxRate,
+      );
+      lineCalcs.push(lineCalc);
+    }
+
+    const saleTotals = this.taxService.calculateSaleTotals(lineCalcs);
+
+    // Calculate shipping cost (same logic as createOrder)
+    let shippingCost = 0;
+    if (dto.deliveryMethod === 'shipping' || dto.deliveryMethod === 'cod') {
+      const shippingCity = dto.shippingCity || '';
+      const shippingDepartment = dto.shippingDepartment || '';
+      const storeCityName = settings.storeCityName || '';
+      const storeDepartment = settings.storeDepartment || '';
+
+      if (shippingCity === storeCityName && storeCityName) {
+        shippingCost = Number(settings.shippingCostLocal);
+      } else if (
+        shippingDepartment === storeDepartment &&
+        storeDepartment &&
+        shippingCity !== storeCityName
+      ) {
+        shippingCost = Number(settings.shippingCostRegional);
+      } else {
+        shippingCost = Number(settings.shippingCostNational);
+      }
+
+      if (settings.maxShippingCost) {
+        shippingCost = Math.min(shippingCost, Number(settings.maxShippingCost));
+      }
+
+      if (
+        settings.freeShippingThreshold &&
+        saleTotals.total >= Number(settings.freeShippingThreshold)
+      ) {
+        shippingCost = 0;
+      }
+    }
+
+    // Calculate COD pricing
+    const codPricing = this.calculateCodPricing(
+      dto.deliveryMethod,
+      saleTotals.total,
+      shippingCost,
+      settings,
+    );
+
+    const grandTotal = saleTotals.total + shippingCost + codPricing.codSurchargeAmount;
+
+    return {
+      subtotal: saleTotals.subtotal,
+      taxAmount: saleTotals.taxAmount,
+      discountAmount: saleTotals.discountAmount,
+      total: saleTotals.total,
+      shippingCost,
+      codSurcharge: codPricing.codSurchargeAmount,
+      codUpfrontAmount: codPricing.codUpfrontAmount,
+      codRemainingAmount: codPricing.codRemainingAmount,
+      grandTotal,
     };
   }
 }
