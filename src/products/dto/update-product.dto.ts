@@ -7,6 +7,7 @@ import {
   IsString,
   IsUUID,
   Min,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -71,8 +72,9 @@ export class UpdateProductDto {
 
   @ApiPropertyOptional()
   @IsOptional()
+  @ValidateIf((_o, value) => value !== null)
   @IsUUID()
-  categoryId?: string;
+  categoryId?: string | null;
 
   @ApiPropertyOptional({ enum: ProductStatus })
   @IsOptional()
