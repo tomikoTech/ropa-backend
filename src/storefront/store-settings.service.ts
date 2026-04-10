@@ -13,6 +13,8 @@ import { StockMovement } from '../inventory/entities/stock-movement.entity.js';
 import { UpdateStoreSettingsDto } from './dto/update-store-settings.dto.js';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto.js';
 import { InvoiceEmailService } from '../common/services/invoice-email.service.js';
+import { OrderNotificationEmailService } from '../common/services/order-notification-email.service.js';
+import type { OrderEmailData } from '../common/services/order-notification-email.service.js';
 import { EcommerceOrderStatus } from '../common/enums/ecommerce-order-status.enum.js';
 import { ShippingStatus } from '../common/enums/shipping-status.enum.js';
 import { MovementType } from '../common/enums/movement-type.enum.js';
@@ -28,7 +30,27 @@ export class StoreSettingsService {
     private readonly orderItemRepo: Repository<EcommerceOrderItem>,
     private readonly dataSource: DataSource,
     private readonly invoiceEmailService: InvoiceEmailService,
+    private readonly orderNotificationEmailService: OrderNotificationEmailService,
   ) {}
+
+  /** Build OrderEmailData from an EcommerceOrder with items loaded. */
+  private buildOrderEmailData(order: EcommerceOrder): OrderEmailData {
+    return {
+      orderNumber: order.orderNumber,
+      customerName: order.customerName,
+      customerEmail: order.customerEmail,
+      items: order.items.map((i) => ({
+        productName: i.productName,
+        variantInfo: `${i.variantSize} / ${i.variantColor}`,
+        quantity: i.quantity,
+        unitPrice: Number(i.unitPrice),
+        lineTotal: Number(i.lineTotal),
+      })),
+      subtotal: Number(order.subtotal),
+      shippingCost: Number(order.shippingCost),
+      total: Number(order.total),
+    };
+  }
 
   async getSettings(tenantId: string): Promise<StoreSettings> {
     let settings = await this.settingsRepo.findOne({ where: { tenantId } });
@@ -188,7 +210,30 @@ export class StoreSettingsService {
       order.adminNotes = dto.adminNotes;
     }
 
-    return this.orderRepo.save(order);
+    const saved = await this.orderRepo.save(order);
+
+    // Send email notification (fire-and-forget)
+    if (saved.customerEmail) {
+      const settings = await this.settingsRepo.findOne({ where: { tenantId } });
+      const storeName = settings?.storeName || 'MiPinta';
+      const emailData = this.buildOrderEmailData(saved);
+
+      if (dto.status === EcommerceOrderStatus.CONFIRMED) {
+        this.orderNotificationEmailService
+          .sendOrderConfirmed(tenantId, emailData, storeName)
+          .catch(() => {});
+      } else if (dto.status === EcommerceOrderStatus.READY_FOR_PICKUP) {
+        this.orderNotificationEmailService
+          .sendOrderReadyForPickup(tenantId, emailData, storeName)
+          .catch(() => {});
+      } else if (dto.status === EcommerceOrderStatus.CANCELLED) {
+        this.orderNotificationEmailService
+          .sendOrderCancelled(tenantId, emailData, storeName)
+          .catch(() => {});
+      }
+    }
+
+    return saved;
   }
 
   async finalizeOrder(
@@ -394,6 +439,29 @@ export class StoreSettingsService {
 
     await this.orderRepo.save(order);
 
+    // Send email notification (fire-and-forget)
+    if (order.customerEmail) {
+      const emailSettings = await this.settingsRepo.findOne({ where: { tenantId } });
+      const emailStoreName = emailSettings?.storeName || 'MiPinta';
+      const emailData = this.buildOrderEmailData(order);
+
+      if (status === ShippingStatus.SHIPPED) {
+        this.orderNotificationEmailService
+          .sendOrderShipped(
+            tenantId,
+            emailData,
+            emailStoreName,
+            order.shippingTrackingCode || undefined,
+            order.shippingCarrier || undefined,
+          )
+          .catch(() => {});
+      } else if (status === ShippingStatus.DELIVERED) {
+        this.orderNotificationEmailService
+          .sendOrderDelivered(tenantId, emailData, emailStoreName)
+          .catch(() => {});
+      }
+    }
+
     // Build WhatsApp notification URL if customer has phone
     let whatsappNotifyUrl: string | null = null;
     if (order.customerPhone) {
@@ -436,7 +504,19 @@ export class StoreSettingsService {
     }
 
     order.status = EcommerceOrderStatus.DELIVERED;
-    return this.orderRepo.save(order);
+    const saved = await this.orderRepo.save(order);
+
+    // Send delivered email notification (fire-and-forget)
+    if (saved.customerEmail) {
+      const settings = await this.settingsRepo.findOne({ where: { tenantId } });
+      const storeName = settings?.storeName || 'MiPinta';
+      const emailData = this.buildOrderEmailData(saved);
+      this.orderNotificationEmailService
+        .sendOrderDelivered(tenantId, emailData, storeName)
+        .catch(() => {});
+    }
+
+    return saved;
   }
 
   async confirmCodPayment(
