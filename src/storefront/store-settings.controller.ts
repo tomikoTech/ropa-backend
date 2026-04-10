@@ -114,6 +114,15 @@ export class StoreSettingsController {
     return this.storeSettingsService.updateShippingStatus(id, tenantId, body);
   }
 
+  @Patch('orders/:id/confirm-pickup')
+  @ApiOperation({ summary: 'Confirmar recogida de pedido en tienda' })
+  confirmPickup(
+    @Param('id', ParseUUIDPipe) id: string,
+    @TenantId() tenantId: string,
+  ) {
+    return this.storeSettingsService.confirmPickup(id, tenantId);
+  }
+
   @Patch('orders/:id/confirm-cod')
   @ApiOperation({ summary: 'Confirmar pago contraentrega' })
   confirmCodPayment(

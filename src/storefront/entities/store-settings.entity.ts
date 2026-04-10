@@ -113,6 +113,27 @@ export class StoreSettings extends TenantAwareEntity {
   @Column({ name: 'store_city_name', nullable: true })
   storeCityName: string;
 
+  @Column({
+    name: 'shipping_cost_regional',
+    type: 'decimal',
+    precision: 14,
+    scale: 2,
+    default: 0,
+  })
+  shippingCostRegional: number;
+
+  @Column({ name: 'store_department', nullable: true })
+  storeDepartment: string;
+
+  @Column({
+    name: 'max_shipping_cost',
+    type: 'decimal',
+    precision: 14,
+    scale: 2,
+    nullable: true,
+  })
+  maxShippingCost: number;
+
   @Column({ name: 'custom_hero_html', type: 'text', nullable: true })
   customHeroHtml: string;
 

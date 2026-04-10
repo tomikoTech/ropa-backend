@@ -4,6 +4,7 @@ import {
   IsArray,
   IsNumber,
   IsUUID,
+  IsIn,
   Min,
   ValidateNested,
   IsEmail,
@@ -72,6 +73,16 @@ export class CreateOrderDto {
   @IsOptional()
   @IsString()
   shippingType?: string;
+
+  @ApiPropertyOptional({ example: 'pickup', enum: ['pickup', 'shipping', 'cod'] })
+  @IsOptional()
+  @IsIn(['pickup', 'shipping', 'cod'])
+  deliveryMethod?: string;
+
+  @ApiPropertyOptional({ example: 'Cundinamarca' })
+  @IsOptional()
+  @IsString()
+  shippingDepartment?: string;
 
   @ApiProperty({ type: [CreateOrderItemDto] })
   @IsArray()

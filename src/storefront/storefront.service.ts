@@ -81,6 +81,11 @@ export class StorefrontService {
         ? Number(settings.freeShippingThreshold)
         : null,
       storeCityName: settings.storeCityName,
+      shippingCostRegional: Number(settings.shippingCostRegional),
+      storeDepartment: settings.storeDepartment || null,
+      maxShippingCost: settings.maxShippingCost
+        ? Number(settings.maxShippingCost)
+        : null,
       customHeroHtml: settings.customHeroHtml || null,
       storeFontFamily: settings.storeFontFamily || null,
       storeTheme: settings.storeTheme || 'dark',
@@ -402,20 +407,76 @@ export class StorefrontService {
 
     const saleTotals = this.taxService.calculateSaleTotals(lineCalcs);
 
-    // Calculate shipping cost
+    // Calculate shipping cost based on delivery method
     let shippingCost = 0;
-    if (dto.shippingAddress) {
-      const subtotal = saleTotals.total;
+    let effectiveShippingCity = dto.shippingCity || undefined;
+    let effectiveShippingAddress = dto.shippingAddress || undefined;
+    let pickupDeadline: Date | undefined;
+    let effectivePaymentMethod = dto.paymentMethod || 'whatsapp';
+    let effectiveShippingStatus: ShippingStatus | undefined = dto.shippingAddress
+      ? ShippingStatus.PENDING_SHIPMENT
+      : undefined;
+
+    if (dto.deliveryMethod === 'pickup') {
+      // Pickup: no shipping cost, use store city, no address
+      shippingCost = 0;
+      effectiveShippingCity = settings.storeCityName || undefined;
+      effectiveShippingAddress = undefined;
+      pickupDeadline = new Date(Date.now() + 48 * 60 * 60 * 1000);
+      effectiveShippingStatus = undefined;
+    } else if (dto.deliveryMethod === 'shipping' || dto.deliveryMethod === 'cod') {
+      // 3-tier shipping cost calculation
+      const shippingCity = dto.shippingCity || '';
+      const shippingDepartment = dto.shippingDepartment || '';
+      const storeCityName = settings.storeCityName || '';
+      const storeDepartment = settings.storeDepartment || '';
+
+      if (shippingCity === storeCityName && storeCityName) {
+        shippingCost = Number(settings.shippingCostLocal);
+      } else if (
+        shippingDepartment === storeDepartment &&
+        storeDepartment &&
+        shippingCity !== storeCityName
+      ) {
+        shippingCost = Number(settings.shippingCostRegional);
+      } else {
+        shippingCost = Number(settings.shippingCostNational);
+      }
+
+      // Apply max shipping cost cap
+      if (settings.maxShippingCost) {
+        shippingCost = Math.min(shippingCost, Number(settings.maxShippingCost));
+      }
+
+      // Apply free shipping threshold
       if (
         settings.freeShippingThreshold &&
-        subtotal >= Number(settings.freeShippingThreshold)
+        saleTotals.total >= Number(settings.freeShippingThreshold)
       ) {
         shippingCost = 0;
-      } else {
-        shippingCost =
-          dto.shippingType === 'local'
-            ? Number(settings.shippingCostLocal)
-            : Number(settings.shippingCostNational);
+      }
+
+      effectiveShippingStatus = ShippingStatus.PENDING_SHIPMENT;
+
+      // COD specific
+      if (dto.deliveryMethod === 'cod') {
+        effectivePaymentMethod = 'contraentrega';
+      }
+    } else {
+      // Legacy path (no deliveryMethod specified)
+      if (dto.shippingAddress) {
+        const subtotal = saleTotals.total;
+        if (
+          settings.freeShippingThreshold &&
+          subtotal >= Number(settings.freeShippingThreshold)
+        ) {
+          shippingCost = 0;
+        } else {
+          shippingCost =
+            dto.shippingType === 'local'
+              ? Number(settings.shippingCostLocal)
+              : Number(settings.shippingCostNational);
+        }
       }
     }
 
@@ -436,15 +497,15 @@ export class StorefrontService {
       discountAmount: saleTotals.discountAmount,
       taxAmount: saleTotals.taxAmount,
       total: saleTotals.total,
-      shippingCity: dto.shippingCity || undefined,
-      shippingAddress: dto.shippingAddress || undefined,
+      shippingCity: effectiveShippingCity,
+      shippingAddress: effectiveShippingAddress,
       shippingAddressDetails: dto.shippingAddressDetails || undefined,
       shippingCost,
-      shippingStatus: dto.shippingAddress
-        ? ShippingStatus.PENDING_SHIPMENT
-        : undefined,
+      shippingStatus: effectiveShippingStatus,
       status: EcommerceOrderStatus.PENDING,
-      paymentMethod: dto.paymentMethod || 'whatsapp',
+      paymentMethod: effectivePaymentMethod,
+      deliveryMethod: dto.deliveryMethod || undefined,
+      pickupDeadline,
       warehouseId,
       tenantId,
     };

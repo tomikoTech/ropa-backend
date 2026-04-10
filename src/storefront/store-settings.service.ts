@@ -89,6 +89,12 @@ export class StoreSettingsService {
       settings.freeShippingThreshold = dto.freeShippingThreshold;
     if (dto.storeCityName !== undefined)
       settings.storeCityName = dto.storeCityName;
+    if (dto.shippingCostRegional !== undefined)
+      settings.shippingCostRegional = dto.shippingCostRegional;
+    if (dto.storeDepartment !== undefined)
+      settings.storeDepartment = dto.storeDepartment;
+    if (dto.maxShippingCost !== undefined)
+      settings.maxShippingCost = dto.maxShippingCost;
     if (dto.customHeroHtml !== undefined)
       settings.customHeroHtml = dto.customHeroHtml;
     if (dto.storeFontFamily !== undefined)
@@ -145,6 +151,27 @@ export class StoreSettingsService {
     if (order.status === EcommerceOrderStatus.DELIVERED) {
       throw new BadRequestException(
         'No se puede actualizar un pedido entregado',
+      );
+    }
+
+    // Allow CONFIRMED → READY_FOR_PICKUP for pickup orders
+    if (
+      dto.status === EcommerceOrderStatus.READY_FOR_PICKUP &&
+      order.status !== EcommerceOrderStatus.CONFIRMED
+    ) {
+      throw new BadRequestException(
+        'Solo se puede marcar como listo para recogida desde estado CONFIRMED',
+      );
+    }
+
+    // Allow READY_FOR_PICKUP → DELIVERED
+    if (
+      order.status === EcommerceOrderStatus.READY_FOR_PICKUP &&
+      dto.status !== EcommerceOrderStatus.DELIVERED &&
+      dto.status !== EcommerceOrderStatus.CANCELLED
+    ) {
+      throw new BadRequestException(
+        'Desde READY_FOR_PICKUP solo se puede pasar a DELIVERED o CANCELLED',
       );
     }
 
@@ -386,6 +413,22 @@ export class StoreSettingsService {
     }
 
     return { order, whatsappNotifyUrl };
+  }
+
+  async confirmPickup(
+    id: string,
+    tenantId: string,
+  ): Promise<EcommerceOrder> {
+    const order = await this.findOneOrder(id, tenantId);
+
+    if (order.status !== EcommerceOrderStatus.READY_FOR_PICKUP) {
+      throw new BadRequestException(
+        'Solo se puede confirmar recogida de pedidos en estado READY_FOR_PICKUP',
+      );
+    }
+
+    order.status = EcommerceOrderStatus.DELIVERED;
+    return this.orderRepo.save(order);
   }
 
   async confirmCodPayment(

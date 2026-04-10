@@ -120,6 +120,12 @@ export class EcommerceOrder extends TenantAwareEntity {
   @Column({ name: 'cod_payment_confirmed_at', type: 'timestamptz', nullable: true })
   codPaymentConfirmedAt: Date;
 
+  @Column({ name: 'delivery_method', nullable: true })
+  deliveryMethod: string;
+
+  @Column({ name: 'pickup_deadline', type: 'timestamptz', nullable: true })
+  pickupDeadline: Date;
+
   @Column({ name: 'admin_notes', type: 'text', nullable: true })
   adminNotes: string;
 

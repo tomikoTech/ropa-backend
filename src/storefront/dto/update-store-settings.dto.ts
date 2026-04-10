@@ -132,6 +132,21 @@ export class UpdateStoreSettingsDto {
   @IsString()
   storeCityName?: string;
 
+  @ApiPropertyOptional({ example: 12000 })
+  @IsOptional()
+  @IsNumber()
+  shippingCostRegional?: number;
+
+  @ApiPropertyOptional({ example: 'Cundinamarca' })
+  @IsOptional()
+  @IsString()
+  storeDepartment?: string;
+
+  @ApiPropertyOptional({ example: 20000 })
+  @IsOptional()
+  @IsNumber()
+  maxShippingCost?: number;
+
   @ApiPropertyOptional({ description: 'Custom hero HTML (developer-managed)' })
   @IsOptional()
   @IsString()
