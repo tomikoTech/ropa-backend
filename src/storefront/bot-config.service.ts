@@ -59,6 +59,9 @@ export class BotConfigService {
     if (dto.btnProductsLabel !== undefined) config.btnProductsLabel = dto.btnProductsLabel;
     if (dto.btnAboutLabel !== undefined) config.btnAboutLabel = dto.btnAboutLabel;
     if (dto.btnHoursLabel !== undefined) config.btnHoursLabel = dto.btnHoursLabel;
+    if (dto.botEnabled !== undefined) config.botEnabled = dto.botEnabled;
+    if (dto.whatsappAccessToken !== undefined) config.whatsappAccessToken = dto.whatsappAccessToken;
+    if (dto.whatsappPhoneNumberId !== undefined) config.whatsappPhoneNumberId = dto.whatsappPhoneNumberId;
 
     return this.botConfigRepo.save(config);
   }

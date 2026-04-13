@@ -44,6 +44,15 @@ export class BotConfig extends TenantAwareEntity {
   @Column({ name: 'btn_hours_label', default: 'Horario y ubicación' })
   btnHoursLabel: string;
 
+  @Column({ name: 'bot_enabled', default: false })
+  botEnabled: boolean;
+
+  @Column({ name: 'whatsapp_access_token', type: 'text', nullable: true })
+  whatsappAccessToken: string;
+
+  @Column({ name: 'whatsapp_phone_number_id', nullable: true })
+  whatsappPhoneNumberId: string;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 

@@ -13,6 +13,8 @@ import { Stock } from '../inventory/entities/stock.entity.js';
 import { StockMovement } from '../inventory/entities/stock-movement.entity.js';
 import { Promotion } from '../promotions/entities/promotion.entity.js';
 import { BotConfig } from './entities/bot-config.entity.js';
+import { BotConversation } from './entities/bot-conversation.entity.js';
+import { BotMessage } from './entities/bot-message.entity.js';
 import { StorefrontController } from './storefront.controller.js';
 import { StorefrontService } from './storefront.service.js';
 import { StoreSettingsController } from './store-settings.controller.js';
@@ -22,6 +24,8 @@ import { CustomerAuthService } from './customer-auth.service.js';
 import { JwtCustomerStrategy } from './strategies/jwt-customer.strategy.js';
 import { BotConfigController } from './bot-config.controller.js';
 import { BotConfigService } from './bot-config.service.js';
+import { BotChatController } from './bot-chat.controller.js';
+import { BotChatService } from './bot-chat.service.js';
 import { TaxService } from '../pos/services/tax.service.js';
 
 @Module({
@@ -38,6 +42,8 @@ import { TaxService } from '../pos/services/tax.service.js';
       StockMovement,
       Promotion,
       BotConfig,
+      BotConversation,
+      BotMessage,
     ]),
     JwtModule.registerAsync({
       imports: [ConfigModule],
@@ -50,12 +56,13 @@ import { TaxService } from '../pos/services/tax.service.js';
       }),
     }),
   ],
-  controllers: [StorefrontController, StoreSettingsController, CustomerAuthController, BotConfigController],
+  controllers: [StorefrontController, StoreSettingsController, CustomerAuthController, BotConfigController, BotChatController],
   providers: [
     StorefrontService,
     StoreSettingsService,
     CustomerAuthService,
     BotConfigService,
+    BotChatService,
     JwtCustomerStrategy,
     TaxService,
   ],
