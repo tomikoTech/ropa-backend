@@ -210,12 +210,25 @@ export class StorefrontService {
       qb.andWhere('p.gender = :gender', { gender: filters.gender });
     }
     if (filters?.search) {
-      qb.andWhere('(p.name ILIKE :q OR p.description ILIKE :q)', {
-        q: `%${filters.search}%`,
-      });
-    }
+      const words = filters.search.trim().split(/\s+/).filter(Boolean);
+      const conditions = words.map(
+        (_, i) =>
+          `(p.name ILIKE :q${i} OR p.description ILIKE :q${i} OR c.name ILIKE :q${i})`,
+      );
+      const params: Record<string, string> = {};
+      words.forEach((w, i) => (params[`q${i}`] = `%${w}%`));
+      qb.andWhere(`(${conditions.join(' OR ')})`, params);
 
-    qb.orderBy('p.created_at', 'DESC');
+      const scoreTerms = words.map(
+        (_, i) =>
+          `(CASE WHEN p.name ILIKE :q${i} THEN 3 ELSE 0 END + ` +
+          `CASE WHEN c.name ILIKE :q${i} THEN 2 ELSE 0 END + ` +
+          `CASE WHEN p.description ILIKE :q${i} THEN 1 ELSE 0 END)`,
+      );
+      qb.orderBy(`(${scoreTerms.join(' + ')})`, 'DESC');
+    } else {
+      qb.orderBy('p.created_at', 'DESC');
+    }
 
     const products = await qb.getMany();
 
