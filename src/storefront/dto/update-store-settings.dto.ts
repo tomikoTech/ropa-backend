@@ -189,4 +189,9 @@ export class UpdateStoreSettingsDto {
   @IsOptional()
   @IsString()
   storeBgColor?: string;
+
+  @ApiPropertyOptional({ description: 'Dominio personalizado (ej: theculture.co)', example: 'theculture.co' })
+  @IsOptional()
+  @IsString()
+  customDomain?: string;
 }

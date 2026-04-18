@@ -56,6 +56,17 @@ export class StorefrontService {
     return { tenantId: settings.tenantId, settings };
   }
 
+  async resolveByDomain(domain: string) {
+    const cleaned = domain.toLowerCase().replace(/^https?:\/\//, '').replace(/\/+$/, '').trim();
+    const settings = await this.settingsRepo.findOne({
+      where: { customDomain: cleaned, isStorefrontActive: true },
+    });
+    if (!settings) {
+      throw new NotFoundException('Dominio no registrado');
+    }
+    return { storeSlug: settings.storeSlug };
+  }
+
   async getSettings(tenantSlug: string) {
     const { settings } = await this.resolveTenant(tenantSlug);
     return {

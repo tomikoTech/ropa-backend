@@ -28,6 +28,14 @@ export class StorefrontController {
   }
 
   @Public()
+  @Get('resolve-domain')
+  @ApiOperation({ summary: 'Resolver dominio personalizado a slug de tienda' })
+  @ApiQuery({ name: 'domain', required: true })
+  resolveDomain(@Query('domain') domain: string) {
+    return this.storefrontService.resolveByDomain(domain);
+  }
+
+  @Public()
   @Get(':tenantSlug/settings')
   @ApiOperation({ summary: 'Obtener info de la tienda' })
   getSettings(@Param('tenantSlug') tenantSlug: string) {

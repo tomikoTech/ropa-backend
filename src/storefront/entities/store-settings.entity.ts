@@ -170,6 +170,9 @@ export class StoreSettings extends TenantAwareEntity {
   @Column({ name: 'store_bg_color', nullable: true })
   storeBgColor: string;
 
+  @Column({ name: 'custom_domain', nullable: true, unique: true })
+  customDomain: string;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 

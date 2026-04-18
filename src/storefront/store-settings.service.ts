@@ -133,6 +133,20 @@ export class StoreSettingsService {
       settings.storeTheme = dto.storeTheme;
     if (dto.storeBgColor !== undefined)
       settings.storeBgColor = dto.storeBgColor;
+    if (dto.customDomain !== undefined) {
+      const cleaned = dto.customDomain
+        ? dto.customDomain.toLowerCase().replace(/^https?:\/\//, '').replace(/\/+$/, '').trim()
+        : null;
+      if (cleaned) {
+        const existing = await this.settingsRepo.findOne({
+          where: { customDomain: cleaned },
+        });
+        if (existing && existing.id !== settings.id) {
+          throw new BadRequestException('Este dominio ya está asignado a otra tienda');
+        }
+      }
+      settings.customDomain = cleaned as any;
+    }
 
     return this.settingsRepo.save(settings);
   }
