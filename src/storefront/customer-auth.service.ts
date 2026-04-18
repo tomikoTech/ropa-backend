@@ -211,6 +211,36 @@ export class CustomerAuthService {
     });
   }
 
+  /** Refresh access token using a valid refresh token */
+  async refreshToken(tenantSlug: string, refreshToken: string) {
+    const refreshSecret = this.configService.get<string>('jwt.refreshSecret');
+
+    let payload: { sub: string; email: string; type: string; tenantId: string };
+    try {
+      payload = this.jwtService.verify(refreshToken, { secret: refreshSecret });
+    } catch {
+      throw new UnauthorizedException('Token de refresco inválido o expirado');
+    }
+
+    if (payload.type !== 'customer') {
+      throw new UnauthorizedException('Token no válido para clientes');
+    }
+
+    const tenantId = await this.resolveTenantId(tenantSlug);
+    if (payload.tenantId !== tenantId) {
+      throw new UnauthorizedException('Token no válido para esta tienda');
+    }
+
+    const customer = await this.customerRepo.findOne({
+      where: { id: payload.sub, tenantId },
+    });
+    if (!customer || !customer.isActive) {
+      throw new UnauthorizedException('Cliente inactivo o no encontrado');
+    }
+
+    return this.generateTokens(customer);
+  }
+
   /** Generate access + refresh tokens */
   private generateTokens(customer: EcommerceCustomer) {
     const payload = {

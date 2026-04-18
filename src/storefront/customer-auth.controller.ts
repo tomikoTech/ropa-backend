@@ -53,6 +53,17 @@ export class CustomerAuthController {
     return this.customerAuthService.googleLogin(tenantSlug, dto);
   }
 
+  @Public()
+  @Post('refresh')
+  @ApiOperation({ summary: 'Refrescar access token del cliente' })
+  refresh(
+    @Param('tenantSlug') tenantSlug: string,
+    @Body('refreshToken') refreshToken: string,
+  ) {
+    return this.customerAuthService.refreshToken(tenantSlug, refreshToken);
+  }
+
+  @Public()
   @UseGuards(CustomerAuthGuard)
   @Get('profile')
   @ApiBearerAuth()
@@ -61,6 +72,7 @@ export class CustomerAuthController {
     return this.customerAuthService.getProfile(customer.id);
   }
 
+  @Public()
   @UseGuards(CustomerAuthGuard)
   @Patch('profile')
   @ApiBearerAuth()
@@ -72,6 +84,7 @@ export class CustomerAuthController {
     return this.customerAuthService.updateProfile(customer.id, dto);
   }
 
+  @Public()
   @UseGuards(CustomerAuthGuard)
   @Get('orders')
   @ApiBearerAuth()
