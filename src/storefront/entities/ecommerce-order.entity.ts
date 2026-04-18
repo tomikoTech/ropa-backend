@@ -82,6 +82,12 @@ export class EcommerceOrder extends TenantAwareEntity {
   @Column({ name: 'wava_payment_url', nullable: true })
   wavaPaymentUrl: string;
 
+  @Column({ name: 'wompi_transaction_id', nullable: true })
+  wompiTransactionId: string;
+
+  @Column({ name: 'wompi_payment_status', nullable: true })
+  wompiPaymentStatus: string;
+
   @Column({ name: 'shipping_city', nullable: true })
   shippingCity: string;
 

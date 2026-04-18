@@ -173,6 +173,18 @@ export class StoreSettings extends TenantAwareEntity {
   @Column({ name: 'custom_domain', nullable: true, unique: true })
   customDomain: string;
 
+  @Column({ name: 'wompi_public_key', nullable: true })
+  wompiPublicKey: string;
+
+  @Column({ name: 'wompi_private_key', nullable: true })
+  wompiPrivateKey: string;
+
+  @Column({ name: 'wompi_integrity_secret', nullable: true })
+  wompiIntegritySecret: string;
+
+  @Column({ name: 'wompi_events_secret', nullable: true })
+  wompiEventsSecret: string;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 

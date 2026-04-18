@@ -194,4 +194,24 @@ export class UpdateStoreSettingsDto {
   @IsOptional()
   @IsString()
   customDomain?: string;
+
+  @ApiPropertyOptional({ description: 'Wompi public key', example: 'pub_prod_xxx' })
+  @IsOptional()
+  @IsString()
+  wompiPublicKey?: string;
+
+  @ApiPropertyOptional({ description: 'Wompi private key', example: 'prv_prod_xxx' })
+  @IsOptional()
+  @IsString()
+  wompiPrivateKey?: string;
+
+  @ApiPropertyOptional({ description: 'Wompi integrity secret', example: 'prod_integrity_xxx' })
+  @IsOptional()
+  @IsString()
+  wompiIntegritySecret?: string;
+
+  @ApiPropertyOptional({ description: 'Wompi events secret', example: 'prod_events_xxx' })
+  @IsOptional()
+  @IsString()
+  wompiEventsSecret?: string;
 }

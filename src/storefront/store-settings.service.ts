@@ -147,6 +147,14 @@ export class StoreSettingsService {
       }
       settings.customDomain = cleaned as any;
     }
+    if (dto.wompiPublicKey !== undefined)
+      settings.wompiPublicKey = dto.wompiPublicKey || (null as any);
+    if (dto.wompiPrivateKey !== undefined)
+      settings.wompiPrivateKey = dto.wompiPrivateKey || (null as any);
+    if (dto.wompiIntegritySecret !== undefined)
+      settings.wompiIntegritySecret = dto.wompiIntegritySecret || (null as any);
+    if (dto.wompiEventsSecret !== undefined)
+      settings.wompiEventsSecret = dto.wompiEventsSecret || (null as any);
 
     return this.settingsRepo.save(settings);
   }

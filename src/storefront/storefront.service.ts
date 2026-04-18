@@ -86,6 +86,7 @@ export class StorefrontService {
       heroSubtitle: settings.heroSubtitle,
       accentColor: settings.accentColor,
       wavaEnabled: !!settings.wavaMerchantKey,
+      wompiEnabled: !!settings.wompiPublicKey && !!settings.wompiIntegritySecret,
       codEnabled: settings.codEnabled,
       codRequireShippingUpfront: settings.codRequireShippingUpfront,
       codUpfrontPercentage: Number(settings.codUpfrontPercentage),
