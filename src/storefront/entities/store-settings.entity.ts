@@ -170,6 +170,15 @@ export class StoreSettings extends TenantAwareEntity {
   @Column({ name: 'store_bg_color', nullable: true })
   storeBgColor: string;
 
+  @Column({
+    name: 'flat_shipping_cost',
+    type: 'decimal',
+    precision: 14,
+    scale: 2,
+    default: 30000,
+  })
+  flatShippingCost: number;
+
   @Column({ name: 'custom_domain', nullable: true, unique: true })
   customDomain: string;
 

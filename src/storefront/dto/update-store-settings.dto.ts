@@ -135,6 +135,12 @@ export class UpdateStoreSettingsDto {
   @Min(0)
   codSurchargeValue?: number;
 
+  @ApiPropertyOptional({ description: 'Flat shipping cost for all deliveries', example: 30000 })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  flatShippingCost?: number;
+
   @ApiPropertyOptional({ example: 8000 })
   @IsOptional()
   @IsNumber()
