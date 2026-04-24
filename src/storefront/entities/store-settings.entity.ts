@@ -176,6 +176,9 @@ export class StoreSettings extends TenantAwareEntity {
   @Column({ name: 'font_apply_navbar', type: 'boolean', default: false })
   fontApplyNavbar: boolean;
 
+  @Column({ name: 'font_sections', type: 'jsonb', nullable: true })
+  fontSections: string[] | null;
+
   @Column({ name: 'nav_items', type: 'jsonb', nullable: true })
   navItems: { label: string; href: string }[] | null;
 

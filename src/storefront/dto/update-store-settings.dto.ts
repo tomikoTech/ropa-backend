@@ -206,6 +206,10 @@ export class UpdateStoreSettingsDto {
   @IsBoolean()
   fontApplyNavbar?: boolean;
 
+  @ApiPropertyOptional({ description: 'Font sections array', example: ['storeName', 'navbar', 'productCards'] })
+  @IsOptional()
+  fontSections?: string[];
+
   @ApiPropertyOptional({ description: 'Custom navigation items', type: 'array' })
   @IsOptional()
   navItems?: { label: string; href: string }[];
