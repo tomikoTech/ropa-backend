@@ -76,6 +76,7 @@ export class StorefrontService {
       logoUrl: settings.logoUrl,
       heroLogoUrl: settings.heroLogoUrl,
       miniLogoUrl: settings.miniLogoUrl,
+      navbarLogoUrl: settings.navbarLogoUrl || null,
       bannerUrl: settings.bannerUrl,
       aboutText: settings.aboutText,
       instagramUrl: settings.instagramUrl,

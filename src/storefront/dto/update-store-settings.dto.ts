@@ -27,6 +27,11 @@ export class UpdateStoreSettingsDto {
   @IsString()
   miniLogoUrl?: string;
 
+  @ApiPropertyOptional({ example: 'https://example.com/navbar-logo.png' })
+  @IsOptional()
+  @IsString()
+  navbarLogoUrl?: string;
+
   @ApiPropertyOptional({ example: 'https://example.com/banner.jpg' })
   @IsOptional()
   @IsString()

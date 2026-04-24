@@ -32,6 +32,9 @@ export class StoreSettings extends TenantAwareEntity {
   @Column({ name: 'mini_logo_url', nullable: true })
   miniLogoUrl: string;
 
+  @Column({ name: 'navbar_logo_url', nullable: true })
+  navbarLogoUrl: string;
+
   @Column({ name: 'banner_url', nullable: true })
   bannerUrl: string;
 
