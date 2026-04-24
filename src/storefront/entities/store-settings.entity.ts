@@ -164,6 +164,18 @@ export class StoreSettings extends TenantAwareEntity {
   @Column({ name: 'store_font_family', nullable: true })
   storeFontFamily: string;
 
+  @Column({ name: 'font_apply_hero', type: 'boolean', default: true })
+  fontApplyHero: boolean;
+
+  @Column({ name: 'font_apply_products', type: 'boolean', default: false })
+  fontApplyProducts: boolean;
+
+  @Column({ name: 'font_apply_navbar', type: 'boolean', default: false })
+  fontApplyNavbar: boolean;
+
+  @Column({ name: 'nav_items', type: 'jsonb', nullable: true })
+  navItems: { label: string; href: string }[] | null;
+
   @Column({ name: 'store_theme', default: 'dark' })
   storeTheme: string;
 

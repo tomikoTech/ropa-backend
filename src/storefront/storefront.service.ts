@@ -91,6 +91,10 @@ export class StorefrontService {
       flatShippingCost: Number(settings.flatShippingCost) || 0,
       customHeroHtml: settings.customHeroHtml || null,
       storeFontFamily: settings.storeFontFamily || null,
+      fontApplyHero: settings.fontApplyHero ?? true,
+      fontApplyProducts: settings.fontApplyProducts ?? false,
+      fontApplyNavbar: settings.fontApplyNavbar ?? false,
+      navItems: settings.navItems || null,
       storeTheme: settings.storeTheme || 'dark',
       storeBgColor: settings.storeBgColor || null,
     };

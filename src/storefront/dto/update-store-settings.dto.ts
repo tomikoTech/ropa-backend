@@ -186,6 +186,25 @@ export class UpdateStoreSettingsDto {
   @IsString()
   storeFontFamily?: string;
 
+  @ApiPropertyOptional({ description: 'Apply custom font to hero section' })
+  @IsOptional()
+  @IsBoolean()
+  fontApplyHero?: boolean;
+
+  @ApiPropertyOptional({ description: 'Apply custom font to product cards/details' })
+  @IsOptional()
+  @IsBoolean()
+  fontApplyProducts?: boolean;
+
+  @ApiPropertyOptional({ description: 'Apply custom font to navbar' })
+  @IsOptional()
+  @IsBoolean()
+  fontApplyNavbar?: boolean;
+
+  @ApiPropertyOptional({ description: 'Custom navigation items', type: 'array' })
+  @IsOptional()
+  navItems?: { label: string; href: string }[];
+
   @ApiPropertyOptional({ description: 'Store theme: dark or light', example: 'light' })
   @IsOptional()
   @IsString()
