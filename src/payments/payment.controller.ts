@@ -70,8 +70,14 @@ export class PaymentController {
 
     if (wavaEnabled) {
       try {
-        const result = await this.wavaService.getPaymentGateways(settings.wavaMerchantKey);
-        return { gateways: result.payment_gateways || [], wavaEnabled: true, wompiEnabled: false };
+        const result = await this.wavaService.getPaymentGateways(
+          settings.wavaMerchantKey,
+        );
+        return {
+          gateways: result.payment_gateways || [],
+          wavaEnabled: true,
+          wompiEnabled: false,
+        };
       } catch {
         return { gateways: [], wavaEnabled: false, wompiEnabled: false };
       }
@@ -97,16 +103,22 @@ export class PaymentController {
     const wavaEnabled = this.hasWava(settings);
 
     if (!wompiEnabled && !wavaEnabled) {
-      throw new BadRequestException('Pagos en linea no configurados para esta tienda');
+      throw new BadRequestException(
+        'Pagos en linea no configurados para esta tienda',
+      );
     }
 
-    this.logger.log(`Creating payment for order ${body.orderId} in tenant ${tenantSlug} (provider: ${wompiEnabled ? 'wompi' : 'wava'})`);
+    this.logger.log(
+      `Creating payment for order ${body.orderId} in tenant ${tenantSlug} (provider: ${wompiEnabled ? 'wompi' : 'wava'})`,
+    );
 
     const order = await this.orderRepo.findOne({
       where: { id: body.orderId, tenantId: settings.tenantId },
     });
     if (!order) {
-      this.logger.warn(`Order ${body.orderId} not found for tenant ${settings.tenantId}`);
+      this.logger.warn(
+        `Order ${body.orderId} not found for tenant ${settings.tenantId}`,
+      );
       throw new NotFoundException('Orden no encontrada');
     }
 
@@ -115,24 +127,41 @@ export class PaymentController {
       return { paymentUrl: order.wavaPaymentUrl, provider: 'wompi' };
     }
     if (!wompiEnabled && order.wavaPaymentUrl) {
-      return { paymentUrl: order.wavaPaymentUrl, wavaOrderId: order.wavaOrderId, provider: 'wava' };
+      return {
+        paymentUrl: order.wavaPaymentUrl,
+        wavaOrderId: order.wavaOrderId,
+        provider: 'wava',
+      };
     }
 
-    const ECOMMERCE_BASE = process.env.ECOMMERCE_BASE_URL || 'https://mipinta.shop';
+    const ECOMMERCE_BASE =
+      process.env.ECOMMERCE_BASE_URL || 'https://mipinta.shop';
     const sanitize = (url: string) =>
-      url.startsWith('http://localhost') ? url.replace(/http:\/\/localhost:\d+/, ECOMMERCE_BASE) : url;
+      url.startsWith('http://localhost')
+        ? url.replace(/http:\/\/localhost:\d+/, ECOMMERCE_BASE)
+        : url;
 
     const successUrl = sanitize(body.successUrl);
     const cancelUrl = sanitize(body.cancelUrl);
 
     const isCod = order.paymentMethod === 'contraentrega';
-    const chargeAmount = isCod ? Number(order.shippingCost) : Number(order.total);
+    const chargeAmount = isCod
+      ? Number(order.shippingCost)
+      : Number(order.total);
 
     if (wompiEnabled) {
       return this.createWompiPayment(settings, order, chargeAmount, successUrl);
     }
 
-    return this.createWavaPayment(settings, order, chargeAmount, isCod, successUrl, cancelUrl, sanitize(body.failureUrl || body.cancelUrl));
+    return this.createWavaPayment(
+      settings,
+      order,
+      chargeAmount,
+      isCod,
+      successUrl,
+      cancelUrl,
+      sanitize(body.failureUrl || body.cancelUrl),
+    );
   }
 
   private async createWompiPayment(
@@ -144,7 +173,7 @@ export class PaymentController {
     const amountInCents = Math.round(chargeAmount * 100);
     const reference = `${order.orderNumber}-${Date.now()}`;
 
-    const { checkoutUrl, signature } = this.wompiService.buildCheckoutUrl({
+    const { checkoutUrl } = this.wompiService.buildCheckoutUrl({
       publicKey: settings.wompiPublicKey,
       integritySecret: settings.wompiIntegritySecret,
       reference,
@@ -154,13 +183,16 @@ export class PaymentController {
       customerEmail: order.customerEmail || undefined,
     });
 
-    this.logger.log(`Wompi checkout URL built for ${order.orderNumber}, amount: ${amountInCents} cents, ref: ${reference}`);
+    this.logger.log(
+      `Wompi checkout URL built for ${order.orderNumber}, amount: ${amountInCents} cents, ref: ${reference}`,
+    );
 
     await this.orderRepo.update(order.id, {
       wompiTransactionId: reference,
       wompiPaymentStatus: 'PENDING',
       wavaPaymentUrl: checkoutUrl,
-      paymentMethod: order.paymentMethod === 'contraentrega' ? 'contraentrega' : 'wompi',
+      paymentMethod:
+        order.paymentMethod === 'contraentrega' ? 'contraentrega' : 'wompi',
     });
 
     return {
@@ -183,7 +215,9 @@ export class PaymentController {
       ? `Envio para pedido ${order.orderNumber} - ${settings.storeName}`
       : `Pedido ${order.orderNumber} - ${settings.storeName}`;
 
-    this.logger.log(`Calling Wava createPaymentLink for ${order.orderNumber}, amount: ${chargeAmount} (COD: ${isCod})`);
+    this.logger.log(
+      `Calling Wava createPaymentLink for ${order.orderNumber}, amount: ${chargeAmount} (COD: ${isCod})`,
+    );
     const link = await this.wavaService.createPaymentLink(
       settings.wavaMerchantKey,
       {
@@ -226,13 +260,20 @@ export class PaymentController {
       const settings = await this.getSettings(tenantSlug);
       if (this.hasWompi(settings)) {
         try {
-          const tx = await this.wompiService.getTransaction(settings.wompiPublicKey, transactionId);
+          const tx = await this.wompiService.getTransaction(
+            settings.wompiPublicKey,
+            transactionId,
+          );
           if (tx.status !== order.wompiPaymentStatus) {
-            await this.orderRepo.update(order.id, { wompiPaymentStatus: tx.status });
+            await this.orderRepo.update(order.id, {
+              wompiPaymentStatus: tx.status,
+            });
             order.wompiPaymentStatus = tx.status;
           }
         } catch (err) {
-          this.logger.warn(`Wompi status poll failed for ${transactionId}: ${err}`);
+          this.logger.warn(
+            `Wompi status poll failed for ${transactionId}: ${err}`,
+          );
         }
       }
     }
