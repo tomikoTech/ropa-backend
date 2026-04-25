@@ -213,9 +213,31 @@ export class ProductsService {
 
     // Handle variants update
     if (dto.variants) {
+      const incomingIds = new Set(
+        dto.variants.filter((v) => v.id).map((v) => v.id!),
+      );
+
+      // Remove variants not present in the payload
+      const existingVariants = await this.variantRepository.find({
+        where: { productId: id },
+      });
+      for (const ev of existingVariants) {
+        if (!incomingIds.has(ev.id)) {
+          try {
+            await this.variantRepository.remove(ev);
+          } catch (err: any) {
+            if (err?.code === '23503') {
+              ev.isActive = false;
+              await this.variantRepository.save(ev);
+            } else {
+              throw err;
+            }
+          }
+        }
+      }
+
       for (const v of dto.variants) {
         if (v.id) {
-          // Update existing — product already verified for tenant
           const existing = await this.variantRepository.findOne({
             where: { id: v.id, productId: id },
           });
@@ -225,14 +247,12 @@ export class ProductsService {
             if (v.priceOverride !== undefined)
               existing.priceOverride = v.priceOverride;
             if (v.isActive !== undefined) existing.isActive = v.isActive;
-            // Regenerate SKU if size or color changed
             if (v.size || v.color) {
               const baseSku = this.generateSku(
                 product.skuPrefix,
                 v.size || existing.size,
                 v.color || existing.color,
               );
-              // Only change if different from current, and ensure unique
               if (baseSku !== existing.sku) {
                 existing.sku = await this.ensureUniqueSku(baseSku, tenantId);
               }
@@ -240,7 +260,6 @@ export class ProductsService {
             await this.variantRepository.save(existing);
           }
         } else {
-          // Create new variant
           const sku = await this.ensureUniqueSku(
             this.generateSku(product.skuPrefix, v.size, v.color),
             tenantId,
