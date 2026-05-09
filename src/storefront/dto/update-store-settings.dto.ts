@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsBoolean, IsUUID, IsNumber, IsIn, Min, Max } from 'class-validator';
+import { IsString, IsOptional, IsBoolean, IsUUID, IsNumber, IsIn, IsArray, Min, Max } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class UpdateStoreSettingsDto {
@@ -175,6 +175,42 @@ export class UpdateStoreSettingsDto {
   @IsOptional()
   @IsString()
   storeDepartment?: string;
+
+  @ApiPropertyOptional({ example: 6000 })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  shippingExtraItemLocal?: number;
+
+  @ApiPropertyOptional({ example: 7500 })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  shippingExtraItemRegional?: number;
+
+  @ApiPropertyOptional({ example: 10000 })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  shippingExtraItemNational?: number;
+
+  @ApiPropertyOptional({ example: 40000 })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  shippingCostRemote?: number;
+
+  @ApiPropertyOptional({ example: 28000 })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  shippingExtraItemRemote?: number;
+
+  @ApiPropertyOptional({ description: 'Departments considered remote for shipping', example: ['La Guajira', 'Amazonas'] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  remoteDepartments?: string[];
 
   @ApiPropertyOptional({ example: 20000 })
   @IsOptional()
