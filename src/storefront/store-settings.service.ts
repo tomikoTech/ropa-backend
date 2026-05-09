@@ -124,6 +124,18 @@ export class StoreSettingsService {
       settings.shippingCostRegional = dto.shippingCostRegional;
     if (dto.storeDepartment !== undefined)
       settings.storeDepartment = dto.storeDepartment;
+    if (dto.shippingExtraItemLocal !== undefined)
+      settings.shippingExtraItemLocal = dto.shippingExtraItemLocal;
+    if (dto.shippingExtraItemRegional !== undefined)
+      settings.shippingExtraItemRegional = dto.shippingExtraItemRegional;
+    if (dto.shippingExtraItemNational !== undefined)
+      settings.shippingExtraItemNational = dto.shippingExtraItemNational;
+    if (dto.shippingCostRemote !== undefined)
+      settings.shippingCostRemote = dto.shippingCostRemote;
+    if (dto.shippingExtraItemRemote !== undefined)
+      settings.shippingExtraItemRemote = dto.shippingExtraItemRemote;
+    if (dto.remoteDepartments !== undefined)
+      settings.remoteDepartments = dto.remoteDepartments;
     if (dto.maxShippingCost !== undefined)
       settings.maxShippingCost = dto.maxShippingCost;
     if (dto.customHeroHtml !== undefined)

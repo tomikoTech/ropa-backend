@@ -153,6 +153,54 @@ export class StoreSettings extends TenantAwareEntity {
   storeDepartment: string;
 
   @Column({
+    name: 'shipping_extra_item_local',
+    type: 'decimal',
+    precision: 14,
+    scale: 2,
+    default: 0,
+  })
+  shippingExtraItemLocal: number;
+
+  @Column({
+    name: 'shipping_extra_item_regional',
+    type: 'decimal',
+    precision: 14,
+    scale: 2,
+    default: 0,
+  })
+  shippingExtraItemRegional: number;
+
+  @Column({
+    name: 'shipping_extra_item_national',
+    type: 'decimal',
+    precision: 14,
+    scale: 2,
+    default: 0,
+  })
+  shippingExtraItemNational: number;
+
+  @Column({
+    name: 'shipping_cost_remote',
+    type: 'decimal',
+    precision: 14,
+    scale: 2,
+    default: 0,
+  })
+  shippingCostRemote: number;
+
+  @Column({
+    name: 'shipping_extra_item_remote',
+    type: 'decimal',
+    precision: 14,
+    scale: 2,
+    default: 0,
+  })
+  shippingExtraItemRemote: number;
+
+  @Column({ name: 'remote_departments', type: 'jsonb', nullable: true })
+  remoteDepartments: string[] | null;
+
+  @Column({
     name: 'max_shipping_cost',
     type: 'decimal',
     precision: 14,

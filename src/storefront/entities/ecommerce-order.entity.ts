@@ -91,6 +91,9 @@ export class EcommerceOrder extends TenantAwareEntity {
   @Column({ name: 'shipping_city', nullable: true })
   shippingCity: string;
 
+  @Column({ name: 'shipping_department', nullable: true })
+  shippingDepartment: string;
+
   @Column({ name: 'shipping_address', nullable: true })
   shippingAddress: string;
 

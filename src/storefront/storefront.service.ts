@@ -90,6 +90,17 @@ export class StorefrontService {
       wompiEnabled: !!settings.wompiPublicKey && !!settings.wompiIntegritySecret,
       codEnabled: settings.codEnabled,
       flatShippingCost: Number(settings.flatShippingCost) || 0,
+      storeCityName: settings.storeCityName || null,
+      storeDepartment: settings.storeDepartment || null,
+      shippingCostLocal: Number(settings.shippingCostLocal) || 0,
+      shippingCostRegional: Number(settings.shippingCostRegional) || 0,
+      shippingCostNational: Number(settings.shippingCostNational) || 0,
+      shippingCostRemote: Number(settings.shippingCostRemote) || 0,
+      shippingExtraItemLocal: Number(settings.shippingExtraItemLocal) || 0,
+      shippingExtraItemRegional: Number(settings.shippingExtraItemRegional) || 0,
+      shippingExtraItemNational: Number(settings.shippingExtraItemNational) || 0,
+      shippingExtraItemRemote: Number(settings.shippingExtraItemRemote) || 0,
+      remoteDepartments: settings.remoteDepartments || null,
       customHeroHtml: settings.customHeroHtml || null,
       storeFontFamily: settings.storeFontFamily || null,
       fontSections: settings.fontSections || [],
@@ -444,7 +455,10 @@ export class StorefrontService {
       effectiveShippingStatus = undefined;
       effectivePaymentMethod = 'pickup';
     } else if (dto.deliveryMethod === 'shipping' || dto.deliveryMethod === 'cod') {
-      shippingCost = Number(settings.flatShippingCost) || 0;
+      const totalItemCount = dto.items.reduce((sum, i) => sum + i.quantity, 0);
+      shippingCost = this.calculateShippingCost(
+        settings, dto.shippingCity, dto.shippingDepartment, totalItemCount, dto.deliveryMethod,
+      );
       effectiveShippingStatus = ShippingStatus.PENDING_SHIPMENT;
       if (dto.deliveryMethod === 'cod') {
         effectivePaymentMethod = 'contraentrega';
@@ -477,6 +491,7 @@ export class StorefrontService {
       taxAmount: saleTotals.taxAmount,
       total: saleTotals.total,
       shippingCity: effectiveShippingCity,
+      shippingDepartment: dto.shippingDepartment || undefined,
       shippingAddress: effectiveShippingAddress,
       shippingAddressDetails: dto.shippingAddressDetails || undefined,
       shippingCost,
@@ -587,6 +602,64 @@ export class StorefrontService {
     };
   }
 
+  private static readonly DEFAULT_REMOTE_DEPARTMENTS = [
+    'la guajira', 'cesar', 'magdalena', 'atlantico', 'bolivar',
+    'sucre', 'cordoba', 'san andres y providencia', 'arauca',
+    'casanare', 'vichada', 'guainia', 'guaviare', 'vaupes',
+    'amazonas', 'putumayo', 'norte de santander', 'caqueta',
+  ];
+
+  private static normalizeDept(s: string): string {
+    return s.toLowerCase().trim().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  }
+
+  private calculateShippingCost(
+    settings: StoreSettings,
+    shippingCity: string | undefined,
+    shippingDepartment: string | undefined,
+    totalItemCount: number,
+    deliveryMethod: string | undefined,
+  ): number {
+    if (deliveryMethod === 'pickup') return 0;
+
+    const storeCity = StorefrontService.normalizeDept(settings.storeCityName || '');
+    const storeDept = StorefrontService.normalizeDept(settings.storeDepartment || '');
+    const destCity = StorefrontService.normalizeDept(shippingCity || '');
+    const destDept = StorefrontService.normalizeDept(shippingDepartment || '');
+
+    let baseCost: number;
+    let extraItemCost: number;
+
+    if (storeCity && destCity && storeCity === destCity) {
+      baseCost = Number(settings.shippingCostLocal) || 0;
+      extraItemCost = Number(settings.shippingExtraItemLocal) || 0;
+    } else if (storeDept && destDept && storeDept === destDept) {
+      baseCost = Number(settings.shippingCostRegional) || 0;
+      extraItemCost = Number(settings.shippingExtraItemRegional) || 0;
+    } else {
+      const remoteDepts = (settings.remoteDepartments || StorefrontService.DEFAULT_REMOTE_DEPARTMENTS)
+        .map(StorefrontService.normalizeDept);
+      if (destDept && remoteDepts.includes(destDept)) {
+        baseCost = Number(settings.shippingCostRemote) || 0;
+        extraItemCost = Number(settings.shippingExtraItemRemote) || 0;
+      } else {
+        baseCost = Number(settings.shippingCostNational) || 0;
+        extraItemCost = Number(settings.shippingExtraItemNational) || 0;
+      }
+    }
+
+    if (baseCost === 0) baseCost = Number(settings.flatShippingCost) || 0;
+
+    let finalCost = totalItemCount <= 1
+      ? baseCost
+      : baseCost + (totalItemCount - 1) * extraItemCost;
+
+    const maxCost = Number(settings.maxShippingCost) || 0;
+    if (maxCost > 0 && finalCost > maxCost) finalCost = maxCost;
+
+    return finalCost;
+  }
+
   /** Calculate COD surcharge and upfront/remaining amounts. */
   private calculateCodPricing(
     deliveryMethod: string | undefined,
@@ -652,7 +725,10 @@ export class StorefrontService {
 
     let shippingCost = 0;
     if (dto.deliveryMethod === 'shipping' || dto.deliveryMethod === 'cod') {
-      shippingCost = Number(settings.flatShippingCost) || 0;
+      const totalItemCount = dto.items.reduce((sum, i) => sum + i.quantity, 0);
+      shippingCost = this.calculateShippingCost(
+        settings, dto.shippingCity, dto.shippingDepartment, totalItemCount, dto.deliveryMethod,
+      );
     }
 
     // Calculate COD pricing
