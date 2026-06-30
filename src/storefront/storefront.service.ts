@@ -4,7 +4,13 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In, LessThanOrEqual, MoreThanOrEqual } from 'typeorm';
+import {
+  Repository,
+  In,
+  LessThanOrEqual,
+  MoreThanOrEqual,
+  SelectQueryBuilder,
+} from 'typeorm';
 import { StoreSettings } from './entities/store-settings.entity.js';
 import { EcommerceOrder } from './entities/ecommerce-order.entity.js';
 import { EcommerceOrderItem } from './entities/ecommerce-order-item.entity.js';
@@ -200,49 +206,140 @@ export class StorefrontService {
   async getProducts(
     tenantSlug: string,
     filters?: {
-      categorySlug?: string;
+      category?: string;
       gender?: string;
       search?: string;
+      inStock?: boolean;
+      sizes?: string[];
+      page?: number;
+      limit?: number | null;
     },
   ) {
     const { tenantId } = await this.resolveTenant(tenantSlug);
 
-    const qb = this.productRepo
-      .createQueryBuilder('p')
-      .leftJoinAndSelect('p.variants', 'v', 'v.is_active = true')
-      .leftJoinAndSelect('p.category', 'c')
-      .where('p.tenant_id = :tenantId', { tenantId })
-      .andWhere('p.is_published = true')
-      .andWhere('p.status = :status', { status: ProductStatus.ACTIVE });
+    // Resolve category filter once (slug OR name + descendants).
+    const catIds = filters?.category
+      ? await this.resolveCategoryIds(tenantId, filters.category)
+      : null;
 
-    if (filters?.categorySlug) {
-      qb.andWhere('c.slug = :catSlug', { catSlug: filters.categorySlug });
-    }
-    if (filters?.gender) {
-      qb.andWhere('p.gender = :gender', { gender: filters.gender });
-    }
-    if (filters?.search) {
-      const words = filters.search.trim().split(/\s+/).filter(Boolean);
-      const conditions = words.map(
-        (_, i) =>
-          `(p.name ILIKE :q${i} OR p.description ILIKE :q${i} OR c.name ILIKE :q${i})`,
-      );
-      const params: Record<string, string> = {};
-      words.forEach((w, i) => (params[`q${i}`] = `%${w}%`));
-      qb.andWhere(`(${conditions.join(' OR ')})`, params);
+    const sizes = (filters?.sizes ?? [])
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean);
+    const wantInStock = filters?.inStock === true;
 
-      const scoreTerms = words.map(
-        (_, i) =>
-          `(CASE WHEN p.name ILIKE :q${i} THEN 3 ELSE 0 END + ` +
-          `CASE WHEN c.name ILIKE :q${i} THEN 2 ELSE 0 END + ` +
-          `CASE WHEN p.description ILIKE :q${i} THEN 1 ELSE 0 END)`,
-      );
-      qb.orderBy(`(${scoreTerms.join(' + ')})`, 'DESC');
+    // All WHERE/ORDER filtering shared by the count, id-page and hydrate queries.
+    // Does NOT touch the `variants` collection: size/inStock use a correlated
+    // EXISTS so the returned `variants` array stays complete (incl. agotadas).
+    const applyFilters = (qb: SelectQueryBuilder<Product>) => {
+      qb.where('p.tenant_id = :tenantId', { tenantId })
+        .andWhere('p.is_published = true')
+        .andWhere('p.status = :status', { status: ProductStatus.ACTIVE });
+
+      if (filters?.category) {
+        if (!catIds || catIds.length === 0) {
+          // No matching category → preserve "0 results" behavior.
+          qb.andWhere('1 = 0');
+        } else {
+          qb.andWhere('p.category_id IN (:...catIds)', { catIds });
+        }
+      }
+      if (filters?.gender) {
+        qb.andWhere('p.gender = :gender', { gender: filters.gender });
+      }
+      if (filters?.search) {
+        const words = filters.search.trim().split(/\s+/).filter(Boolean);
+        const conditions = words.map(
+          (_, i) =>
+            `(p.name ILIKE :q${i} OR p.description ILIKE :q${i} OR ` +
+            `c.name ILIKE :q${i} OR p.sku_prefix ILIKE :q${i})`,
+        );
+        const params: Record<string, string> = {};
+        words.forEach((w, i) => (params[`q${i}`] = `%${w}%`));
+        qb.andWhere(`(${conditions.join(' OR ')})`, params);
+
+        const scoreTerms = words.map(
+          (_, i) =>
+            `(CASE WHEN p.name ILIKE :q${i} THEN 3 ELSE 0 END + ` +
+            `CASE WHEN c.name ILIKE :q${i} THEN 2 ELSE 0 END + ` +
+            `CASE WHEN p.sku_prefix ILIKE :q${i} THEN 2 ELSE 0 END + ` +
+            `CASE WHEN p.description ILIKE :q${i} THEN 1 ELSE 0 END)`,
+        );
+        qb.orderBy(`(${scoreTerms.join(' + ')})`, 'DESC');
+      } else {
+        qb.orderBy('p.created_at', 'DESC');
+      }
+
+      if (sizes.length > 0 || wantInStock) {
+        const variantConds = ['pv.product_id = p.id', 'pv.is_active = true'];
+        const subParams: Record<string, string> = {};
+        if (sizes.length > 0) {
+          const sizeOr = sizes.map((s, i) => {
+            // Pad with spaces so we match whole space-separated tokens:
+            // "Eur 42" matches size=42; "ML" does NOT match size=M.
+            const escaped = s.replace(/([%_\\])/g, '\\$1');
+            subParams[`vsize${i}`] = `% ${escaped} %`;
+            return `(' ' || LOWER(pv.size) || ' ') LIKE :vsize${i} ESCAPE '\\'`;
+          });
+          variantConds.push(`(${sizeOr.join(' OR ')})`);
+        }
+        const exists = wantInStock
+          ? `EXISTS (SELECT 1 FROM product_variants pv ` +
+            `JOIN stock st ON st.variant_id = pv.id AND st.tenant_id = p.tenant_id ` +
+            `WHERE ${variantConds.join(' AND ')} ` +
+            `GROUP BY pv.id HAVING COALESCE(SUM(st.quantity), 0) > 0)`
+          : `EXISTS (SELECT 1 FROM product_variants pv ` +
+            `WHERE ${variantConds.join(' AND ')})`;
+        qb.andWhere(exists, subParams);
+      }
+    };
+
+    // Optional pagination. Default (no limit) returns the full set (retrocompat).
+    const page = filters?.page && filters.page > 0 ? filters.page : 1;
+    const limit =
+      filters?.limit != null && filters.limit > 0 ? filters.limit : null;
+
+    let products: Product[];
+    let total: number;
+    if (limit === null) {
+      // Unpaginated path: identical query/shape as before (byte-compatible).
+      const qb = this.productRepo
+        .createQueryBuilder('p')
+        .leftJoinAndSelect('p.variants', 'v', 'v.is_active = true')
+        .leftJoinAndSelect('p.category', 'c');
+      applyFilters(qb);
+      products = await qb.getMany();
+      total = products.length;
     } else {
-      qb.orderBy('p.created_at', 'DESC');
-    }
+      // Paginated path: select the page of product ids WITHOUT the variants
+      // collection join (TypeORM's take/skip breaks with collection joins),
+      // then hydrate full entities preserving order.
+      const idQb = this.productRepo
+        .createQueryBuilder('p')
+        .leftJoin('p.category', 'c');
+      applyFilters(idQb);
+      total = await idQb.getCount();
+      const idRows = await idQb
+        .select('p.id', 'id')
+        .offset((page - 1) * limit)
+        .limit(limit)
+        .getRawMany<{ id: string }>();
+      const pageIds = idRows.map((r) => r.id);
 
-    const products = await qb.getMany();
+      if (pageIds.length === 0) {
+        products = [];
+      } else {
+        const hydrateQb = this.productRepo
+          .createQueryBuilder('p')
+          .leftJoinAndSelect('p.variants', 'v', 'v.is_active = true')
+          .leftJoinAndSelect('p.category', 'c')
+          .where('p.id IN (:...pageIds)', { pageIds });
+        const fetched = await hydrateQb.getMany();
+        const byId = new Map(fetched.map((p) => [p.id, p]));
+        products = pageIds
+          .map((id) => byId.get(id))
+          .filter((p): p is Product => p != null);
+      }
+    }
 
     // Load stock for each variant — sum across ALL warehouses (cascade logic)
     if (products.length > 0) {
@@ -270,7 +367,45 @@ export class StorefrontService {
       }
     }
 
-    return products;
+    return { products, total, page, limit };
+  }
+
+  /**
+   * Resolve a category filter (slug OR name, case-insensitive) to the set of
+   * matching category ids plus all of their descendants (tree via parentId).
+   * Returns [] when nothing matches.
+   */
+  private async resolveCategoryIds(
+    tenantId: string,
+    term: string,
+  ): Promise<string[]> {
+    const needle = term.trim().toLowerCase();
+    if (!needle) return [];
+
+    const cats = await this.categoryRepo.find({ where: { tenantId } });
+    const childrenByParent = new Map<string | null, Category[]>();
+    for (const c of cats) {
+      const key = c.parentId ?? null;
+      const list = childrenByParent.get(key) ?? [];
+      list.push(c);
+      childrenByParent.set(key, list);
+    }
+
+    const matched = cats.filter(
+      (c) =>
+        c.slug.toLowerCase() === needle || c.name.toLowerCase() === needle,
+    );
+
+    const ids = new Set<string>();
+    const addWithChildren = (cat: Category) => {
+      if (ids.has(cat.id)) return;
+      ids.add(cat.id);
+      for (const child of childrenByParent.get(cat.id) ?? []) {
+        addWithChildren(child);
+      }
+    };
+    matched.forEach(addWithChildren);
+    return [...ids];
   }
 
   async getProductBySlug(tenantSlug: string, productSlug: string) {

@@ -1,4 +1,13 @@
-import { Controller, Get, Post, Body, Param, Query } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  Query,
+  Res,
+} from '@nestjs/common';
+import type { Response } from 'express';
 import { ApiTags, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { Public } from '../common/decorators/public.decorator.js';
 import { StorefrontService } from './storefront.service.js';
@@ -45,20 +54,88 @@ export class StorefrontController {
   @Public()
   @Get(':tenantSlug/products')
   @ApiOperation({ summary: 'Listar productos publicados' })
-  @ApiQuery({ name: 'category', required: false })
-  @ApiQuery({ name: 'gender', required: false })
-  @ApiQuery({ name: 'search', required: false })
-  getProducts(
+  @ApiQuery({
+    name: 'category',
+    required: false,
+    type: String,
+    description:
+      'Filtra por categoría: acepta slug O nombre (case-insensitive) e incluye subcategorías.',
+  })
+  @ApiQuery({ name: 'gender', required: false, type: String })
+  @ApiQuery({
+    name: 'search',
+    required: false,
+    type: String,
+    description:
+      'Búsqueda parcial (case-insensitive) sobre nombre, descripción, categoría y prefijo de SKU.',
+  })
+  @ApiQuery({
+    name: 'inStock',
+    required: false,
+    type: Boolean,
+    description:
+      'Si es true, solo productos con al menos una variante activa con stock > 0. No recorta el array de variantes.',
+  })
+  @ApiQuery({
+    name: 'size',
+    required: false,
+    type: String,
+    description:
+      'Filtra por talla (case-insensitive, match por token: "42" matchea "Eur 42"). Acepta varias separadas por coma: "40,41".',
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: 'Página (default 1). Solo aplica si se envía limit.',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description:
+      'Tamaño de página. Default: sin límite (devuelve todos). Metadatos en headers X-Total-Count, X-Page, X-Limit.',
+  })
+  async getProducts(
     @Param('tenantSlug') tenantSlug: string,
-    @Query('category') categorySlug?: string,
+    @Res({ passthrough: true }) res: Response,
+    @Query('category') category?: string,
     @Query('gender') gender?: string,
     @Query('search') search?: string,
+    @Query('inStock') inStock?: string,
+    @Query('size') size?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
   ) {
-    return this.storefrontService.getProducts(tenantSlug, {
-      categorySlug,
-      gender,
-      search,
-    });
+    const sizes = size
+      ? size
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : undefined;
+    const pageNum = page ? parseInt(page, 10) : undefined;
+    const limitNum = limit ? parseInt(limit, 10) : undefined;
+
+    const { products, total, page: usedPage, limit: usedLimit } =
+      await this.storefrontService.getProducts(tenantSlug, {
+        category,
+        gender,
+        search,
+        inStock: inStock === 'true',
+        sizes,
+        page: pageNum,
+        limit: limitNum,
+      });
+
+    // Expose pagination metadata via headers only when paginating, so the
+    // default response (and its body shape) stays byte-identical to before.
+    if (usedLimit != null) {
+      res.setHeader('X-Total-Count', String(total));
+      res.setHeader('X-Page', String(usedPage));
+      res.setHeader('X-Limit', String(usedLimit));
+    }
+
+    return products;
   }
 
   @Public()
