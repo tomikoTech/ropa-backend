@@ -4,9 +4,10 @@ import { ProductsService } from './products.service.js';
 import { ProductsController } from './products.controller.js';
 import { Product } from './entities/product.entity.js';
 import { ProductVariant } from './entities/product-variant.entity.js';
+import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Product, ProductVariant])],
+  imports: [TypeOrmModule.forFeature([Product, ProductVariant, StoreSettings])],
   controllers: [ProductsController],
   providers: [ProductsService],
   exports: [ProductsService],

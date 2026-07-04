@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Product } from './entities/product.entity.js';
 import { ProductVariant } from './entities/product-variant.entity.js';
+import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
 import { CreateProductDto } from './dto/create-product.dto.js';
 import { UpdateProductDto } from './dto/update-product.dto.js';
 
@@ -13,7 +14,17 @@ export class ProductsService {
     private readonly productRepository: Repository<Product>,
     @InjectRepository(ProductVariant)
     private readonly variantRepository: Repository<ProductVariant>,
+    @InjectRepository(StoreSettings)
+    private readonly storeSettingsRepo: Repository<StoreSettings>,
   ) {}
+
+  // Cuando el tenant tiene la gestión automática de frascos activada,
+  // cada loción tiene un "Frasco {nombre}" vinculado cuyo nombre se
+  // sincroniza con el de la loción. Desactivado para el resto de tenants.
+  private async isFrascoAutoManaged(tenantId: string): Promise<boolean> {
+    const s = await this.storeSettingsRepo.findOne({ where: { tenantId } });
+    return !!s?.frascoAutoManaged;
+  }
 
   private generateSkuPrefix(name: string): string {
     return name
@@ -213,6 +224,35 @@ export class ProductsService {
     }
 
     await this.productRepository.save(product);
+
+    // Sincronía de nombre: si cambió el nombre y tiene un frasco vinculado,
+    // renombrar el frasco a "Frasco {nombre}" (solo tenants con auto-gestión).
+    if (
+      dto.name !== undefined &&
+      product.frascoVariantId &&
+      (await this.isFrascoAutoManaged(tenantId))
+    ) {
+      const frascoVariant = await this.variantRepository.findOne({
+        where: { id: product.frascoVariantId, tenantId },
+      });
+      if (frascoVariant) {
+        const frasco = await this.productRepository.findOne({
+          where: { id: frascoVariant.productId, tenantId },
+        });
+        if (frasco) {
+          const newName = `Frasco ${product.name}`;
+          if (frasco.name !== newName) {
+            frasco.name = newName;
+            frasco.slug = await this.ensureUniqueSlug(
+              this.generateSlug(newName),
+              tenantId,
+              frasco.id,
+            );
+            await this.productRepository.save(frasco);
+          }
+        }
+      }
+    }
 
     // Handle variants update
     if (dto.variants) {

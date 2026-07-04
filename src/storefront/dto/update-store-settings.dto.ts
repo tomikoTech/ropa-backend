@@ -97,6 +97,14 @@ export class UpdateStoreSettingsDto {
   @IsString({ each: true })
   collaboratorModules?: string[];
 
+  @ApiPropertyOptional({
+    example: true,
+    description: 'Gestión automática de frascos vinculados (perfumería)',
+  })
+  @IsOptional()
+  @IsBoolean()
+  frascoAutoManaged?: boolean;
+
   @ApiPropertyOptional({ example: 'Bienvenidos a nuestra tienda' })
   @IsOptional()
   @IsString()

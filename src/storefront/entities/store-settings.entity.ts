@@ -280,6 +280,11 @@ export class StoreSettings extends TenantAwareEntity {
   @Column({ name: 'collaborator_modules', type: 'jsonb', nullable: true })
   collaboratorModules: string[] | null;
 
+  // Perfumería: gestión automática de frascos vinculados a lociones
+  // (crear "Frasco {nombre}" y sincronizar su nombre). Solo este tenant.
+  @Column({ name: 'frasco_auto_managed', default: false })
+  frascoAutoManaged: boolean;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 

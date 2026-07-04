@@ -95,6 +95,8 @@ export class StoreSettingsService {
       settings.invoiceThankYouNote = dto.invoiceThankYouNote;
     if (dto.collaboratorModules !== undefined)
       settings.collaboratorModules = dto.collaboratorModules;
+    if (dto.frascoAutoManaged !== undefined)
+      settings.frascoAutoManaged = dto.frascoAutoManaged;
     if (dto.heroTitle !== undefined) settings.heroTitle = dto.heroTitle;
     if (dto.heroSubtitle !== undefined)
       settings.heroSubtitle = dto.heroSubtitle;

@@ -299,28 +299,26 @@ export class PosService {
         }
 
         // Perfumería: si el producto (loción) tiene un frasco vinculado,
-        // descontar 1 frasco por cada unidad vendida.
+        // descontar 1 frasco por cada unidad vendida. NO bloquea la venta:
+        // descuenta lo disponible y el remanente deja el frasco en negativo
+        // (aviso de que hay que reponer).
         const frascoVariantId = data.variant.product.frascoVariantId;
         if (frascoVariantId) {
           const frascoStocks = await stockRepo.find({
             where: { variantId: frascoVariantId, tenantId },
             order: { quantity: 'DESC' },
           });
-          const totalFrasco = frascoStocks.reduce(
-            (s, st) => s + Number(st.quantity),
-            0,
-          );
-          if (totalFrasco < data.quantity) {
-            throw new BadRequestException(
-              `Stock de frasco insuficiente para "${data.variant.product.name}". Disponible: ${totalFrasco}, requerido: ${data.quantity}`,
-            );
-          }
           let frascoRemaining = data.quantity;
-          for (const fs of frascoStocks) {
-            if (frascoRemaining <= 0) break;
+          for (let i = 0; i < frascoStocks.length && frascoRemaining > 0; i++) {
+            const fs = frascoStocks[i];
+            const isLast = i === frascoStocks.length - 1;
             const avail = Number(fs.quantity);
-            if (avail <= 0) continue;
-            const toDeduct = Math.min(avail, frascoRemaining);
+            // En la última fila se descuenta todo el remanente (puede quedar
+            // negativo); en las demás, solo lo positivo disponible.
+            const toDeduct = isLast
+              ? frascoRemaining
+              : Math.min(Math.max(avail, 0), frascoRemaining);
+            if (toDeduct <= 0) continue;
             fs.quantity = avail - toDeduct;
             frascoRemaining -= toDeduct;
             await stockRepo.save(fs);
