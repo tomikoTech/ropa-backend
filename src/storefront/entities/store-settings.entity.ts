@@ -266,6 +266,16 @@ export class StoreSettings extends TenantAwareEntity {
   @Column({ name: 'iva_enabled', default: true })
   ivaEnabled: boolean;
 
+  // Textos configurables de la factura impresa (por tenant)
+  @Column({ name: 'invoice_tagline', type: 'text', nullable: true })
+  invoiceTagline: string | null;
+
+  @Column({ name: 'invoice_footer_note', type: 'text', nullable: true })
+  invoiceFooterNote: string | null;
+
+  @Column({ name: 'invoice_thank_you_note', type: 'text', nullable: true })
+  invoiceThankYouNote: string | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 

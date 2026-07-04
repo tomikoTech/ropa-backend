@@ -87,6 +87,12 @@ export class StoreSettingsService {
     if (dto.tiktokUrl !== undefined) settings.tiktokUrl = dto.tiktokUrl;
     if (dto.address !== undefined) settings.address = dto.address;
     if (dto.ivaEnabled !== undefined) settings.ivaEnabled = dto.ivaEnabled;
+    if (dto.invoiceTagline !== undefined)
+      settings.invoiceTagline = dto.invoiceTagline;
+    if (dto.invoiceFooterNote !== undefined)
+      settings.invoiceFooterNote = dto.invoiceFooterNote;
+    if (dto.invoiceThankYouNote !== undefined)
+      settings.invoiceThankYouNote = dto.invoiceThankYouNote;
     if (dto.heroTitle !== undefined) settings.heroTitle = dto.heroTitle;
     if (dto.heroSubtitle !== undefined)
       settings.heroSubtitle = dto.heroSubtitle;

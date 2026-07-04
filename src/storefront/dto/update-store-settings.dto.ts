@@ -70,6 +70,23 @@ export class UpdateStoreSettingsDto {
   @IsBoolean()
   ivaEnabled?: boolean;
 
+  @ApiPropertyOptional({ example: 'La fragancia que mereces' })
+  @IsOptional()
+  @IsString()
+  invoiceTagline?: string;
+
+  @ApiPropertyOptional({
+    example: 'Recuerda que esta factura está sujeta a un descuento en los 30 días vigentes',
+  })
+  @IsOptional()
+  @IsString()
+  invoiceFooterNote?: string;
+
+  @ApiPropertyOptional({ example: 'GRACIAS POR SU CONFIANZA' })
+  @IsOptional()
+  @IsString()
+  invoiceThankYouNote?: string;
+
   @ApiPropertyOptional({ example: 'Bienvenidos a nuestra tienda' })
   @IsOptional()
   @IsString()
