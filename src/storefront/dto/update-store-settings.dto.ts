@@ -87,6 +87,16 @@ export class UpdateStoreSettingsDto {
   @IsString()
   invoiceThankYouNote?: string;
 
+  @ApiPropertyOptional({
+    type: [String],
+    example: ['pos', 'sales', 'inventory', 'products', 'categories', 'warehouses'],
+    description: 'Keys de módulos visibles para el rol COLABORADOR',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  collaboratorModules?: string[];
+
   @ApiPropertyOptional({ example: 'Bienvenidos a nuestra tienda' })
   @IsOptional()
   @IsString()

@@ -76,6 +76,12 @@ export class UpdateProductDto {
   @IsUUID()
   categoryId?: string | null;
 
+  @ApiPropertyOptional({ description: 'Frasco (variante) vinculado' })
+  @IsOptional()
+  @ValidateIf((_o, value) => value !== null)
+  @IsUUID()
+  frascoVariantId?: string | null;
+
   @ApiPropertyOptional({ enum: ProductStatus })
   @IsOptional()
   @IsEnum(ProductStatus)

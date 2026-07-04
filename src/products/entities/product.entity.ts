@@ -56,6 +56,11 @@ export class Product extends TenantAwareEntity {
   @Column({ name: 'category_id', nullable: true })
   categoryId: string;
 
+  // Frasco (variante) que consume este producto al venderse. Usado en
+  // perfumería: al vender 1 loción se descuenta también 1 de este frasco.
+  @Column({ name: 'frasco_variant_id', type: 'uuid', nullable: true })
+  frascoVariantId: string | null;
+
   @Column({
     type: 'enum',
     enum: ProductStatus,

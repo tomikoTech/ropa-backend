@@ -62,6 +62,14 @@ export class CreateProductDto {
   @IsUUID()
   categoryId?: string;
 
+  @ApiPropertyOptional({
+    example: 'uuid-variante-frasco',
+    description: 'Frasco (variante) que se descuenta al vender este producto',
+  })
+  @IsOptional()
+  @IsUUID()
+  frascoVariantId?: string;
+
   @ApiPropertyOptional({ example: 19 })
   @IsOptional()
   @IsNumber()

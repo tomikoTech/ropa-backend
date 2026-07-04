@@ -297,6 +297,48 @@ export class PosService {
           });
           await movementRepo.save(movement);
         }
+
+        // Perfumería: si el producto (loción) tiene un frasco vinculado,
+        // descontar 1 frasco por cada unidad vendida.
+        const frascoVariantId = data.variant.product.frascoVariantId;
+        if (frascoVariantId) {
+          const frascoStocks = await stockRepo.find({
+            where: { variantId: frascoVariantId, tenantId },
+            order: { quantity: 'DESC' },
+          });
+          const totalFrasco = frascoStocks.reduce(
+            (s, st) => s + Number(st.quantity),
+            0,
+          );
+          if (totalFrasco < data.quantity) {
+            throw new BadRequestException(
+              `Stock de frasco insuficiente para "${data.variant.product.name}". Disponible: ${totalFrasco}, requerido: ${data.quantity}`,
+            );
+          }
+          let frascoRemaining = data.quantity;
+          for (const fs of frascoStocks) {
+            if (frascoRemaining <= 0) break;
+            const avail = Number(fs.quantity);
+            if (avail <= 0) continue;
+            const toDeduct = Math.min(avail, frascoRemaining);
+            fs.quantity = avail - toDeduct;
+            frascoRemaining -= toDeduct;
+            await stockRepo.save(fs);
+            await movementRepo.save(
+              movementRepo.create({
+                variantId: frascoVariantId,
+                warehouseId: fs.warehouseId,
+                movementType: MovementType.OUT,
+                quantity: -toDeduct,
+                referenceType: 'SALE',
+                referenceId: savedSale.id,
+                notes: `Frasco por venta ${saleNumber}`,
+                createdById: userId,
+                tenantId,
+              }),
+            );
+          }
+        }
       }
 
       // Create payments (only regular, not credit)

@@ -93,6 +93,8 @@ export class StoreSettingsService {
       settings.invoiceFooterNote = dto.invoiceFooterNote;
     if (dto.invoiceThankYouNote !== undefined)
       settings.invoiceThankYouNote = dto.invoiceThankYouNote;
+    if (dto.collaboratorModules !== undefined)
+      settings.collaboratorModules = dto.collaboratorModules;
     if (dto.heroTitle !== undefined) settings.heroTitle = dto.heroTitle;
     if (dto.heroSubtitle !== undefined)
       settings.heroSubtitle = dto.heroSubtitle;

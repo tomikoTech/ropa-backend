@@ -276,6 +276,10 @@ export class StoreSettings extends TenantAwareEntity {
   @Column({ name: 'invoice_thank_you_note', type: 'text', nullable: true })
   invoiceThankYouNote: string | null;
 
+  // Módulos (keys de nav) que puede ver el rol COLABORADOR. null = default.
+  @Column({ name: 'collaborator_modules', type: 'jsonb', nullable: true })
+  collaboratorModules: string[] | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 
