@@ -260,6 +260,12 @@ export class StoreSettings extends TenantAwareEntity {
   @Column({ name: 'wompi_events_secret', nullable: true })
   wompiEventsSecret: string;
 
+  // ─── Facturación / impuestos (por tenant) ───
+  // Cuando está en false, las ventas se registran sin IVA (tasa 0),
+  // ignorando el tax_rate por producto. Default true = comportamiento previo.
+  @Column({ name: 'iva_enabled', default: true })
+  ivaEnabled: boolean;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 

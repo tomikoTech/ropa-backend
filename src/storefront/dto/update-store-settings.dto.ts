@@ -62,6 +62,14 @@ export class UpdateStoreSettingsDto {
   @IsString()
   address?: string;
 
+  @ApiPropertyOptional({
+    example: false,
+    description: 'Si es false, las ventas se registran sin IVA (tasa 0).',
+  })
+  @IsOptional()
+  @IsBoolean()
+  ivaEnabled?: boolean;
+
   @ApiPropertyOptional({ example: 'Bienvenidos a nuestra tienda' })
   @IsOptional()
   @IsString()

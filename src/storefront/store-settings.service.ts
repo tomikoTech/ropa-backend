@@ -86,6 +86,7 @@ export class StoreSettingsService {
     if (dto.facebookUrl !== undefined) settings.facebookUrl = dto.facebookUrl;
     if (dto.tiktokUrl !== undefined) settings.tiktokUrl = dto.tiktokUrl;
     if (dto.address !== undefined) settings.address = dto.address;
+    if (dto.ivaEnabled !== undefined) settings.ivaEnabled = dto.ivaEnabled;
     if (dto.heroTitle !== undefined) settings.heroTitle = dto.heroTitle;
     if (dto.heroSubtitle !== undefined)
       settings.heroSubtitle = dto.heroSubtitle;

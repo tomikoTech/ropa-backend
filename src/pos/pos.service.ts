@@ -94,6 +94,13 @@ export class PosService {
         }
       }
 
+      // IVA config per tenant: some stores (e.g. perfumería) operate without
+      // IVA. When disabled, force taxRate 0 for every line (ignores product tax_rate).
+      const storeSettings = await manager
+        .getRepository(StoreSettings)
+        .findOne({ where: { tenantId } });
+      const ivaEnabled = storeSettings ? storeSettings.ivaEnabled : true;
+
       // Load and validate all variants + stock
       const lineCalcs: LineCalculation[] = [];
       const variantData: {
@@ -161,7 +168,7 @@ export class PosService {
         const unitPrice = variant.priceOverride
           ? Number(variant.priceOverride)
           : Number(variant.product.basePrice);
-        const taxRate = Number(variant.product.taxRate);
+        const taxRate = ivaEnabled ? Number(variant.product.taxRate) : 0;
         const discountPercent = item.discountPercent || 0;
 
         const lineCalc = this.taxService.calculateLine(
