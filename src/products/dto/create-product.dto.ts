@@ -1,5 +1,6 @@
 import {
   IsArray,
+  IsBoolean,
   IsEnum,
   IsNotEmpty,
   IsNumber,
@@ -69,6 +70,14 @@ export class CreateProductDto {
   @IsOptional()
   @IsUUID()
   frascoVariantId?: string;
+
+  @ApiPropertyOptional({
+    example: true,
+    description: 'Crear y vincular automáticamente un "Frasco {nombre}" (perfumería)',
+  })
+  @IsOptional()
+  @IsBoolean()
+  autoCreateFrasco?: boolean;
 
   @ApiPropertyOptional({ example: 19 })
   @IsOptional()

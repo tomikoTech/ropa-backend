@@ -4,6 +4,9 @@ import { Repository } from 'typeorm';
 import { Product } from './entities/product.entity.js';
 import { ProductVariant } from './entities/product-variant.entity.js';
 import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
+import { Category } from '../categories/entities/category.entity.js';
+import { Warehouse } from '../inventory/entities/warehouse.entity.js';
+import { Stock } from '../inventory/entities/stock.entity.js';
 import { CreateProductDto } from './dto/create-product.dto.js';
 import { UpdateProductDto } from './dto/update-product.dto.js';
 
@@ -16,7 +19,88 @@ export class ProductsService {
     private readonly variantRepository: Repository<ProductVariant>,
     @InjectRepository(StoreSettings)
     private readonly storeSettingsRepo: Repository<StoreSettings>,
+    @InjectRepository(Category)
+    private readonly categoryRepository: Repository<Category>,
+    @InjectRepository(Warehouse)
+    private readonly warehouseRepository: Repository<Warehouse>,
+    @InjectRepository(Stock)
+    private readonly stockRepository: Repository<Stock>,
   ) {}
+
+  // Crea un "Frasco {nombre}" en la categoría Frascos, con una variante y
+  // stock 0 en la bodega FRASCOS, y lo vincula a la loción. Devuelve el
+  // variantId del frasco (o null si no existe la categoría Frascos).
+  private async createFrascoForProduct(
+    locion: Product,
+    tenantId: string,
+  ): Promise<string | null> {
+    const frascosCat = await this.categoryRepository
+      .createQueryBuilder('c')
+      .where('c.tenant_id = :tenantId', { tenantId })
+      .andWhere('LOWER(c.name) = :n', { n: 'frascos' })
+      .getOne();
+    if (!frascosCat) return null;
+
+    const name = `Frasco ${locion.name}`;
+    let skuPrefix = this.generateSkuPrefix(name);
+    let n = 1;
+    while (
+      await this.productRepository.findOne({ where: { skuPrefix, tenantId } })
+    ) {
+      n += 1;
+      skuPrefix = `${this.generateSkuPrefix(name)}${n}`;
+    }
+    const slug = await this.ensureUniqueSlug(this.generateSlug(name), tenantId);
+
+    const frasco = this.productRepository.create({
+      name,
+      skuPrefix,
+      slug,
+      basePrice: 0,
+      costPrice: 0,
+      gender: locion.gender,
+      categoryId: frascosCat.id,
+      taxRate: 0,
+      imageUrls: [],
+      description: '[auto-frasco]',
+      tenantId,
+    });
+    const savedFrasco = await this.productRepository.save(frasco);
+
+    const sku = await this.ensureUniqueSku(
+      this.generateSku(skuPrefix, 'Unica', 'Unico'),
+      tenantId,
+    );
+    const variant = this.variantRepository.create({
+      productId: savedFrasco.id,
+      sku,
+      size: 'Única',
+      color: 'Único',
+      barcode: this.generateBarcode(),
+      tenantId,
+    });
+    const savedVariant = await this.variantRepository.save(variant);
+
+    // Stock 0 en bodega FRASCOS (si existe)
+    const frascosWh = await this.warehouseRepository
+      .createQueryBuilder('w')
+      .where('w.tenant_id = :tenantId', { tenantId })
+      .andWhere('LOWER(w.name) = :n', { n: 'frascos' })
+      .getOne();
+    if (frascosWh) {
+      await this.stockRepository.save(
+        this.stockRepository.create({
+          variantId: savedVariant.id,
+          warehouseId: frascosWh.id,
+          quantity: 0,
+          minStock: 0,
+          tenantId,
+        }),
+      );
+    }
+
+    return savedVariant.id;
+  }
 
   // Cuando el tenant tiene la gestión automática de frascos activada,
   // cada loción tiene un "Frasco {nombre}" vinculado cuyo nombre se
@@ -164,6 +248,20 @@ export class ProductsService {
           tenantId,
         });
         await this.variantRepository.save(variant);
+      }
+    }
+
+    // Auto-crear frasco vinculado (perfumería): opt-in por producto y
+    // gated por el flag del tenant.
+    if (
+      dto.autoCreateFrasco &&
+      !dto.frascoVariantId &&
+      (await this.isFrascoAutoManaged(tenantId))
+    ) {
+      const frascoVariantId = await this.createFrascoForProduct(saved, tenantId);
+      if (frascoVariantId) {
+        saved.frascoVariantId = frascoVariantId;
+        await this.productRepository.save(saved);
       }
     }
 
