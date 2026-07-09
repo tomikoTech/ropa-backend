@@ -11,12 +11,17 @@ import { timingSafeEqual } from 'crypto';
 import { Request } from 'express';
 
 /**
- * Guarda las rutas admin del agente Canario. Espera:
+ * Guarda las rutas admin de escritura (agente Canario). Espera:
  *   Authorization: Bearer <MIPINTA_ADMIN_TOKEN>
  *
- * - El token se compara (timing-safe) contra la env var MIPINTA_ADMIN_TOKEN.
- * - Si MIPINTA_ADMIN_TENANT está definido, el :tenantSlug del path debe coincidir
- *   (así el token "corresponde" a un tenant concreto, p.ej. the-culture).
+ * El token autentica al SERVICIO llamador (genérico, multi-tenant): el tenant
+ * sobre el que se opera sale del :tenantSlug del path, no del token. Así el
+ * mismo mecanismo sirve para cualquier tenant, presente o futuro.
+ *
+ * - El token se compara (timing-safe) contra MIPINTA_ADMIN_TOKEN.
+ * - MIPINTA_ADMIN_TENANT es OPCIONAL y actúa como allowlist (uno o varios slugs
+ *   separados por coma). Si se define, el :tenantSlug del path debe estar en la
+ *   lista; si NO se define (recomendado), se permite cualquier tenant.
  *
  * Las rutas se marcan además con @Public() para saltar el JwtAuthGuard global.
  */
@@ -43,13 +48,16 @@ export class AdminTokenGuard implements CanActivate {
       throw new UnauthorizedException('Token de autorización inválido');
     }
 
-    // Validar que el token corresponde al tenant del path.
-    const allowedTenant = this.configService.get<string>(
-      'MIPINTA_ADMIN_TENANT',
-    );
-    if (allowedTenant) {
+    // Allowlist OPCIONAL de tenants. Sin ella, el token opera sobre cualquier
+    // tenant (el path decide). Con ella, el :tenantSlug debe estar en la lista.
+    const allowlistRaw = this.configService.get<string>('MIPINTA_ADMIN_TENANT');
+    if (allowlistRaw && allowlistRaw.trim()) {
+      const allowed = allowlistRaw
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
       const tenantSlug = (request.params as Record<string, string>)?.tenantSlug;
-      if (tenantSlug !== allowedTenant) {
+      if (!allowed.includes(tenantSlug)) {
         throw new ForbiddenException(
           'El token no está autorizado para este tenant',
         );
