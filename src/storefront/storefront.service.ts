@@ -210,6 +210,7 @@ export class StorefrontService {
       gender?: string;
       search?: string;
       inStock?: boolean;
+      onlyAvailable?: boolean;
       sizes?: string[];
       page?: number;
       limit?: number | null;
@@ -245,6 +246,9 @@ export class StorefrontService {
       }
       if (filters?.gender) {
         qb.andWhere('p.gender = :gender', { gender: filters.gender });
+      }
+      if (filters?.onlyAvailable) {
+        qb.andWhere('p.is_available = true');
       }
       if (filters?.search) {
         const words = filters.search.trim().split(/\s+/).filter(Boolean);
@@ -367,6 +371,14 @@ export class StorefrontService {
       }
     }
 
+    // Disponibilidad a nivel producto: `available` = publicado && no agotado.
+    // Tenants sin control de inventario por unidad (p.ej. the-culture) usan
+    // solo esta bandera; el resto la ignora.
+    for (const product of products) {
+      (product as Product & { available: boolean }).available =
+        product.isPublished && product.isAvailable;
+    }
+
     return { products, total, page, limit };
   }
 
@@ -447,6 +459,9 @@ export class StorefrontService {
           stockMap.get(variant.id) ?? 0;
       }
     }
+
+    (product as Product & { available: boolean }).available =
+      product.isPublished && product.isAvailable;
 
     return product;
   }

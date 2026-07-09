@@ -77,6 +77,13 @@ export class StorefrontController {
       'Si es true, solo productos con al menos una variante activa con stock > 0. No recorta el array de variantes.',
   })
   @ApiQuery({
+    name: 'onlyAvailable',
+    required: false,
+    type: Boolean,
+    description:
+      'Si es true, solo productos con disponibilidad activa (is_available = true).',
+  })
+  @ApiQuery({
     name: 'size',
     required: false,
     type: String,
@@ -103,6 +110,7 @@ export class StorefrontController {
     @Query('gender') gender?: string,
     @Query('search') search?: string,
     @Query('inStock') inStock?: string,
+    @Query('onlyAvailable') onlyAvailable?: string,
     @Query('size') size?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
@@ -122,6 +130,7 @@ export class StorefrontController {
         gender,
         search,
         inStock: inStock === 'true',
+        onlyAvailable: onlyAvailable === 'true',
         sizes,
         page: pageNum,
         limit: limitNum,

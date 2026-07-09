@@ -95,6 +95,12 @@ export class Product extends TenantAwareEntity {
   @Column({ name: 'published_at', type: 'timestamptz', nullable: true })
   publishedAt: Date;
 
+  // Disponibilidad a nivel producto, independiente del stock por unidad.
+  // Tenants sin control de inventario (p.ej. the-culture) usan solo esta
+  // bandera: `available` = isPublished && isAvailable. Marcar false = agotado.
+  @Column({ name: 'is_available', default: true })
+  isAvailable: boolean;
+
   @OneToMany(() => ProductVariant, (v) => v.product, {
     cascade: true,
     eager: false,
