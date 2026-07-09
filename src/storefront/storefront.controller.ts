@@ -84,6 +84,13 @@ export class StorefrontController {
       'Si es true, solo productos con disponibilidad activa (is_available = true).',
   })
   @ApiQuery({
+    name: 'sort',
+    required: false,
+    type: String,
+    description:
+      'Orden. Default: más reciente primero (created_at DESC). Opciones: price_asc, price_desc.',
+  })
+  @ApiQuery({
     name: 'size',
     required: false,
     type: String,
@@ -112,6 +119,7 @@ export class StorefrontController {
     @Query('inStock') inStock?: string,
     @Query('onlyAvailable') onlyAvailable?: string,
     @Query('size') size?: string,
+    @Query('sort') sort?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
   ) {
@@ -132,6 +140,7 @@ export class StorefrontController {
         inStock: inStock === 'true',
         onlyAvailable: onlyAvailable === 'true',
         sizes,
+        sort,
         page: pageNum,
         limit: limitNum,
       });

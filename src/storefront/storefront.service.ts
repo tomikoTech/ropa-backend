@@ -212,6 +212,7 @@ export class StorefrontService {
       inStock?: boolean;
       onlyAvailable?: boolean;
       sizes?: string[];
+      sort?: string;
       page?: number;
       limit?: number | null;
     },
@@ -260,18 +261,20 @@ export class StorefrontService {
         const params: Record<string, string> = {};
         words.forEach((w, i) => (params[`q${i}`] = `%${w}%`));
         qb.andWhere(`(${conditions.join(' OR ')})`, params);
+      }
 
-        const scoreTerms = words.map(
-          (_, i) =>
-            `(CASE WHEN p.name ILIKE :q${i} THEN 3 ELSE 0 END + ` +
-            `CASE WHEN c.name ILIKE :q${i} THEN 2 ELSE 0 END + ` +
-            `CASE WHEN p.sku_prefix ILIKE :q${i} THEN 2 ELSE 0 END + ` +
-            `CASE WHEN p.description ILIKE :q${i} THEN 1 ELSE 0 END)`,
-        );
-        qb.orderBy(`(${scoreTerms.join(' + ')})`, 'DESC');
+      // Orden por defecto: MÁS RECIENTE primero (created_at DESC), tanto en el
+      // listado como en la búsqueda — el agente Canario ofrece de arriba hacia
+      // abajo. Desempate: published_at DESC, id DESC (determinista).
+      // ?sort opcional para otros órdenes (precio); el default es recencia.
+      if (filters?.sort === 'price_asc') {
+        qb.orderBy('p.base_price', 'ASC').addOrderBy('p.created_at', 'DESC');
+      } else if (filters?.sort === 'price_desc') {
+        qb.orderBy('p.base_price', 'DESC').addOrderBy('p.created_at', 'DESC');
       } else {
         qb.orderBy('p.created_at', 'DESC');
       }
+      qb.addOrderBy('p.published_at', 'DESC').addOrderBy('p.id', 'DESC');
 
       if (sizes.length > 0 || wantInStock) {
         const variantConds = ['pv.product_id = p.id', 'pv.is_active = true'];
