@@ -108,7 +108,9 @@ export class AdminProductsService {
       {
         name: dto.name,
         description: dto.description,
-        basePrice: dto.basePrice,
+        // Opcional: sin precio se guarda 0 = "precio a consultar". El dueño
+        // lo completa luego (web admin o futura acción de Canario).
+        basePrice: dto.basePrice ?? 0,
         gender: this.normalizeGender(dto.gender),
         categoryId,
         imageUrls,

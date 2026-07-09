@@ -1,4 +1,5 @@
 import {
+  ArrayMinSize,
   IsArray,
   IsBoolean,
   IsNotEmpty,
@@ -46,10 +47,15 @@ export class CreateAdminProductDto {
   @IsString()
   description?: string;
 
-  @ApiProperty({ example: 50000, description: 'Precio en pesos (entero)' })
+  @ApiPropertyOptional({
+    example: 50000,
+    description:
+      'Precio en pesos (entero). Opcional: si no viene se guarda 0 = "precio a consultar"',
+  })
+  @IsOptional()
   @IsNumber()
   @Min(0)
-  basePrice: number;
+  basePrice?: number;
 
   @ApiPropertyOptional({
     example: 'UNISEX',
@@ -74,12 +80,15 @@ export class CreateAdminProductDto {
   @Type(() => AdminVariantDto)
   variants?: AdminVariantDto[];
 
-  @ApiPropertyOptional({ type: [AdminImageBase64Dto] })
-  @IsOptional()
+  @ApiProperty({
+    type: [AdminImageBase64Dto],
+    description: 'Al menos una imagen (obligatorio)',
+  })
   @IsArray()
+  @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => AdminImageBase64Dto)
-  images_base64?: AdminImageBase64Dto[];
+  images_base64: AdminImageBase64Dto[];
 
   @ApiPropertyOptional({ example: true, default: true })
   @IsOptional()
