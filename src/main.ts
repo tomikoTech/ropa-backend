@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { NestExpressApplication } from '@nestjs/platform-express';
+import { json, urlencoded } from 'express';
 import { join } from 'path';
 import { AppModule } from './app.module.js';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter.js';
@@ -12,6 +13,11 @@ async function bootstrap() {
 
   // Serve uploaded files test
   app.useStaticAssets(join(process.cwd(), 'uploads'), { prefix: '/uploads/' });
+
+  // Límite de body a 20MB: los productos del agente Canario llegan con fotos
+  // en base64 dentro del JSON (images_base64), que superan el default ~100KB.
+  app.use(json({ limit: '20mb' }));
+  app.use(urlencoded({ extended: true, limit: '20mb' }));
 
   app.setGlobalPrefix('api');
   app.enableCors({
