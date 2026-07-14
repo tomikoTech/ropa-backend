@@ -61,7 +61,10 @@ export class ProductsService {
       gender: locion.gender,
       categoryId: frascosCat.id,
       taxRate: 0,
-      imageUrls: [],
+      // El frasco hereda la foto de la loción relacionada (se mantiene
+      // sincronizada en update()).
+      imageUrl: locion.imageUrl ?? locion.imageUrls?.[0] ?? undefined,
+      imageUrls: locion.imageUrls ?? [],
       description: '[auto-frasco]',
       tenantId,
     });
@@ -323,10 +326,14 @@ export class ProductsService {
 
     await this.productRepository.save(product);
 
-    // Sincronía de nombre: si cambió el nombre y tiene un frasco vinculado,
-    // renombrar el frasco a "Frasco {nombre}" (solo tenants con auto-gestión).
+    // Sincronía con el frasco vinculado (solo tenants con auto-gestión): si
+    // cambió el nombre, renombrar el frasco a "Frasco {nombre}"; si cambió la
+    // foto, replicarla en el frasco.
+    const nameChanged = dto.name !== undefined;
+    const imageChanged =
+      dto.imageUrl !== undefined || dto.imageUrls !== undefined;
     if (
-      dto.name !== undefined &&
+      (nameChanged || imageChanged) &&
       product.frascoVariantId &&
       (await this.isFrascoAutoManaged(tenantId))
     ) {
@@ -338,16 +345,26 @@ export class ProductsService {
           where: { id: frascoVariant.productId, tenantId },
         });
         if (frasco) {
-          const newName = `Frasco ${product.name}`;
-          if (frasco.name !== newName) {
-            frasco.name = newName;
-            frasco.slug = await this.ensureUniqueSlug(
-              this.generateSlug(newName),
-              tenantId,
-              frasco.id,
-            );
-            await this.productRepository.save(frasco);
+          let dirty = false;
+          if (nameChanged) {
+            const newName = `Frasco ${product.name}`;
+            if (frasco.name !== newName) {
+              frasco.name = newName;
+              frasco.slug = await this.ensureUniqueSlug(
+                this.generateSlug(newName),
+                tenantId,
+                frasco.id,
+              );
+              dirty = true;
+            }
           }
+          if (imageChanged) {
+            frasco.imageUrls = product.imageUrls ?? [];
+            frasco.imageUrl =
+              product.imageUrls?.[0] ?? product.imageUrl ?? null!;
+            dirty = true;
+          }
+          if (dirty) await this.productRepository.save(frasco);
         }
       }
     }
