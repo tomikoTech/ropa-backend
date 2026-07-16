@@ -1,4 +1,14 @@
-import { IsString, IsOptional, IsBoolean, IsUUID, IsNumber, IsIn, IsArray, Min, Max } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsBoolean,
+  IsUUID,
+  IsNumber,
+  IsIn,
+  IsArray,
+  Min,
+  Max,
+} from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class UpdateStoreSettingsDto {
@@ -70,13 +80,24 @@ export class UpdateStoreSettingsDto {
   @IsBoolean()
   ivaEnabled?: boolean;
 
+  @ApiPropertyOptional({
+    example: 19,
+    description: 'Tasa de IVA de la tienda en % (default 19).',
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  ivaRate?: number;
+
   @ApiPropertyOptional({ example: 'La fragancia que mereces' })
   @IsOptional()
   @IsString()
   invoiceTagline?: string;
 
   @ApiPropertyOptional({
-    example: 'Recuerda que esta factura está sujeta a un descuento en los 30 días vigentes',
+    example:
+      'Recuerda que esta factura está sujeta a un descuento en los 30 días vigentes',
   })
   @IsOptional()
   @IsString()
@@ -89,7 +110,14 @@ export class UpdateStoreSettingsDto {
 
   @ApiPropertyOptional({
     type: [String],
-    example: ['pos', 'sales', 'inventory', 'products', 'categories', 'warehouses'],
+    example: [
+      'pos',
+      'sales',
+      'inventory',
+      'products',
+      'categories',
+      'warehouses',
+    ],
     description: 'Keys de módulos visibles para el rol COLABORADOR',
   })
   @IsOptional()
@@ -160,30 +188,45 @@ export class UpdateStoreSettingsDto {
   @IsBoolean()
   codEnabled?: boolean;
 
-  @ApiPropertyOptional({ description: 'Require shipping payment upfront for COD' })
+  @ApiPropertyOptional({
+    description: 'Require shipping payment upfront for COD',
+  })
   @IsOptional()
   @IsBoolean()
   codRequireShippingUpfront?: boolean;
 
-  @ApiPropertyOptional({ description: 'Percentage of product total to pay upfront as abono', example: 10 })
+  @ApiPropertyOptional({
+    description: 'Percentage of product total to pay upfront as abono',
+    example: 10,
+  })
   @IsOptional()
   @IsNumber()
   @Min(0)
   @Max(100)
   codUpfrontPercentage?: number;
 
-  @ApiPropertyOptional({ description: 'COD surcharge type', enum: ['percentage', 'fixed'], example: 'percentage' })
+  @ApiPropertyOptional({
+    description: 'COD surcharge type',
+    enum: ['percentage', 'fixed'],
+    example: 'percentage',
+  })
   @IsOptional()
   @IsIn(['percentage', 'fixed'])
   codSurchargeType?: string;
 
-  @ApiPropertyOptional({ description: 'COD surcharge value (amount or percentage)', example: 5 })
+  @ApiPropertyOptional({
+    description: 'COD surcharge value (amount or percentage)',
+    example: 5,
+  })
   @IsOptional()
   @IsNumber()
   @Min(0)
   codSurchargeValue?: number;
 
-  @ApiPropertyOptional({ description: 'Flat shipping cost for all deliveries', example: 30000 })
+  @ApiPropertyOptional({
+    description: 'Flat shipping cost for all deliveries',
+    example: 30000,
+  })
   @IsOptional()
   @IsNumber()
   @Min(0)
@@ -249,7 +292,10 @@ export class UpdateStoreSettingsDto {
   @Min(0)
   shippingExtraItemRemote?: number;
 
-  @ApiPropertyOptional({ description: 'Departments considered remote for shipping', example: ['La Guajira', 'Amazonas'] })
+  @ApiPropertyOptional({
+    description: 'Departments considered remote for shipping',
+    example: ['La Guajira', 'Amazonas'],
+  })
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
@@ -265,7 +311,10 @@ export class UpdateStoreSettingsDto {
   @IsString()
   customHeroHtml?: string;
 
-  @ApiPropertyOptional({ description: 'Google Font family name', example: 'Playfair Display' })
+  @ApiPropertyOptional({
+    description: 'Google Font family name',
+    example: 'Playfair Display',
+  })
   @IsOptional()
   @IsString()
   storeFontFamily?: string;
@@ -275,7 +324,9 @@ export class UpdateStoreSettingsDto {
   @IsBoolean()
   fontApplyHero?: boolean;
 
-  @ApiPropertyOptional({ description: 'Apply custom font to product cards/details' })
+  @ApiPropertyOptional({
+    description: 'Apply custom font to product cards/details',
+  })
   @IsOptional()
   @IsBoolean()
   fontApplyProducts?: boolean;
@@ -285,45 +336,72 @@ export class UpdateStoreSettingsDto {
   @IsBoolean()
   fontApplyNavbar?: boolean;
 
-  @ApiPropertyOptional({ description: 'Font sections array', example: ['storeName', 'navbar', 'productCards'] })
+  @ApiPropertyOptional({
+    description: 'Font sections array',
+    example: ['storeName', 'navbar', 'productCards'],
+  })
   @IsOptional()
   fontSections?: string[];
 
-  @ApiPropertyOptional({ description: 'Custom navigation items', type: 'array' })
+  @ApiPropertyOptional({
+    description: 'Custom navigation items',
+    type: 'array',
+  })
   @IsOptional()
   navItems?: { label: string; href: string }[];
 
-  @ApiPropertyOptional({ description: 'Store theme: dark or light', example: 'light' })
+  @ApiPropertyOptional({
+    description: 'Store theme: dark or light',
+    example: 'light',
+  })
   @IsOptional()
   @IsString()
   storeTheme?: string;
 
-  @ApiPropertyOptional({ description: 'Custom background color hex (overrides theme)', example: '#ffcc01' })
+  @ApiPropertyOptional({
+    description: 'Custom background color hex (overrides theme)',
+    example: '#ffcc01',
+  })
   @IsOptional()
   @IsString()
   storeBgColor?: string;
 
-  @ApiPropertyOptional({ description: 'Dominio personalizado (ej: theculture.co)', example: 'theculture.co' })
+  @ApiPropertyOptional({
+    description: 'Dominio personalizado (ej: theculture.co)',
+    example: 'theculture.co',
+  })
   @IsOptional()
   @IsString()
   customDomain?: string;
 
-  @ApiPropertyOptional({ description: 'Wompi public key', example: 'pub_prod_xxx' })
+  @ApiPropertyOptional({
+    description: 'Wompi public key',
+    example: 'pub_prod_xxx',
+  })
   @IsOptional()
   @IsString()
   wompiPublicKey?: string;
 
-  @ApiPropertyOptional({ description: 'Wompi private key', example: 'prv_prod_xxx' })
+  @ApiPropertyOptional({
+    description: 'Wompi private key',
+    example: 'prv_prod_xxx',
+  })
   @IsOptional()
   @IsString()
   wompiPrivateKey?: string;
 
-  @ApiPropertyOptional({ description: 'Wompi integrity secret', example: 'prod_integrity_xxx' })
+  @ApiPropertyOptional({
+    description: 'Wompi integrity secret',
+    example: 'prod_integrity_xxx',
+  })
   @IsOptional()
   @IsString()
   wompiIntegritySecret?: string;
 
-  @ApiPropertyOptional({ description: 'Wompi events secret', example: 'prod_events_xxx' })
+  @ApiPropertyOptional({
+    description: 'Wompi events secret',
+    example: 'prod_events_xxx',
+  })
   @IsOptional()
   @IsString()
   wompiEventsSecret?: string;

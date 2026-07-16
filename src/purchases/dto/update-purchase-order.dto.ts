@@ -3,6 +3,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsDateString,
   IsOptional,
   IsString,
@@ -39,4 +40,11 @@ export class UpdatePurchaseOrderDto {
   @IsOptional()
   @IsDateString()
   paymentDueDate?: string;
+
+  @ApiPropertyOptional({
+    description: 'Aplicar IVA (tasa de la tienda) sobre el total.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  applyTax?: boolean;
 }

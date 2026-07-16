@@ -12,6 +12,7 @@ import { AccountsPayablePayment } from './entities/accounts-payable-payment.enti
 import { ProductVariant } from '../products/entities/product-variant.entity.js';
 import { Stock } from '../inventory/entities/stock.entity.js';
 import { StockMovement } from '../inventory/entities/stock-movement.entity.js';
+import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto.js';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto.js';
 import { ReceiveItemsDto } from './dto/receive-items.dto.js';
@@ -31,8 +32,41 @@ export class PurchasesService {
     private readonly apPaymentRepository: Repository<AccountsPayablePayment>,
     @InjectRepository(ProductVariant)
     private readonly variantRepository: Repository<ProductVariant>,
+    @InjectRepository(StoreSettings)
+    private readonly settingsRepository: Repository<StoreSettings>,
     private readonly dataSource: DataSource,
   ) {}
+
+  /**
+   * Resuelve el desglose de IVA de una compra. `applyTax` decide si se aplica;
+   * si es undefined, usa el default del tenant (ivaEnabled). La tasa es única
+   * por tienda (ivaRate). IVA agregado sobre el subtotal (no incluido).
+   */
+  private async computePurchaseTotals(
+    items: { quantityOrdered: number; unitCost: number }[],
+    applyTax: boolean | undefined,
+    tenantId: string,
+    settings?: StoreSettings | null,
+  ): Promise<{
+    subtotal: number;
+    taxRate: number;
+    taxAmount: number;
+    total: number;
+  }> {
+    const s =
+      settings ??
+      (await this.settingsRepository.findOne({ where: { tenantId } }));
+    const ivaEnabled = s ? s.ivaEnabled : true;
+    const doApply = applyTax ?? ivaEnabled;
+    const rate = doApply ? (s ? Number(s.ivaRate) : 19) : 0;
+
+    const subtotal = items.reduce(
+      (sum, i) => sum + i.quantityOrdered * i.unitCost,
+      0,
+    );
+    const taxAmount = Math.round(subtotal * (rate / 100) * 100) / 100;
+    return { subtotal, taxRate: rate, taxAmount, total: subtotal + taxAmount };
+  }
 
   private async generateOrderNumber(tenantId: string): Promise<string> {
     const today = new Date();
@@ -66,16 +100,17 @@ export class PurchasesService {
     }
 
     const orderNumber = await this.generateOrderNumber(tenantId);
-    const total = dto.items.reduce(
-      (sum, i) => sum + i.quantityOrdered * i.unitCost,
-      0,
-    );
+    const { subtotal, taxRate, taxAmount, total } =
+      await this.computePurchaseTotals(dto.items, dto.applyTax, tenantId);
 
     const po = this.poRepository.create({
       orderNumber,
       supplierId: dto.supplierId,
       warehouseId: dto.warehouseId,
       createdById: userId,
+      subtotal,
+      taxRate,
+      taxAmount,
       total,
       notes: dto.notes,
       status: PurchaseOrderStatus.DRAFT,
@@ -341,11 +376,23 @@ export class PurchasesService {
         po.status = PurchaseOrderStatus.RECEIVED;
       }
 
-      // 5) Total y guardado
-      po.total = effective.reduce(
-        (sum, i) => sum + i.quantityOrdered * i.unitCost,
-        0,
+      // 5) Totales (con IVA opcional) y guardado. Si el dto no trae applyTax,
+      //    se conserva si la orden ya tenía IVA (taxRate > 0).
+      const applyTax =
+        dto.applyTax !== undefined ? dto.applyTax : Number(po.taxRate) > 0;
+      const settings = await manager
+        .getRepository(StoreSettings)
+        .findOne({ where: { tenantId } });
+      const totals = await this.computePurchaseTotals(
+        effective,
+        applyTax,
+        tenantId,
+        settings,
       );
+      po.subtotal = totals.subtotal;
+      po.taxRate = totals.taxRate;
+      po.taxAmount = totals.taxAmount;
+      po.total = totals.total;
       await poRepo.save(po);
 
       // 6) Sincronizar cuenta por pagar (si existe y no está pagada)

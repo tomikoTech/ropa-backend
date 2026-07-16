@@ -78,7 +78,8 @@ export class StoreSettingsService {
     if (dto.logoUrl !== undefined) settings.logoUrl = dto.logoUrl;
     if (dto.heroLogoUrl !== undefined) settings.heroLogoUrl = dto.heroLogoUrl;
     if (dto.miniLogoUrl !== undefined) settings.miniLogoUrl = dto.miniLogoUrl;
-    if (dto.navbarLogoUrl !== undefined) settings.navbarLogoUrl = dto.navbarLogoUrl;
+    if (dto.navbarLogoUrl !== undefined)
+      settings.navbarLogoUrl = dto.navbarLogoUrl;
     if (dto.bannerUrl !== undefined) settings.bannerUrl = dto.bannerUrl;
     if (dto.aboutText !== undefined) settings.aboutText = dto.aboutText;
     if (dto.instagramUrl !== undefined)
@@ -87,6 +88,7 @@ export class StoreSettingsService {
     if (dto.tiktokUrl !== undefined) settings.tiktokUrl = dto.tiktokUrl;
     if (dto.address !== undefined) settings.address = dto.address;
     if (dto.ivaEnabled !== undefined) settings.ivaEnabled = dto.ivaEnabled;
+    if (dto.ivaRate !== undefined) settings.ivaRate = dto.ivaRate;
     if (dto.invoiceTagline !== undefined)
       settings.invoiceTagline = dto.invoiceTagline;
     if (dto.invoiceFooterNote !== undefined)
@@ -155,20 +157,25 @@ export class StoreSettingsService {
       settings.storeFontFamily = dto.storeFontFamily;
     if (dto.fontSections !== undefined)
       settings.fontSections = dto.fontSections;
-    if (dto.storeTheme !== undefined)
-      settings.storeTheme = dto.storeTheme;
+    if (dto.storeTheme !== undefined) settings.storeTheme = dto.storeTheme;
     if (dto.storeBgColor !== undefined)
       settings.storeBgColor = dto.storeBgColor;
     if (dto.customDomain !== undefined) {
       const cleaned = dto.customDomain
-        ? dto.customDomain.toLowerCase().replace(/^https?:\/\//, '').replace(/\/+$/, '').trim()
+        ? dto.customDomain
+            .toLowerCase()
+            .replace(/^https?:\/\//, '')
+            .replace(/\/+$/, '')
+            .trim()
         : null;
       if (cleaned) {
         const existing = await this.settingsRepo.findOne({
           where: { customDomain: cleaned },
         });
         if (existing && existing.id !== settings.id) {
-          throw new BadRequestException('Este dominio ya está asignado a otra tienda');
+          throw new BadRequestException(
+            'Este dominio ya está asignado a otra tienda',
+          );
         }
       }
       settings.customDomain = cleaned as any;
@@ -489,7 +496,9 @@ export class StoreSettingsService {
 
     // Send email notification (fire-and-forget)
     if (order.customerEmail) {
-      const emailSettings = await this.settingsRepo.findOne({ where: { tenantId } });
+      const emailSettings = await this.settingsRepo.findOne({
+        where: { tenantId },
+      });
       const emailStoreName = emailSettings?.storeName || 'MiPinta';
       const emailData = this.buildOrderEmailData(order);
 
@@ -539,10 +548,7 @@ export class StoreSettingsService {
     return { order, whatsappNotifyUrl };
   }
 
-  async confirmPickup(
-    id: string,
-    tenantId: string,
-  ): Promise<EcommerceOrder> {
+  async confirmPickup(id: string, tenantId: string): Promise<EcommerceOrder> {
     const order = await this.findOneOrder(id, tenantId);
 
     if (order.status !== EcommerceOrderStatus.READY_FOR_PICKUP) {
@@ -574,14 +580,10 @@ export class StoreSettingsService {
     const order = await this.findOneOrder(id, tenantId);
 
     if (order.paymentMethod !== 'contraentrega') {
-      throw new BadRequestException(
-        'Este pedido no es contra-entrega',
-      );
+      throw new BadRequestException('Este pedido no es contra-entrega');
     }
     if (order.codPaymentConfirmed) {
-      throw new BadRequestException(
-        'El pago contra-entrega ya fue confirmado',
-      );
+      throw new BadRequestException('El pago contra-entrega ya fue confirmado');
     }
 
     order.codPaymentConfirmed = true;

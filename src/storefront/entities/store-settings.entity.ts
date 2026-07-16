@@ -266,6 +266,17 @@ export class StoreSettings extends TenantAwareEntity {
   @Column({ name: 'iva_enabled', default: true })
   ivaEnabled: boolean;
 
+  // Tasa de IVA de la tienda (%). Tasa única aplicada a ventas y compras con
+  // IVA (ignora el tax_rate por producto). Default 19 (Colombia).
+  @Column({
+    name: 'iva_rate',
+    type: 'decimal',
+    precision: 5,
+    scale: 2,
+    default: 19,
+  })
+  ivaRate: number;
+
   // Textos configurables de la factura impresa (por tenant)
   @Column({ name: 'invoice_tagline', type: 'text', nullable: true })
   invoiceTagline: string | null;

@@ -94,12 +94,16 @@ export class PosService {
         }
       }
 
-      // IVA config per tenant: some stores (e.g. perfumería) operate without
-      // IVA. When disabled, force taxRate 0 for every line (ignores product tax_rate).
+      // IVA config per tenant. `applyTax` en el DTO permite decidir por venta;
+      // si no viene, se usa el default del tenant (ivaEnabled). La tasa es única
+      // por tienda (ivaRate), ignorando el tax_rate por producto.
       const storeSettings = await manager
         .getRepository(StoreSettings)
         .findOne({ where: { tenantId } });
       const ivaEnabled = storeSettings ? storeSettings.ivaEnabled : true;
+      const applyTax = dto.applyTax ?? ivaEnabled;
+      const storeIvaRate = storeSettings ? Number(storeSettings.ivaRate) : 19;
+      const effectiveTaxRate = applyTax ? storeIvaRate : 0;
 
       // Load and validate all variants + stock
       const lineCalcs: LineCalculation[] = [];
@@ -168,7 +172,7 @@ export class PosService {
         const unitPrice = variant.priceOverride
           ? Number(variant.priceOverride)
           : Number(variant.product.basePrice);
-        const taxRate = ivaEnabled ? Number(variant.product.taxRate) : 0;
+        const taxRate = effectiveTaxRate;
         const discountPercent = item.discountPercent || 0;
 
         const lineCalc = this.taxService.calculateLine(

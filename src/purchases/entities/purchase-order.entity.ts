@@ -54,6 +54,29 @@ export class PurchaseOrder extends TenantAwareEntity {
   })
   status: PurchaseOrderStatus;
 
+  // IVA opcional por orden: subtotal (sin IVA), tasa aplicada y monto de IVA.
+  // total = subtotal + tax_amount (IVA agregado al total, no incluido).
+  @Column({ type: 'decimal', precision: 14, scale: 2, default: 0 })
+  subtotal: number;
+
+  @Column({
+    name: 'tax_rate',
+    type: 'decimal',
+    precision: 5,
+    scale: 2,
+    default: 0,
+  })
+  taxRate: number;
+
+  @Column({
+    name: 'tax_amount',
+    type: 'decimal',
+    precision: 14,
+    scale: 2,
+    default: 0,
+  })
+  taxAmount: number;
+
   @Column({ type: 'decimal', precision: 14, scale: 2, default: 0 })
   total: number;
 

@@ -5,6 +5,7 @@ import {
   IsArray,
   ValidateNested,
   IsNumber,
+  IsBoolean,
   IsEnum,
   Min,
   ArrayMinSize,
@@ -84,4 +85,10 @@ export class CreateSaleDto {
   @IsEnum(SaleChannel)
   @IsOptional()
   saleChannel?: SaleChannel;
+
+  // IVA opcional por venta: si se define, decide si esta venta aplica IVA
+  // (tasa de la tienda) o no (0). Si se omite, usa el default del tenant.
+  @IsBoolean()
+  @IsOptional()
+  applyTax?: boolean;
 }

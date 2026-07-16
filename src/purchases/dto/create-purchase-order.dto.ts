@@ -4,6 +4,7 @@ import {
   IsArray,
   ValidateNested,
   IsNumber,
+  IsBoolean,
   IsOptional,
   Min,
   ArrayMinSize,
@@ -53,4 +54,12 @@ export class CreatePurchaseOrderDto {
   @IsOptional()
   @IsDateString()
   paymentDueDate?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Aplicar IVA (tasa de la tienda) sobre el total. Si se omite, usa el default del tenant.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  applyTax?: boolean;
 }
