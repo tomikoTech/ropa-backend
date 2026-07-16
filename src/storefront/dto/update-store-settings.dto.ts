@@ -90,6 +90,15 @@ export class UpdateStoreSettingsDto {
   @Max(100)
   ivaRate?: number;
 
+  @ApiPropertyOptional({
+    enum: ['included', 'added'],
+    description:
+      "Modo del IVA: 'included' (incluido en el precio) o 'added' (se suma).",
+  })
+  @IsOptional()
+  @IsIn(['included', 'added'])
+  ivaMode?: 'included' | 'added';
+
   @ApiPropertyOptional({ example: 'La fragancia que mereces' })
   @IsOptional()
   @IsString()

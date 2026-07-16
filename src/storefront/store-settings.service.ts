@@ -89,6 +89,7 @@ export class StoreSettingsService {
     if (dto.address !== undefined) settings.address = dto.address;
     if (dto.ivaEnabled !== undefined) settings.ivaEnabled = dto.ivaEnabled;
     if (dto.ivaRate !== undefined) settings.ivaRate = dto.ivaRate;
+    if (dto.ivaMode !== undefined) settings.ivaMode = dto.ivaMode;
     if (dto.invoiceTagline !== undefined)
       settings.invoiceTagline = dto.invoiceTagline;
     if (dto.invoiceFooterNote !== undefined)

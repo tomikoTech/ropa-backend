@@ -59,13 +59,42 @@ export class PurchasesService {
     const ivaEnabled = s ? s.ivaEnabled : true;
     const doApply = applyTax ?? ivaEnabled;
     const rate = doApply ? (s ? Number(s.ivaRate) : 19) : 0;
+    const mode = s?.ivaMode === 'added' ? 'added' : 'included';
 
-    const subtotal = items.reduce(
+    const gross = items.reduce(
       (sum, i) => sum + i.quantityOrdered * i.unitCost,
       0,
     );
-    const taxAmount = Math.round(subtotal * (rate / 100) * 100) / 100;
-    return { subtotal, taxRate: rate, taxAmount, total: subtotal + taxAmount };
+    const round = (v: number) => Math.round(v * 100) / 100;
+
+    if (rate <= 0) {
+      return {
+        subtotal: round(gross),
+        taxRate: 0,
+        taxAmount: 0,
+        total: round(gross),
+      };
+    }
+
+    if (mode === 'added') {
+      // El costo es la base; el IVA se suma → total = subtotal + IVA.
+      const subtotal = round(gross);
+      const taxAmount = round(gross * (rate / 100));
+      return {
+        subtotal,
+        taxRate: rate,
+        taxAmount,
+        total: round(subtotal + taxAmount),
+      };
+    }
+    // 'included': el costo ya incluye IVA → se extrae, el total no cambia.
+    const subtotal = round(gross / (1 + rate / 100));
+    return {
+      subtotal,
+      taxRate: rate,
+      taxAmount: round(gross - subtotal),
+      total: round(gross),
+    };
   }
 
   private async generateOrderNumber(tenantId: string): Promise<string> {

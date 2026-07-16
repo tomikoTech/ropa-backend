@@ -104,6 +104,7 @@ export class PosService {
       const applyTax = dto.applyTax ?? ivaEnabled;
       const storeIvaRate = storeSettings ? Number(storeSettings.ivaRate) : 19;
       const effectiveTaxRate = applyTax ? storeIvaRate : 0;
+      const ivaMode = storeSettings?.ivaMode === 'added' ? 'added' : 'included';
 
       // Load and validate all variants + stock
       const lineCalcs: LineCalculation[] = [];
@@ -180,6 +181,7 @@ export class PosService {
           item.quantity,
           discountPercent,
           taxRate,
+          ivaMode,
         );
         lineCalcs.push(lineCalc);
 

@@ -277,6 +277,18 @@ export class StoreSettings extends TenantAwareEntity {
   })
   ivaRate: number;
 
+  // Modo del IVA (ventas y compras):
+  //  - 'included': el IVA ya está incluido en el precio/costo (se extrae, el
+  //    total no cambia).
+  //  - 'added': el IVA se suma sobre el precio/costo (total = base + IVA).
+  @Column({
+    name: 'iva_mode',
+    type: 'varchar',
+    length: 20,
+    default: 'included',
+  })
+  ivaMode: 'included' | 'added';
+
   // Textos configurables de la factura impresa (por tenant)
   @Column({ name: 'invoice_tagline', type: 'text', nullable: true })
   invoiceTagline: string | null;

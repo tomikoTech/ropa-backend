@@ -23,25 +23,36 @@ export interface LineCalculation {
 @Injectable()
 export class TaxService {
   /**
-   * Calculate line item totals with IVA included in the price.
-   * Colombian pricing: prices shown are IVA-included.
-   * We extract the tax from the total price.
+   * Calculate line item totals.
+   *  - mode 'included' (default): el precio ya incluye IVA, se extrae del total
+   *    (el total no cambia). Precios colombianos típicos.
+   *  - mode 'added': el IVA se suma sobre el precio (total = base + IVA).
    */
   calculateLine(
     unitPrice: number,
     quantity: number,
     discountPercent: number,
     taxRate: number,
+    mode: 'included' | 'added' = 'included',
   ): LineCalculation {
     const subtotalBeforeDiscount = unitPrice * quantity;
     const discountAmount = subtotalBeforeDiscount * (discountPercent / 100);
-    const totalAfterDiscount = subtotalBeforeDiscount - discountAmount;
+    const priceAfterDiscount = subtotalBeforeDiscount - discountAmount;
 
-    // IVA included: extract tax from the final price
-    // Total = Base + Base * taxRate/100 = Base * (1 + taxRate/100)
-    // Base = Total / (1 + taxRate/100)
-    const taxableBase = totalAfterDiscount / (1 + taxRate / 100);
-    const taxAmount = totalAfterDiscount - taxableBase;
+    let taxableBase: number;
+    let taxAmount: number;
+    let lineTotal: number;
+    if (mode === 'added') {
+      // El precio es la base; el IVA se suma encima.
+      taxableBase = priceAfterDiscount;
+      taxAmount = priceAfterDiscount * (taxRate / 100);
+      lineTotal = priceAfterDiscount + taxAmount;
+    } else {
+      // IVA incluido: se extrae del precio final (el total no cambia).
+      taxableBase = priceAfterDiscount / (1 + taxRate / 100);
+      taxAmount = priceAfterDiscount - taxableBase;
+      lineTotal = priceAfterDiscount;
+    }
 
     return {
       unitPrice,
@@ -52,7 +63,7 @@ export class TaxService {
       discountAmount: this.round(discountAmount),
       taxableBase: this.round(taxableBase),
       taxAmount: this.round(taxAmount),
-      lineTotal: this.round(totalAfterDiscount),
+      lineTotal: this.round(lineTotal),
     };
   }
 
