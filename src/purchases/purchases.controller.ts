@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Body,
   Param,
   Query,
@@ -10,6 +11,7 @@ import {
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { PurchasesService } from './purchases.service.js';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto.js';
+import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto.js';
 import { ReceiveItemsDto } from './dto/receive-items.dto.js';
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
 import { TenantId } from '../common/decorators/tenant-id.decorator.js';
@@ -32,6 +34,21 @@ export class PurchasesController {
     @TenantId() tenantId: string,
   ) {
     return this.purchasesService.create(dto, user.id, tenantId);
+  }
+
+  @Patch(':id')
+  @Roles(Role.ADMIN)
+  @ApiOperation({
+    summary:
+      'Editar orden de compra (revierte y re-aplica inventario si ya fue recibida)',
+  })
+  update(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdatePurchaseOrderDto,
+    @CurrentUser() user: { id: string },
+    @TenantId() tenantId: string,
+  ) {
+    return this.purchasesService.update(id, dto, user.id, tenantId);
   }
 
   @Get()

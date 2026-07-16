@@ -13,6 +13,7 @@ import { ProductVariant } from '../products/entities/product-variant.entity.js';
 import { Stock } from '../inventory/entities/stock.entity.js';
 import { StockMovement } from '../inventory/entities/stock-movement.entity.js';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto.js';
+import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto.js';
 import { ReceiveItemsDto } from './dto/receive-items.dto.js';
 import { PurchaseOrderStatus } from '../common/enums/purchase-order-status.enum.js';
 import { MovementType } from '../common/enums/movement-type.enum.js';
@@ -61,10 +62,7 @@ export class PurchasesService {
       if (!variant) {
         throw new NotFoundException(`Variante ${item.variantId} no encontrada`);
       }
-      variantImageMap.set(
-        item.variantId,
-        variant.product?.imageUrl || null,
-      );
+      variantImageMap.set(item.variantId, variant.product?.imageUrl || null);
     }
 
     const orderNumber = await this.generateOrderNumber(tenantId);
@@ -168,6 +166,210 @@ export class PurchasesService {
     }
     po.status = PurchaseOrderStatus.SENT;
     await this.poRepository.save(po);
+    return this.findOne(id, tenantId);
+  }
+
+  /**
+   * Edita una orden de compra en cualquier estado excepto CANCELLED.
+   *
+   * - DRAFT / SENT: nada fue recibido, no hay inventario que tocar; solo se
+   *   reemplazan ítems/campos y se recalcula el total.
+   * - PARTIAL / RECEIVED: el inventario ya fue afectado. Se hace REVERSIÓN
+   *   TOTAL de lo recibido (movimientos OUT sobre la bodega original) y luego
+   *   se RE-APLICAN los ítems editados como recibidos (movimientos IN sobre la
+   *   bodega destino), dejando la orden en estado RECEIVED. Todo en una única
+   *   transacción para que sea atómico.
+   */
+  async update(
+    id: string,
+    dto: UpdatePurchaseOrderDto,
+    userId: string,
+    tenantId: string,
+  ): Promise<PurchaseOrder> {
+    await this.dataSource.transaction(async (manager) => {
+      const poRepo = manager.getRepository(PurchaseOrder);
+      const poItemRepo = manager.getRepository(PurchaseOrderItem);
+      const apRepo = manager.getRepository(AccountsPayable);
+      const variantRepo = manager.getRepository(ProductVariant);
+      const stockRepo = manager.getRepository(Stock);
+      const movementRepo = manager.getRepository(StockMovement);
+
+      const po = await poRepo.findOne({
+        where: { id, tenantId },
+        relations: ['items'],
+      });
+      if (!po) {
+        throw new NotFoundException('Orden de compra no encontrada');
+      }
+      if (po.status === PurchaseOrderStatus.CANCELLED) {
+        throw new BadRequestException('No se puede editar una orden cancelada');
+      }
+
+      const wasReceived =
+        po.status === PurchaseOrderStatus.RECEIVED ||
+        po.status === PurchaseOrderStatus.PARTIAL;
+      const oldWarehouseId = po.warehouseId;
+
+      // 1) REVERSIÓN: descontar del inventario todo lo que esta orden había
+      //    recibido, en la bodega original, con movimiento OUT de auditoría.
+      if (wasReceived) {
+        for (const item of po.items) {
+          if (item.quantityReceived > 0) {
+            const stock = await stockRepo.findOne({
+              where: {
+                variantId: item.variantId,
+                warehouseId: oldWarehouseId,
+                tenantId,
+              },
+            });
+            if (stock) {
+              stock.quantity -= item.quantityReceived;
+              await stockRepo.save(stock);
+            }
+            await movementRepo.save(
+              movementRepo.create({
+                variantId: item.variantId,
+                warehouseId: oldWarehouseId,
+                movementType: MovementType.OUT,
+                quantity: item.quantityReceived,
+                referenceType: 'PURCHASE',
+                referenceId: po.id,
+                notes: `Reversión edición OC ${po.orderNumber}`,
+                createdById: userId,
+                tenantId,
+              }),
+            );
+          }
+        }
+      }
+
+      // 2) Campos de cabecera
+      if (dto.supplierId !== undefined) po.supplierId = dto.supplierId;
+      if (dto.warehouseId !== undefined) po.warehouseId = dto.warehouseId;
+      if (dto.notes !== undefined) po.notes = dto.notes;
+
+      // 3) Ítems efectivos: los del dto (validando variantes) o los actuales.
+      let effective: {
+        variantId: string;
+        quantityOrdered: number;
+        unitCost: number;
+        productImageUrl?: string;
+      }[];
+      if (dto.items) {
+        effective = [];
+        for (const item of dto.items) {
+          const variant = await variantRepo.findOne({
+            where: { id: item.variantId, tenantId },
+            relations: ['product'],
+          });
+          if (!variant) {
+            throw new NotFoundException(
+              `Variante ${item.variantId} no encontrada`,
+            );
+          }
+          effective.push({
+            variantId: item.variantId,
+            quantityOrdered: item.quantityOrdered,
+            unitCost: item.unitCost,
+            productImageUrl: variant.product?.imageUrl || undefined,
+          });
+        }
+      } else {
+        effective = po.items.map((i) => ({
+          variantId: i.variantId,
+          quantityOrdered: i.quantityOrdered,
+          unitCost: i.unitCost,
+          productImageUrl: i.productImageUrl || undefined,
+        }));
+      }
+
+      // 4) Reemplazar ítems. Si la orden ya estaba recibida, los nuevos ítems
+      //    quedan como totalmente recibidos y se re-aplica el inventario.
+      await poItemRepo.delete({ purchaseOrderId: po.id, tenantId });
+      const newItems = effective.map((i) =>
+        poItemRepo.create({
+          purchaseOrderId: po.id,
+          variantId: i.variantId,
+          quantityOrdered: i.quantityOrdered,
+          unitCost: i.unitCost,
+          quantityReceived: wasReceived ? i.quantityOrdered : 0,
+          productImageUrl: i.productImageUrl,
+          tenantId,
+        }),
+      );
+      const savedNewItems = await poItemRepo.save(newItems);
+      // Reemplazar la colección en memoria para que el save() de la orden no
+      // intente re-insertar (vía cascade) los ítems viejos ya eliminados.
+      po.items = savedNewItems;
+
+      if (wasReceived) {
+        for (const i of effective) {
+          let stock = await stockRepo.findOne({
+            where: {
+              variantId: i.variantId,
+              warehouseId: po.warehouseId,
+              tenantId,
+            },
+          });
+          if (stock) {
+            stock.quantity += i.quantityOrdered;
+            await stockRepo.save(stock);
+          } else {
+            stock = stockRepo.create({
+              variantId: i.variantId,
+              warehouseId: po.warehouseId,
+              quantity: i.quantityOrdered,
+              minStock: 3,
+              tenantId,
+            });
+            await stockRepo.save(stock);
+          }
+          await movementRepo.save(
+            movementRepo.create({
+              variantId: i.variantId,
+              warehouseId: po.warehouseId,
+              movementType: MovementType.IN,
+              quantity: i.quantityOrdered,
+              referenceType: 'PURCHASE',
+              referenceId: po.id,
+              notes: `Re-aplicación edición OC ${po.orderNumber}`,
+              createdById: userId,
+              tenantId,
+            }),
+          );
+        }
+        po.status = PurchaseOrderStatus.RECEIVED;
+      }
+
+      // 5) Total y guardado
+      po.total = effective.reduce(
+        (sum, i) => sum + i.quantityOrdered * i.unitCost,
+        0,
+      );
+      await poRepo.save(po);
+
+      // 6) Sincronizar cuenta por pagar (si existe y no está pagada)
+      const ap = await apRepo.findOne({
+        where: { purchaseOrderId: po.id, tenantId },
+      });
+      if (ap) {
+        if (!ap.isPaid) {
+          ap.amount = po.total;
+          if (dto.paymentDueDate) ap.dueDate = new Date(dto.paymentDueDate);
+          await apRepo.save(ap);
+        }
+      } else if (dto.paymentDueDate) {
+        await apRepo.save(
+          apRepo.create({
+            purchaseOrderId: po.id,
+            amount: po.total,
+            dueDate: new Date(dto.paymentDueDate),
+            tenantId,
+          }),
+        );
+      }
+    });
+
     return this.findOne(id, tenantId);
   }
 
