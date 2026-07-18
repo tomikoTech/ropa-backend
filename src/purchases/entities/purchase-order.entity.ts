@@ -26,6 +26,10 @@ export class PurchaseOrder extends TenantAwareEntity {
   @Column({ name: 'order_number' })
   orderNumber: string;
 
+  // Número de factura del proveedor (referencia externa, opcional).
+  @Column({ name: 'supplier_invoice_number', nullable: true })
+  supplierInvoiceNumber: string;
+
   @ManyToOne(() => Supplier, { eager: true })
   @JoinColumn({ name: 'supplier_id' })
   supplier: Supplier;

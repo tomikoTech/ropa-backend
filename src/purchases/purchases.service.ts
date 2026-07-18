@@ -142,6 +142,7 @@ export class PurchasesService {
       taxAmount,
       total,
       notes: dto.notes,
+      supplierInvoiceNumber: dto.supplierInvoiceNumber,
       status: PurchaseOrderStatus.DRAFT,
       tenantId,
     });
@@ -311,6 +312,8 @@ export class PurchasesService {
       if (dto.supplierId !== undefined) po.supplierId = dto.supplierId;
       if (dto.warehouseId !== undefined) po.warehouseId = dto.warehouseId;
       if (dto.notes !== undefined) po.notes = dto.notes;
+      if (dto.supplierInvoiceNumber !== undefined)
+        po.supplierInvoiceNumber = dto.supplierInvoiceNumber;
 
       // 3) Ítems efectivos: los del dto (validando variantes) o los actuales.
       let effective: {

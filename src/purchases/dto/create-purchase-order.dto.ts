@@ -50,6 +50,11 @@ export class CreatePurchaseOrderDto {
   @IsString()
   notes?: string;
 
+  @ApiPropertyOptional({ description: 'Número de factura del proveedor' })
+  @IsOptional()
+  @IsString()
+  supplierInvoiceNumber?: string;
+
   @ApiPropertyOptional({ description: 'Fecha vencimiento cuenta por pagar' })
   @IsOptional()
   @IsDateString()
