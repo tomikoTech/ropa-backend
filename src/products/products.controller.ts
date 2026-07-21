@@ -56,6 +56,15 @@ export class ProductsController {
     return this.productsService.findOne(id, tenantId);
   }
 
+  @Get(':id/recipe')
+  @ApiOperation({ summary: 'Receta de esencias del producto (perfumería)' })
+  getRecipe(
+    @Param('id', ParseUUIDPipe) id: string,
+    @TenantId() tenantId: string,
+  ) {
+    return this.productsService.getRecipe(id, tenantId);
+  }
+
   @Patch(':id')
   @ApiOperation({ summary: 'Actualizar producto y variantes' })
   update(

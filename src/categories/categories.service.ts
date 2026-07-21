@@ -52,6 +52,7 @@ export class CategoriesService {
       displayName: dto.displayName,
       slug,
       description: dto.description,
+      type: dto.type ?? undefined,
       parentId: dto.parentId || null,
       sortOrder: dto.sortOrder ?? 0,
       isActive: dto.isActive ?? true,
@@ -130,6 +131,7 @@ export class CategoriesService {
 
     if (dto.displayName !== undefined) category.displayName = dto.displayName;
     if (dto.description !== undefined) category.description = dto.description;
+    if (dto.type !== undefined) category.type = dto.type;
     if (dto.sortOrder !== undefined) category.sortOrder = dto.sortOrder;
     if (dto.isActive !== undefined) category.isActive = dto.isActive;
     if (dto.isPublished !== undefined) category.isPublished = dto.isPublished;

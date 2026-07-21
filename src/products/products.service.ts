@@ -1,6 +1,8 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
+import { RecipeService } from './services/recipe.service.js';
+import { ProductEssence } from './entities/product-essence.entity.js';
 import { Product } from './entities/product.entity.js';
 import { ProductVariant } from './entities/product-variant.entity.js';
 import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
@@ -25,6 +27,10 @@ export class ProductsService {
     private readonly warehouseRepository: Repository<Warehouse>,
     @InjectRepository(Stock)
     private readonly stockRepository: Repository<Stock>,
+    @InjectRepository(ProductEssence)
+    private readonly essenceRepository: Repository<ProductEssence>,
+    private readonly recipeService: RecipeService,
+    private readonly dataSource: DataSource,
   ) {}
 
   // Crea un "Frasco {nombre}" en la categoría Frascos, con una variante y
@@ -268,6 +274,16 @@ export class ProductsService {
       }
     }
 
+    // Receta de esencias (perfumería): muchos-a-muchos con gramos por unidad.
+    if (dto.essences) {
+      await this.recipeService.replaceRecipe(
+        this.dataSource.manager,
+        saved.id,
+        tenantId,
+        dto.essences,
+      );
+    }
+
     return this.findOne(saved.id, tenantId);
   }
 
@@ -436,7 +452,23 @@ export class ProductsService {
       }
     }
 
+    // Receta de esencias: si el payload la incluye, reemplaza la actual.
+    if (dto.essences) {
+      await this.recipeService.replaceRecipe(
+        this.dataSource.manager,
+        id,
+        tenantId,
+        dto.essences,
+      );
+    }
+
     return this.findOne(id, tenantId);
+  }
+
+  // Receta de esencias del producto (para el frontend).
+  async getRecipe(id: string, tenantId: string): Promise<ProductEssence[]> {
+    await this.findOne(id, tenantId); // valida existencia/tenant
+    return this.recipeService.getRecipe(id, tenantId);
   }
 
   async remove(id: string, tenantId: string): Promise<void> {

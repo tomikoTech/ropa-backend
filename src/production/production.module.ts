@@ -7,6 +7,7 @@ import { ProductionItem } from './entities/production-item.entity.js';
 import { Stock } from '../inventory/entities/stock.entity.js';
 import { StockMovement } from '../inventory/entities/stock-movement.entity.js';
 import { ProductVariant } from '../products/entities/product-variant.entity.js';
+import { ProductsModule } from '../products/products.module.js';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { ProductVariant } from '../products/entities/product-variant.entity.js';
       StockMovement,
       ProductVariant,
     ]),
+    ProductsModule,
   ],
   controllers: [ProductionController],
   providers: [ProductionService],

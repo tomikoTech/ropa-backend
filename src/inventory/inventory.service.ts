@@ -14,6 +14,8 @@ import { UpdateWarehouseDto } from './dto/update-warehouse.dto.js';
 import { AdjustStockDto } from './dto/adjust-stock.dto.js';
 import { TransferStockDto } from './dto/transfer-stock.dto.js';
 import { MovementType } from '../common/enums/movement-type.enum.js';
+import { ProductVariant } from '../products/entities/product-variant.entity.js';
+import { RecipeService } from '../products/services/recipe.service.js';
 
 @Injectable()
 export class InventoryService {
@@ -24,6 +26,7 @@ export class InventoryService {
     private readonly stockRepository: Repository<Stock>,
     @InjectRepository(StockMovement)
     private readonly movementRepository: Repository<StockMovement>,
+    private readonly recipeService: RecipeService,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -188,6 +191,7 @@ export class InventoryService {
         });
       }
 
+      const prevQuantity = stock.quantity;
       switch (dto.movementType) {
         case MovementType.IN:
           stock.quantity += dto.quantity;
@@ -217,6 +221,27 @@ export class InventoryService {
         createdById: userId,
       });
       await movementRepo.save(movement);
+
+      // Perfumería: si se AGREGARON unidades de un producto final con receta,
+      // consumir la esencia proporcional (misma bodega). Cero efecto para
+      // productos sin receta (no perfumería). El delta positivo dispara el
+      // consumo; correcciones a la baja no consumen.
+      const unitsAdded = stock.quantity - prevQuantity;
+      if (unitsAdded > 0) {
+        const variant = await manager.getRepository(ProductVariant).findOne({
+          where: { id: dto.variantId, tenantId },
+        });
+        if (variant) {
+          await this.recipeService.consumeEssences(manager, {
+            productId: variant.productId,
+            units: unitsAdded,
+            warehouseId: dto.warehouseId,
+            userId,
+            tenantId,
+            referenceId: stock.id,
+          });
+        }
+      }
 
       return stockRepo.findOne({
         where: { id: stock.id },

@@ -13,6 +13,7 @@ import {
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Gender } from '../../common/enums/gender.enum.js';
+import { RecipeItemDto } from './recipe-item.dto.js';
 
 export class CreateVariantDto {
   @ApiPropertyOptional({ example: 'M' })
@@ -110,4 +111,15 @@ export class CreateProductDto {
   @ValidateNested({ each: true })
   @Type(() => CreateVariantDto)
   variants: CreateVariantDto[];
+
+  @ApiPropertyOptional({
+    type: [RecipeItemDto],
+    description:
+      'Receta de esencias (perfumería): esencias y gramos por unidad producida',
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => RecipeItemDto)
+  essences?: RecipeItemDto[];
 }

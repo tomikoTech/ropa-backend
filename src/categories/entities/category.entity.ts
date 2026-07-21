@@ -10,6 +10,7 @@ import {
   Unique,
 } from 'typeorm';
 import { TenantAwareEntity } from '../../common/entities/tenant-aware.entity.js';
+import { CategoryType } from '../../common/enums/category-type.enum.js';
 
 @Entity('categories')
 @Unique(['tenantId', 'name'])
@@ -20,6 +21,10 @@ export class Category extends TenantAwareEntity {
 
   @Column()
   name: string;
+
+  // Rol de la categoría (perfumería y otros): STANDARD | ESSENCE | FRASCO.
+  @Column({ type: 'enum', enum: CategoryType, default: CategoryType.STANDARD })
+  type: CategoryType;
 
   @Column({ name: 'display_name', nullable: true })
   displayName: string;

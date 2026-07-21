@@ -1,17 +1,24 @@
 import {
   IsBoolean,
+  IsEnum,
   IsInt,
   IsOptional,
   IsString,
   IsUUID,
 } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { CategoryType } from '../../common/enums/category-type.enum.js';
 
 export class UpdateCategoryDto {
   @ApiPropertyOptional({ example: 'Camisetas' })
   @IsOptional()
   @IsString()
   name?: string;
+
+  @ApiPropertyOptional({ enum: CategoryType })
+  @IsOptional()
+  @IsEnum(CategoryType)
+  type?: CategoryType;
 
   @ApiPropertyOptional({ example: 'Camisetas Urbanas' })
   @IsOptional()
