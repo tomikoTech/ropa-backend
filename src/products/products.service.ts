@@ -522,17 +522,36 @@ export class ProductsService {
   async searchVariants(
     query: string,
     tenantId: string,
+    opts?: { limit?: number; offset?: number; type?: string },
   ): Promise<ProductVariant[]> {
-    return this.variantRepository
+    // Límite configurable (para el catálogo del POS con "ver más"), con tope.
+    const limit = Math.min(Math.max(Number(opts?.limit) || 20, 1), 200);
+    const offset = Math.max(Number(opts?.offset) || 0, 0);
+
+    const qb = this.variantRepository
       .createQueryBuilder('v')
       .leftJoinAndSelect('v.product', 'p')
+      .leftJoin('p.category', 'c')
       .where('v.is_active = true')
       .andWhere('p.status = :status', { status: 'ACTIVE' })
       .andWhere('p.tenant_id = :tenantId', { tenantId })
       .andWhere('(v.sku ILIKE :q OR v.barcode ILIKE :q OR p.name ILIKE :q)', {
         q: `%${query}%`,
-      })
-      .limit(20)
+      });
+
+    // Filtro por tipo de categoría (perfumería): STANDARD | ESSENCE | FRASCO.
+    // "STANDARD" incluye productos sin categoría o con categoría sin tipo.
+    if (opts?.type === 'STANDARD') {
+      qb.andWhere("(c.type = 'STANDARD' OR c.type IS NULL)");
+    } else if (opts?.type) {
+      qb.andWhere('c.type = :type', { type: opts.type });
+    }
+
+    return qb
+      .orderBy('p.name', 'ASC')
+      .addOrderBy('v.id', 'ASC')
+      .limit(limit)
+      .offset(offset)
       .getMany();
   }
 }

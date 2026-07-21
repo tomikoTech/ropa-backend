@@ -43,8 +43,21 @@ export class ProductsController {
     summary: 'Buscar variantes por SKU, código de barras o nombre',
   })
   @ApiQuery({ name: 'q', required: true })
-  searchVariants(@Query('q') query: string, @TenantId() tenantId: string) {
-    return this.productsService.searchVariants(query, tenantId);
+  @ApiQuery({ name: 'limit', required: false })
+  @ApiQuery({ name: 'offset', required: false })
+  @ApiQuery({ name: 'type', required: false })
+  searchVariants(
+    @Query('q') query: string,
+    @TenantId() tenantId: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('type') type?: string,
+  ) {
+    return this.productsService.searchVariants(query, tenantId, {
+      limit: limit ? Number(limit) : undefined,
+      offset: offset ? Number(offset) : undefined,
+      type: type || undefined,
+    });
   }
 
   @Get(':id')
