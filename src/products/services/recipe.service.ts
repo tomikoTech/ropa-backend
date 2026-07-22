@@ -33,6 +33,85 @@ export class RecipeService {
     });
   }
 
+  // Relación inversa: productos finales que USAN esta esencia. Devuelve una
+  // fila por producto final asociado (a cualquier variante de la esencia).
+  async getUsedIn(
+    essenceProductId: string,
+    tenantId: string,
+  ): Promise<{ productId: string; gramsPerUnit: number }[]> {
+    const variantRepo = this.essenceRepo.manager.getRepository(ProductVariant);
+    const essenceVariants = await variantRepo.find({
+      where: { productId: essenceProductId, tenantId },
+      select: ['id'],
+    });
+    if (essenceVariants.length === 0) return [];
+    const rows = await this.essenceRepo.find({
+      where: essenceVariants.map((v) => ({
+        essenceVariantId: v.id,
+        tenantId,
+      })),
+    });
+    return rows.map((r) => ({
+      productId: r.productId,
+      gramsPerUnit: Number(r.gramsPerUnit),
+    }));
+  }
+
+  // Reemplaza las asociaciones inversas de una esencia: qué productos finales
+  // la usan y con cuántos gramos. Todas las filas apuntan a la variante
+  // principal (primera) de la esencia. Ejecuta dentro de la transacción.
+  async replaceUsedIn(
+    manager: EntityManager,
+    essenceProductId: string,
+    tenantId: string,
+    items: { productId: string; gramsPerUnit: number }[],
+  ): Promise<void> {
+    const essenceRepo = manager.getRepository(ProductEssence);
+    const variantRepo = manager.getRepository(ProductVariant);
+
+    const essenceVariants = await variantRepo.find({
+      where: { productId: essenceProductId, tenantId },
+    });
+    if (essenceVariants.length === 0) {
+      throw new BadRequestException('La esencia no tiene variantes');
+    }
+    const variantIds = essenceVariants.map((v) => v.id);
+    const primaryVariantId = variantIds[0];
+
+    // Borrar todas las asociaciones existentes de esta esencia (cualquier
+    // variante), para reemplazarlas por la lista nueva.
+    await essenceRepo
+      .createQueryBuilder()
+      .delete()
+      .where('tenant_id = :tenantId', { tenantId })
+      .andWhere('essence_variant_id IN (:...variantIds)', { variantIds })
+      .execute();
+
+    if (!items || items.length === 0) return;
+
+    // Deduplicar por producto final.
+    const byProduct = new Map<string, number>();
+    for (const it of items) {
+      if (it.gramsPerUnit == null || it.gramsPerUnit < 0) {
+        throw new BadRequestException(
+          'Los gramos de esencia no pueden ser negativos',
+        );
+      }
+      byProduct.set(it.productId, Number(it.gramsPerUnit));
+    }
+
+    for (const [productId, gramsPerUnit] of byProduct) {
+      await essenceRepo.save(
+        essenceRepo.create({
+          productId,
+          essenceVariantId: primaryVariantId,
+          gramsPerUnit,
+          tenantId,
+        }),
+      );
+    }
+  }
+
   // Reemplaza por completo la receta de un producto. Valida que cada variante
   // de esencia exista en el tenant. Se ejecuta dentro de la transacción del
   // create/update del producto (recibe el EntityManager).

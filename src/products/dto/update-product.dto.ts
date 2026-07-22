@@ -14,7 +14,7 @@ import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Gender } from '../../common/enums/gender.enum.js';
 import { ProductStatus } from '../../common/enums/product-status.enum.js';
-import { RecipeItemDto } from './recipe-item.dto.js';
+import { RecipeItemDto, UsedInItemDto } from './recipe-item.dto.js';
 
 export class UpdateVariantDto {
   @ApiPropertyOptional()
@@ -136,4 +136,15 @@ export class UpdateProductDto {
   @ValidateNested({ each: true })
   @Type(() => RecipeItemDto)
   essences?: RecipeItemDto[];
+
+  @ApiPropertyOptional({
+    type: [UsedInItemDto],
+    description:
+      'Relación inversa (solo esencias): productos finales que usan esta esencia',
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => UsedInItemDto)
+  usedInProducts?: UsedInItemDto[];
 }

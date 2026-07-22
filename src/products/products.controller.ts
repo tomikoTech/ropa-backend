@@ -78,6 +78,17 @@ export class ProductsController {
     return this.productsService.getRecipe(id, tenantId);
   }
 
+  @Get(':id/used-in')
+  @ApiOperation({
+    summary: 'Productos finales que usan esta esencia (relación inversa)',
+  })
+  getUsedIn(
+    @Param('id', ParseUUIDPipe) id: string,
+    @TenantId() tenantId: string,
+  ) {
+    return this.productsService.getUsedIn(id, tenantId);
+  }
+
   @Patch(':id')
   @ApiOperation({ summary: 'Actualizar producto y variantes' })
   update(

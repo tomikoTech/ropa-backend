@@ -283,6 +283,15 @@ export class ProductsService {
         dto.essences,
       );
     }
+    // Relación inversa (esencia → productos que la usan).
+    if (dto.usedInProducts) {
+      await this.recipeService.replaceUsedIn(
+        this.dataSource.manager,
+        saved.id,
+        tenantId,
+        dto.usedInProducts,
+      );
+    }
 
     return this.findOne(saved.id, tenantId);
   }
@@ -461,6 +470,15 @@ export class ProductsService {
         dto.essences,
       );
     }
+    // Relación inversa (esencia → productos que la usan).
+    if (dto.usedInProducts) {
+      await this.recipeService.replaceUsedIn(
+        this.dataSource.manager,
+        id,
+        tenantId,
+        dto.usedInProducts,
+      );
+    }
 
     return this.findOne(id, tenantId);
   }
@@ -469,6 +487,15 @@ export class ProductsService {
   async getRecipe(id: string, tenantId: string): Promise<ProductEssence[]> {
     await this.findOne(id, tenantId); // valida existencia/tenant
     return this.recipeService.getRecipe(id, tenantId);
+  }
+
+  // Relación inversa: productos finales que usan esta esencia.
+  async getUsedIn(
+    id: string,
+    tenantId: string,
+  ): Promise<{ productId: string; gramsPerUnit: number }[]> {
+    await this.findOne(id, tenantId);
+    return this.recipeService.getUsedIn(id, tenantId);
   }
 
   async remove(id: string, tenantId: string): Promise<void> {
