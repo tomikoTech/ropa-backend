@@ -222,12 +222,13 @@ export class InventoryService {
       });
       await movementRepo.save(movement);
 
-      // Perfumería: si se AGREGARON unidades de un producto final con receta,
-      // consumir la esencia proporcional (misma bodega). Cero efecto para
-      // productos sin receta (no perfumería). El delta positivo dispara el
-      // consumo; correcciones a la baja no consumen.
+      // Perfumería: solo si se pide explícitamente (consumeEssence=producción)
+      // y se AGREGARON unidades de un producto final con receta, se consume la
+      // esencia proporcional (misma bodega). Por defecto NO se consume, para
+      // que cargar inventario inicial/conteos/correcciones no toque esencias.
+      // Cero efecto para productos sin receta.
       const unitsAdded = stock.quantity - prevQuantity;
-      if (unitsAdded > 0) {
+      if (dto.consumeEssence && unitsAdded > 0) {
         const variant = await manager.getRepository(ProductVariant).findOne({
           where: { id: dto.variantId, tenantId },
         });
