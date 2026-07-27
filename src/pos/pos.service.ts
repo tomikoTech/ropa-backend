@@ -489,7 +489,14 @@ export class PosService {
 
     return this.saleRepository.find({
       where,
-      relations: ['client', 'user', 'warehouse', 'items', 'payments'],
+      relations: [
+        'client',
+        'user',
+        'warehouse',
+        'items',
+        'payments',
+        'accountsReceivable',
+      ],
       order: { createdAt: 'DESC' },
       take: filters?.limit || 100,
     });
@@ -763,6 +770,77 @@ export class PosService {
       totalPaid,
       totalPending: totalCredit - totalPaid,
       activeAccounts: accounts.filter((a) => !a.isFullyPaid).length,
+    };
+  }
+
+  /**
+   * Estado de cuenta de un cliente: sus ventas a crédito (facturas) con lo que
+   * compró, cuánto ha abonado y cuánto debe. Reúne en una sola vista lo que
+   * antes obligaba a cruzar Ventas ↔ Cuentas por Cobrar. Genérico para todos
+   * los tenants.
+   */
+  async getClientStatement(clientId: string, tenantId: string) {
+    const accounts = await this.arRepository.find({
+      where: { clientId, tenantId },
+      relations: ['sale', 'sale.items', 'client', 'payments'],
+      order: { createdAt: 'DESC' },
+    });
+
+    let totalCredit = 0;
+    let totalPaid = 0;
+    let totalDebt = 0;
+
+    const client = accounts[0]?.client;
+
+    const invoices = accounts.map((ar) => {
+      const total = Number(ar.totalAmount);
+      const paid = Number(ar.paidAmount);
+      const balance = Math.max(0, total - paid);
+      const paymentStatus =
+        ar.isFullyPaid || balance <= 0
+          ? 'PAID'
+          : paid > 0
+            ? 'PARTIAL'
+            : 'PENDING';
+
+      totalCredit += total;
+      totalPaid += paid;
+      totalDebt += balance;
+
+      return {
+        id: ar.id,
+        saleId: ar.saleId,
+        invoiceNumber: ar.sale?.invoiceNumber ?? ar.sale?.saleNumber ?? null,
+        date: ar.createdAt,
+        dueDate: ar.dueDate ?? null,
+        total,
+        paidAmount: paid,
+        balance,
+        paymentStatus,
+        items: (ar.sale?.items || []).map((it) => ({
+          name: it.productName,
+          size: it.variantSize ?? '',
+          color: it.variantColor ?? '',
+          quantity: it.quantity,
+          unitPrice: Number(it.unitPrice),
+          lineTotal: it.quantity * Number(it.unitPrice),
+        })),
+      };
+    });
+
+    return {
+      client: client
+        ? {
+            id: client.id,
+            name: `${client.firstName ?? ''} ${client.lastName ?? ''}`.trim(),
+            documentNumber: client.documentNumber ?? null,
+            phone: client.phone ?? null,
+            email: client.email ?? null,
+            address: client.address ?? null,
+          }
+        : null,
+      invoices,
+      totals: { totalCredit, totalPaid, totalDebt },
     };
   }
 }

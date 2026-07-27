@@ -119,6 +119,98 @@ export class ProductsService {
     return !!s?.frascoAutoManaged;
   }
 
+  private async isEssenceAutoManaged(tenantId: string): Promise<boolean> {
+    const s = await this.storeSettingsRepo.findOne({ where: { tenantId } });
+    return !!s?.essenceAutoManaged;
+  }
+
+  // Crea una "Esencia {nombre}" en la categoría Esencias (tipo ESSENCE), con
+  // una variante y stock 0 en la bodega ESENCIAS (si existe), y la vincula a la
+  // loción en la receta con 0 gramos (sin definir aún). El objetivo es que la
+  // esencia quede disponible para buscarla al registrar compras; los gramos por
+  // unidad se definen después desde la receta del producto. Devuelve el
+  // variantId de la esencia (o null si no existe la categoría Esencias).
+  private async createEssenceForProduct(
+    locion: Product,
+    tenantId: string,
+  ): Promise<string | null> {
+    const essenceCat = await this.categoryRepository
+      .createQueryBuilder('c')
+      .where('c.tenant_id = :tenantId', { tenantId })
+      .andWhere("(c.type = 'ESSENCE' OR LOWER(c.name) = :n)", { n: 'esencias' })
+      .getOne();
+    if (!essenceCat) return null;
+
+    const name = `Esencia ${locion.name}`;
+    let skuPrefix = this.generateSkuPrefix(name);
+    let n = 1;
+    while (
+      await this.productRepository.findOne({ where: { skuPrefix, tenantId } })
+    ) {
+      n += 1;
+      skuPrefix = `${this.generateSkuPrefix(name)}${n}`;
+    }
+    const slug = await this.ensureUniqueSlug(this.generateSlug(name), tenantId);
+
+    const essence = this.productRepository.create({
+      name,
+      skuPrefix,
+      slug,
+      basePrice: 0,
+      costPrice: 0,
+      gender: locion.gender,
+      categoryId: essenceCat.id,
+      taxRate: 0,
+      description: '[auto-esencia]',
+      tenantId,
+    });
+    const savedEssence = await this.productRepository.save(essence);
+
+    const sku = await this.ensureUniqueSku(
+      this.generateSku(skuPrefix, 'Unica', 'Unico'),
+      tenantId,
+    );
+    const variant = this.variantRepository.create({
+      productId: savedEssence.id,
+      sku,
+      size: 'Única',
+      color: 'Único',
+      barcode: this.generateBarcode(),
+      tenantId,
+    });
+    const savedVariant = await this.variantRepository.save(variant);
+
+    // Stock 0 en bodega ESENCIAS (si existe)
+    const essenceWh = await this.warehouseRepository
+      .createQueryBuilder('w')
+      .where('w.tenant_id = :tenantId', { tenantId })
+      .andWhere('LOWER(w.name) = :n', { n: 'esencias' })
+      .getOne();
+    if (essenceWh) {
+      await this.stockRepository.save(
+        this.stockRepository.create({
+          variantId: savedVariant.id,
+          warehouseId: essenceWh.id,
+          quantity: 0,
+          minStock: 0,
+          tenantId,
+        }),
+      );
+    }
+
+    // Vincular a la receta de la loción con 0 gramos (sin definir aún).
+    await this.essenceRepository.save(
+      this.essenceRepository.create({
+        productId: locion.id,
+        essenceVariantId: savedVariant.id,
+        gramsPerUnit: 0,
+        tenantId,
+      }),
+    );
+
+    return savedVariant.id;
+  }
+
   private generateSkuPrefix(name: string): string {
     return name
       .toUpperCase()
@@ -291,6 +383,13 @@ export class ProductsService {
         tenantId,
         dto.usedInProducts,
       );
+    }
+
+    // Auto-crear esencia vinculada (perfumería): opt-in por producto y gated
+    // por el flag del tenant. Se ejecuta después de la receta manual para no
+    // pisarla (createEssenceForProduct hace append, no replace).
+    if (dto.autoCreateEssence && (await this.isEssenceAutoManaged(tenantId))) {
+      await this.createEssenceForProduct(saved, tenantId);
     }
 
     return this.findOne(saved.id, tenantId);

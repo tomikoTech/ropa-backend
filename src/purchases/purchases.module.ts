@@ -8,6 +8,7 @@ import { ProductVariant } from '../products/entities/product-variant.entity.js';
 import { Stock } from '../inventory/entities/stock.entity.js';
 import { StockMovement } from '../inventory/entities/stock-movement.entity.js';
 import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
+import { Supplier } from '../suppliers/entities/supplier.entity.js';
 import { PurchasesService } from './purchases.service.js';
 import { PurchasesController } from './purchases.controller.js';
 
@@ -22,6 +23,7 @@ import { PurchasesController } from './purchases.controller.js';
       Stock,
       StockMovement,
       StoreSettings,
+      Supplier,
     ]),
   ],
   controllers: [PurchasesController],

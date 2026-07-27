@@ -142,6 +142,14 @@ export class UpdateStoreSettingsDto {
   @IsBoolean()
   frascoAutoManaged?: boolean;
 
+  @ApiPropertyOptional({
+    example: true,
+    description: 'Crear automáticamente la esencia vinculada a cada loción',
+  })
+  @IsOptional()
+  @IsBoolean()
+  essenceAutoManaged?: boolean;
+
   @ApiPropertyOptional({ example: 'Bienvenidos a nuestra tienda' })
   @IsOptional()
   @IsString()

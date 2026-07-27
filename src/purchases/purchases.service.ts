@@ -13,6 +13,7 @@ import { ProductVariant } from '../products/entities/product-variant.entity.js';
 import { Stock } from '../inventory/entities/stock.entity.js';
 import { StockMovement } from '../inventory/entities/stock-movement.entity.js';
 import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
+import { Supplier } from '../suppliers/entities/supplier.entity.js';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto.js';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto.js';
 import { ReceiveItemsDto } from './dto/receive-items.dto.js';
@@ -34,8 +35,95 @@ export class PurchasesService {
     private readonly variantRepository: Repository<ProductVariant>,
     @InjectRepository(StoreSettings)
     private readonly settingsRepository: Repository<StoreSettings>,
+    @InjectRepository(Supplier)
+    private readonly supplierRepository: Repository<Supplier>,
     private readonly dataSource: DataSource,
   ) {}
+
+  /**
+   * Estado de cuenta de un proveedor: sus compras/facturas con lo que contienen,
+   * cuánto se le ha pagado y cuánto se le debe. Reúne en una sola vista lo que
+   * antes obligaba a cruzar Compras ↔ Cuentas por Pagar. Genérico para todos los
+   * tenants.
+   */
+  async getSupplierStatement(supplierId: string, tenantId: string) {
+    const supplier = await this.supplierRepository.findOne({
+      where: { id: supplierId, tenantId },
+    });
+    if (!supplier) throw new NotFoundException('Proveedor no encontrado');
+
+    const orders = await this.poRepository.find({
+      where: { supplierId, tenantId },
+      relations: [
+        'items',
+        'items.variant',
+        'items.variant.product',
+        'accountsPayable',
+      ],
+      order: { createdAt: 'DESC' },
+    });
+
+    let totalPurchased = 0;
+    let totalPaid = 0;
+    let totalDebt = 0;
+
+    const invoices = orders.map((po) => {
+      const total = Number(po.total);
+      // Una compra genera cuentas por pagar solo si se registró con crédito.
+      // Si no hay AP, se asume pagada de contado al momento de la compra.
+      const ap = po.accountsPayable?.[0];
+      const hasCredit = !!ap;
+      const amount = hasCredit ? Number(ap.amount) : total;
+      const paid = hasCredit ? Number(ap.paidAmount) : total;
+      const balance = Math.max(0, amount - paid);
+      const paymentStatus = !hasCredit
+        ? 'PAID'
+        : ap.isPaid || balance <= 0
+          ? 'PAID'
+          : paid > 0
+            ? 'PARTIAL'
+            : 'PENDING';
+
+      totalPurchased += total;
+      totalPaid += paid;
+      totalDebt += balance;
+
+      return {
+        id: po.id,
+        orderNumber: po.orderNumber,
+        supplierInvoiceNumber: po.supplierInvoiceNumber ?? null,
+        date: po.createdAt,
+        dueDate: ap?.dueDate ?? null,
+        status: po.status,
+        total,
+        paidAmount: paid,
+        balance,
+        paymentStatus,
+        items: (po.items || []).map((it) => ({
+          name: it.variant?.product?.name ?? 'Producto',
+          size: it.variant?.size ?? '',
+          color: it.variant?.color ?? '',
+          quantity: it.quantityOrdered,
+          unitCost: Number(it.unitCost),
+          lineTotal: it.quantityOrdered * Number(it.unitCost),
+        })),
+      };
+    });
+
+    return {
+      supplier: {
+        id: supplier.id,
+        name: supplier.name,
+        nit: supplier.nit ?? null,
+        contactName: supplier.contactName ?? null,
+        phone: supplier.phone ?? null,
+        email: supplier.email ?? null,
+        address: supplier.address ?? null,
+      },
+      invoices,
+      totals: { totalPurchased, totalPaid, totalDebt },
+    };
+  }
 
   /**
    * Resuelve el desglose de IVA de una compra. `applyTax` decide si se aplica;

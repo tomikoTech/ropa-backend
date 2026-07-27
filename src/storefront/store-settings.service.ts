@@ -100,6 +100,8 @@ export class StoreSettingsService {
       settings.collaboratorModules = dto.collaboratorModules;
     if (dto.frascoAutoManaged !== undefined)
       settings.frascoAutoManaged = dto.frascoAutoManaged;
+    if (dto.essenceAutoManaged !== undefined)
+      settings.essenceAutoManaged = dto.essenceAutoManaged;
     if (dto.heroTitle !== undefined) settings.heroTitle = dto.heroTitle;
     if (dto.heroSubtitle !== undefined)
       settings.heroSubtitle = dto.heroSubtitle;

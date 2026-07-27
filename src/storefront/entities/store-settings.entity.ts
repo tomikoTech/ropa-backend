@@ -308,6 +308,12 @@ export class StoreSettings extends TenantAwareEntity {
   @Column({ name: 'frasco_auto_managed', default: false })
   frascoAutoManaged: boolean;
 
+  // Perfumería: al crear una loción, crear también su esencia vinculada
+  // ("Esencia {nombre}") en la categoría Esencias, sin gramos definidos,
+  // para que quede disponible al registrar compras.
+  @Column({ name: 'essence_auto_managed', default: false })
+  essenceAutoManaged: boolean;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 

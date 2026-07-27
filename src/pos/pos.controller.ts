@@ -5,10 +5,13 @@ import {
   Body,
   Param,
   Query,
+  Res,
   ParseUUIDPipe,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { PosService } from './pos.service.js';
+import { buildStatementWorkbook } from '../common/utils/statement-excel.util.js';
 import { CreateSaleDto } from './dto/create-sale.dto.js';
 import { RecordArPaymentDto } from './dto/record-ar-payment.dto.js';
 import { SendInvoiceDto } from './dto/send-invoice.dto.js';
@@ -105,6 +108,85 @@ export class PosController {
     @TenantId() tenantId: string,
   ) {
     return this.posService.getClientAccountSummary(clientId, tenantId);
+  }
+
+  @Get('clients/:clientId/statement')
+  @ApiOperation({ summary: 'Estado de cuenta del cliente' })
+  getClientStatement(
+    @Param('clientId', ParseUUIDPipe) clientId: string,
+    @TenantId() tenantId: string,
+  ) {
+    return this.posService.getClientStatement(clientId, tenantId);
+  }
+
+  @Get('clients/:clientId/statement/export')
+  @ApiOperation({ summary: 'Exportar estado de cuenta del cliente (Excel)' })
+  async exportClientStatement(
+    @Param('clientId', ParseUUIDPipe) clientId: string,
+    @TenantId() tenantId: string,
+    @Res() res: Response,
+    @Query('format') format?: string,
+  ) {
+    const st = await this.posService.getClientStatement(clientId, tenantId);
+    const name = st.client?.name || 'cliente';
+    const wb = buildStatementWorkbook({
+      kind: 'client',
+      header: st.client
+        ? {
+            name: st.client.name,
+            doc: st.client.documentNumber,
+            phone: st.client.phone,
+            email: st.client.email,
+            address: st.client.address,
+          }
+        : { name },
+      baseLabel: 'Total facturado (crédito)',
+      totals: {
+        totalBase: st.totals.totalCredit,
+        totalPaid: st.totals.totalPaid,
+        totalDebt: st.totals.totalDebt,
+      },
+      invoices: st.invoices.map((i) => ({
+        number: i.invoiceNumber,
+        date: i.date,
+        dueDate: i.dueDate,
+        status: i.paymentStatus,
+        total: i.total,
+        paid: i.paidAmount,
+        balance: i.balance,
+        items: i.items.map((it) => ({
+          name: it.name,
+          size: it.size,
+          color: it.color,
+          quantity: it.quantity,
+          unit: it.unitPrice,
+          lineTotal: it.lineTotal,
+        })),
+      })),
+    });
+
+    const safe = name.replace(/[^a-zA-Z0-9]/g, '_');
+    if (format === 'csv') {
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename=estado-cuenta-${safe}.csv`,
+      );
+      res.write('﻿');
+      await wb.csv.write(res);
+      res.end();
+      return;
+    }
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename=estado-cuenta-${safe}.xlsx`,
+    );
+    await wb.xlsx.write(res);
+    res.end();
   }
 
   @Get('sales/:id')

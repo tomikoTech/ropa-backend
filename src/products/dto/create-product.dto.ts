@@ -80,6 +80,15 @@ export class CreateProductDto {
   @IsBoolean()
   autoCreateFrasco?: boolean;
 
+  @ApiPropertyOptional({
+    example: true,
+    description:
+      'Crear y vincular automáticamente una "Esencia {nombre}" (perfumería)',
+  })
+  @IsOptional()
+  @IsBoolean()
+  autoCreateEssence?: boolean;
+
   @ApiPropertyOptional({ example: 19 })
   @IsOptional()
   @IsNumber()

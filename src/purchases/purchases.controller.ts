@@ -6,10 +6,13 @@ import {
   Body,
   Param,
   Query,
+  Res,
   ParseUUIDPipe,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { PurchasesService } from './purchases.service.js';
+import { buildStatementWorkbook } from '../common/utils/statement-excel.util.js';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto.js';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto.js';
 import { ReceiveItemsDto } from './dto/receive-items.dto.js';
@@ -59,6 +62,87 @@ export class PurchasesController {
     @Query('supplierId') supplierId?: string,
   ) {
     return this.purchasesService.findAll({ status, supplierId }, tenantId);
+  }
+
+  @Get('suppliers/:supplierId/statement')
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Estado de cuenta del proveedor' })
+  getSupplierStatement(
+    @Param('supplierId', ParseUUIDPipe) supplierId: string,
+    @TenantId() tenantId: string,
+  ) {
+    return this.purchasesService.getSupplierStatement(supplierId, tenantId);
+  }
+
+  @Get('suppliers/:supplierId/statement/export')
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Exportar estado de cuenta del proveedor (Excel)' })
+  async exportSupplierStatement(
+    @Param('supplierId', ParseUUIDPipe) supplierId: string,
+    @TenantId() tenantId: string,
+    @Res() res: Response,
+    @Query('format') format?: string,
+  ) {
+    const st = await this.purchasesService.getSupplierStatement(
+      supplierId,
+      tenantId,
+    );
+    const wb = buildStatementWorkbook({
+      kind: 'supplier',
+      header: {
+        name: st.supplier.name,
+        doc: st.supplier.nit,
+        phone: st.supplier.phone,
+        email: st.supplier.email,
+        address: st.supplier.address,
+      },
+      baseLabel: 'Total comprado',
+      totals: {
+        totalBase: st.totals.totalPurchased,
+        totalPaid: st.totals.totalPaid,
+        totalDebt: st.totals.totalDebt,
+      },
+      invoices: st.invoices.map((i) => ({
+        number: i.supplierInvoiceNumber || i.orderNumber,
+        date: i.date,
+        dueDate: i.dueDate,
+        status: i.paymentStatus,
+        total: i.total,
+        paid: i.paidAmount,
+        balance: i.balance,
+        items: i.items.map((it) => ({
+          name: it.name,
+          size: it.size,
+          color: it.color,
+          quantity: it.quantity,
+          unit: it.unitCost,
+          lineTotal: it.lineTotal,
+        })),
+      })),
+    });
+
+    const safe = st.supplier.name.replace(/[^a-zA-Z0-9]/g, '_');
+    if (format === 'csv') {
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename=estado-cuenta-${safe}.csv`,
+      );
+      res.write('﻿');
+      await wb.csv.write(res);
+      res.end();
+      return;
+    }
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename=estado-cuenta-${safe}.xlsx`,
+    );
+    await wb.xlsx.write(res);
+    res.end();
   }
 
   @Get('accounts-payable')
