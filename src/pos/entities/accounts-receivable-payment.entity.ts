@@ -33,6 +33,10 @@ export class AccountsReceivablePayment extends TenantAwareEntity {
   @Column({ nullable: true })
   reference: string;
 
+  // Banco donde entra el abono (para TARJETA/TRANSFERENCIA). Opcional.
+  @Column({ name: 'bank_id', type: 'uuid', nullable: true })
+  bankId: string | null;
+
   @Column({ name: 'receipt_image_url', nullable: true })
   receiptImageUrl: string;
 

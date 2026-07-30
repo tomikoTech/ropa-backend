@@ -40,6 +40,10 @@ export class PaymentDto {
   @IsOptional()
   reference?: string;
 
+  @IsUUID()
+  @IsOptional()
+  bankId?: string;
+
   @IsNumber()
   @Min(0)
   @IsOptional()

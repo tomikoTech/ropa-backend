@@ -38,6 +38,10 @@ export class Payment extends TenantAwareEntity {
   @Column({ nullable: true })
   reference: string;
 
+  // Banco donde cae el dinero (para TARJETA/TRANSFERENCIA/CREDITO). Opcional.
+  @Column({ name: 'bank_id', type: 'uuid', nullable: true })
+  bankId: string | null;
+
   @Column({ name: 'receipt_image_url', nullable: true })
   receiptImageUrl: string;
 

@@ -1,4 +1,11 @@
-import { IsNumber, IsEnum, IsString, IsOptional, Min } from 'class-validator';
+import {
+  IsNumber,
+  IsEnum,
+  IsString,
+  IsOptional,
+  IsUUID,
+  Min,
+} from 'class-validator';
 import { PaymentMethod } from '../../common/enums/payment-method.enum.js';
 
 export class RecordArPaymentDto {
@@ -12,6 +19,10 @@ export class RecordArPaymentDto {
   @IsString()
   @IsOptional()
   reference?: string;
+
+  @IsUUID()
+  @IsOptional()
+  bankId?: string;
 
   @IsString()
   @IsOptional()

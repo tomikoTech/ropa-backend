@@ -23,6 +23,8 @@ import { StorefrontModule } from './storefront/storefront.module.js';
 import { PaymentsModule } from './payments/payments.module.js';
 import { ProductionModule } from './production/production.module.js';
 import { AdminModule } from './admin/admin.module.js';
+import { BanksModule } from './banks/banks.module.js';
+import { IncomesModule } from './incomes/incomes.module.js';
 import { CommonModule } from './common/common.module.js';
 import { AuditInterceptor } from './audit/audit.interceptor.js';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard.js';
@@ -56,6 +58,8 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard.js';
     PaymentsModule,
     ProductionModule,
     AdminModule,
+    BanksModule,
+    IncomesModule,
     CommonModule,
   ],
   providers: [
