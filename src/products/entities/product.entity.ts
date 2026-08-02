@@ -80,6 +80,16 @@ export class Product extends TenantAwareEntity {
   @Column({ name: 'display_name', nullable: true })
   displayName: string;
 
+  // Marca del producto (ej. NIKE, ADIDAS). MiPinta no la tenía; se agregó para
+  // la migración desde demachine (Sportcali), que sí maneja marca por producto.
+  @Column({ nullable: true })
+  brand: string;
+
+  // Referencia de procedencia para migraciones/re-sync idempotentes.
+  // Formato: "<sistema>:<instancia>:<id>" (ej. "demachine:sportcali:534").
+  @Column({ name: 'source_ref', nullable: true })
+  sourceRef: string;
+
   @Column({ name: 'image_url', nullable: true })
   imageUrl: string;
 
