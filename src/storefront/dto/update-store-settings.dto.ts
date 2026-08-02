@@ -150,6 +150,14 @@ export class UpdateStoreSettingsDto {
   @IsBoolean()
   essenceAutoManaged?: boolean;
 
+  @ApiPropertyOptional({
+    example: true,
+    description: 'Habilita el módulo de Producción / perfumería (esencias y frascos)',
+  })
+  @IsOptional()
+  @IsBoolean()
+  productionEnabled?: boolean;
+
   @ApiPropertyOptional({ example: 'Bienvenidos a nuestra tienda' })
   @IsOptional()
   @IsString()

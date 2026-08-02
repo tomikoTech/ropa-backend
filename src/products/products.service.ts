@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, ConflictException } from '@nestjs/common
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository, In } from 'typeorm';
 import { RecipeService } from './services/recipe.service.js';
+import { BrandsService } from '../brands/brands.service.js';
 import { ProductEssence } from './entities/product-essence.entity.js';
 import { Product } from './entities/product.entity.js';
 import { ProductVariant } from './entities/product-variant.entity.js';
@@ -30,6 +31,7 @@ export class ProductsService {
     @InjectRepository(ProductEssence)
     private readonly essenceRepository: Repository<ProductEssence>,
     private readonly recipeService: RecipeService,
+    private readonly brandsService: BrandsService,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -322,6 +324,7 @@ export class ProductsService {
       costPrice: dto.costPrice ?? 0,
       gender: dto.gender,
       categoryId: dto.categoryId,
+      brand: dto.brand?.trim() || undefined,
       frascoVariantId: dto.frascoVariantId ?? null,
       taxRate: dto.taxRate ?? 19,
       imageUrl: dto.imageUrl || dto.imageUrls?.[0],
@@ -331,6 +334,7 @@ export class ProductsService {
     });
 
     const saved = await this.productRepository.save(product);
+    await this.brandsService.ensure(dto.brand, tenantId);
 
     // Create variants
     if (dto.variants && dto.variants.length > 0) {
@@ -510,6 +514,10 @@ export class ProductsService {
     if (dto.costPrice !== undefined) product.costPrice = dto.costPrice;
     if (dto.gender !== undefined) product.gender = dto.gender;
     if (dto.categoryId !== undefined) product.categoryId = dto.categoryId as string;
+    if (dto.brand !== undefined) {
+      product.brand = dto.brand?.trim() || (null as never);
+      await this.brandsService.ensure(dto.brand, tenantId);
+    }
     if (dto.frascoVariantId !== undefined)
       product.frascoVariantId = dto.frascoVariantId || null;
     if (dto.status !== undefined) product.status = dto.status;

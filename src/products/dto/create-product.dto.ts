@@ -64,6 +64,11 @@ export class CreateProductDto {
   @IsUUID()
   categoryId?: string;
 
+  @ApiPropertyOptional({ example: 'Nike', description: 'Marca del producto' })
+  @IsOptional()
+  @IsString()
+  brand?: string;
+
   @ApiPropertyOptional({
     example: 'uuid-variante-frasco',
     description: 'Frasco (variante) que se descuenta al vender este producto',

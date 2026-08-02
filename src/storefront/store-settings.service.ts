@@ -102,6 +102,8 @@ export class StoreSettingsService {
       settings.frascoAutoManaged = dto.frascoAutoManaged;
     if (dto.essenceAutoManaged !== undefined)
       settings.essenceAutoManaged = dto.essenceAutoManaged;
+    if (dto.productionEnabled !== undefined)
+      settings.productionEnabled = dto.productionEnabled;
     if (dto.heroTitle !== undefined) settings.heroTitle = dto.heroTitle;
     if (dto.heroSubtitle !== undefined)
       settings.heroSubtitle = dto.heroSubtitle;

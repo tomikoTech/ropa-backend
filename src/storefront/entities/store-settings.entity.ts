@@ -314,6 +314,12 @@ export class StoreSettings extends TenantAwareEntity {
   @Column({ name: 'essence_auto_managed', default: false })
   essenceAutoManaged: boolean;
 
+  // Módulo de Producción / perfumería (esencias y frascos). Es genérico pero
+  // solo algunos tenants lo usan (p.ej. Distri Amber). Controla la pestaña
+  // "Producción" y el bloque de perfumería en Productos. Off por defecto.
+  @Column({ name: 'production_enabled', default: false })
+  productionEnabled: boolean;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 

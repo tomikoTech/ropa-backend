@@ -11,6 +11,7 @@ import { Category } from '../categories/entities/category.entity.js';
 import { Warehouse } from '../inventory/entities/warehouse.entity.js';
 import { Stock } from '../inventory/entities/stock.entity.js';
 import { StockMovement } from '../inventory/entities/stock-movement.entity.js';
+import { BrandsModule } from '../brands/brands.module.js';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { StockMovement } from '../inventory/entities/stock-movement.entity.js';
       Stock,
       StockMovement,
     ]),
+    BrandsModule,
   ],
   controllers: [ProductsController],
   providers: [ProductsService, RecipeService],

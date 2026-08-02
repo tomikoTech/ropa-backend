@@ -77,6 +77,11 @@ export class UpdateProductDto {
   @IsUUID()
   categoryId?: string | null;
 
+  @ApiPropertyOptional({ example: 'Nike', description: 'Marca del producto' })
+  @IsOptional()
+  @IsString()
+  brand?: string;
+
   @ApiPropertyOptional({ description: 'Frasco (variante) vinculado' })
   @IsOptional()
   @ValidateIf((_o, value) => value !== null)
