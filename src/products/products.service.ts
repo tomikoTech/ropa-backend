@@ -744,9 +744,10 @@ export class ProductsService {
       .where('v.is_active = true')
       .andWhere('p.status = :status', { status: 'ACTIVE' })
       .andWhere('p.tenant_id = :tenantId', { tenantId })
-      .andWhere('(v.sku ILIKE :q OR v.barcode ILIKE :q OR p.name ILIKE :q)', {
-        q: `%${query}%`,
-      });
+      .andWhere(
+        '(v.sku ILIKE :q OR v.barcode ILIKE :q OR p.name ILIKE :q OR p.brand ILIKE :q)',
+        { q: `%${query}%` },
+      );
 
     // Filtro por tipo de categoría (perfumería): STANDARD | ESSENCE | FRASCO.
     // "STANDARD" incluye productos sin categoría o con categoría sin tipo.
