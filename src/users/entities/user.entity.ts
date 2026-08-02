@@ -12,12 +12,17 @@ import { TenantAwareEntity } from '../../common/entities/tenant-aware.entity.js'
 
 @Entity('users')
 @Unique(['tenantId', 'email'])
+@Unique(['tenantId', 'username'])
 export class User extends TenantAwareEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
   @Column()
   email: string;
+
+  // Nombre de usuario opcional para login (además del email). Ej: "cesar".
+  @Column({ nullable: true })
+  username: string;
 
   @Column({ name: 'password_hash' })
   @Exclude()

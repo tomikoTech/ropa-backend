@@ -171,6 +171,7 @@ async function main() {
   }
 
   // ── 3. Staff -> Users ──
+  const usedUsernames = new Set<string>();
   for (const s of payload.staff) {
     if (!s.email || s.email.endsWith('@demachine.co')) continue; // salta soporte interno
     const email = s.email.trim().toLowerCase();
@@ -183,8 +184,27 @@ async function main() {
       const isOwner =
         (s.name || '').trim().toLowerCase() === 'cesar' ||
         email.startsWith('cesarpgiron');
+      // username para login (además del email): nombre de demachine normalizado,
+      // único por tenant.
+      const baseUsername =
+        (s.name || '')
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .replace(/[^a-z0-9]+/g, '') || email.split('@')[0];
+      let username = baseUsername;
+      let un = 1;
+      while (
+        usedUsernames.has(username) ||
+        (await userRepo.findOne({ where: { tenantId, username } }))
+      ) {
+        un++;
+        username = `${baseUsername}${un}`;
+      }
+      usedUsernames.add(username);
       user = userRepo.create({
         email,
+        username,
         passwordHash,
         firstName: parts[0] || 'Staff',
         lastName: parts.slice(1).join(' ') || 'Sportcali',

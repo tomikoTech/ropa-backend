@@ -58,6 +58,15 @@ export class UsersService {
     return this.userRepository.findOne({ where: { email } });
   }
 
+  // Login por email O nombre de usuario (mismo criterio global que findByEmail).
+  async findByEmailOrUsername(identifier: string): Promise<User | null> {
+    const id = (identifier || '').trim();
+    if (!id) return null;
+    return this.userRepository.findOne({
+      where: [{ email: id }, { username: id }],
+    });
+  }
+
   async update(
     id: string,
     updateUserDto: UpdateUserDto,
