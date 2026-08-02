@@ -33,25 +33,33 @@ export class ProductsController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'Listar productos (paginado si se envía page/limit/search)' })
+  @ApiOperation({
+    summary: 'Listar productos (paginado si se envían filtros/paginación)',
+  })
   @ApiQuery({ name: 'page', required: false })
   @ApiQuery({ name: 'limit', required: false })
   @ApiQuery({ name: 'search', required: false })
-  @ApiQuery({ name: 'categoryId', required: false })
+  @ApiQuery({ name: 'categoryIds', required: false, description: 'IDs separados por coma' })
+  @ApiQuery({ name: 'gender', required: false })
+  @ApiQuery({ name: 'type', required: false, description: 'STANDARD | ESSENCE | FRASCO' })
   findAll(
     @TenantId() tenantId: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('search') search?: string,
-    @Query('categoryId') categoryId?: string,
+    @Query('categoryIds') categoryIds?: string,
+    @Query('gender') gender?: string,
+    @Query('type') type?: string,
   ) {
-    // Backward-compatible: sin params de paginación devuelve el array completo
+    // Backward-compatible: sin ningún param devuelve el array completo
     // (POS, gestión de storefront, etc. lo siguen consumiendo igual).
     if (
       page === undefined &&
       limit === undefined &&
       search === undefined &&
-      categoryId === undefined
+      categoryIds === undefined &&
+      gender === undefined &&
+      type === undefined
     ) {
       return this.productsService.findAll(tenantId);
     }
@@ -59,7 +67,11 @@ export class ProductsController {
       page: page ? Number(page) : 1,
       limit: limit ? Number(limit) : 30,
       search,
-      categoryId,
+      categoryIds: categoryIds
+        ? categoryIds.split(',').map((s) => s.trim()).filter(Boolean)
+        : undefined,
+      gender,
+      type,
     });
   }
 

@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository, ILike, FindOptionsWhere } from 'typeorm';
+import { DataSource, Repository, In } from 'typeorm';
 import { RecipeService } from './services/recipe.service.js';
 import { ProductEssence } from './entities/product-essence.entity.js';
 import { Product } from './entities/product.entity.js';
@@ -411,7 +411,14 @@ export class ProductsService {
    */
   async findPaginated(
     tenantId: string,
-    opts: { page?: number; limit?: number; search?: string; categoryId?: string },
+    opts: {
+      page?: number;
+      limit?: number;
+      search?: string;
+      categoryIds?: string[];
+      gender?: string;
+      type?: string;
+    },
   ): Promise<{
     data: Product[];
     total: number;
@@ -421,26 +428,52 @@ export class ProductsService {
   }> {
     const page = Math.max(1, opts.page || 1);
     const limit = Math.min(200, Math.max(1, opts.limit || 30));
-    const base: FindOptionsWhere<Product> = { tenantId };
-    if (opts.categoryId) base.categoryId = opts.categoryId;
 
-    let where: FindOptionsWhere<Product> | FindOptionsWhere<Product>[] = base;
+    // Paso 1: IDs de la página aplicando TODOS los filtros en el servidor.
+    // leftJoin (no select) a category para poder filtrar por su `type` sin
+    // multiplicar filas (es many-to-one). Así take/skip pagina productos bien.
+    const qb = this.productRepository
+      .createQueryBuilder('p')
+      .leftJoin('p.category', 'c')
+      .where('p.tenantId = :tenantId', { tenantId });
+
+    if (opts.categoryIds && opts.categoryIds.length) {
+      qb.andWhere('p.categoryId IN (:...categoryIds)', {
+        categoryIds: opts.categoryIds,
+      });
+    }
+    if (opts.gender) {
+      qb.andWhere('p.gender = :gender', { gender: opts.gender });
+    }
+    if (opts.type) {
+      // type de la categoría (STANDARD/ESSENCE/FRASCO); null => STANDARD.
+      qb.andWhere("COALESCE(c.type, 'STANDARD') = :type", { type: opts.type });
+    }
     if (opts.search && opts.search.trim()) {
-      const q = ILike(`%${opts.search.trim()}%`);
-      // tenantId (+category) AND (name ILIKE q OR skuPrefix ILIKE q)
-      where = [
-        { ...base, name: q },
-        { ...base, skuPrefix: q },
-      ];
+      qb.andWhere(
+        '(p.name ILIKE :q OR p.skuPrefix ILIKE :q OR p.brand ILIKE :q)',
+        { q: `%${opts.search.trim()}%` },
+      );
     }
 
-    const [data, total] = await this.productRepository.findAndCount({
-      where,
-      relations: ['category', 'variants'],
-      order: { createdAt: 'DESC' },
-      take: limit,
-      skip: (page - 1) * limit,
-    });
+    qb.orderBy('p.createdAt', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit);
+
+    const [rows, total] = await qb.getManyAndCount();
+
+    // Paso 2: cargar esos productos CON relaciones (category, variants),
+    // preservando el orden de la página.
+    const ids = rows.map((r) => r.id);
+    let data: Product[] = [];
+    if (ids.length) {
+      const withRel = await this.productRepository.find({
+        where: { id: In(ids) },
+        relations: ['category', 'variants'],
+      });
+      const byId = new Map(withRel.map((p) => [p.id, p]));
+      data = ids.map((id) => byId.get(id)!).filter(Boolean);
+    }
 
     return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
