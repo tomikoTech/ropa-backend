@@ -9,6 +9,7 @@ import { AuthModule } from './auth/auth.module.js';
 import { UsersModule } from './users/users.module.js';
 import { CategoriesModule } from './categories/categories.module.js';
 import { BrandsModule } from './brands/brands.module.js';
+import { ConsignmentsModule } from './consignments/consignments.module.js';
 import { ProductsModule } from './products/products.module.js';
 import { InventoryModule } from './inventory/inventory.module.js';
 import { ClientsModule } from './clients/clients.module.js';
@@ -45,6 +46,7 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard.js';
     UsersModule,
     CategoriesModule,
     BrandsModule,
+    ConsignmentsModule,
     ProductsModule,
     InventoryModule,
     ClientsModule,
