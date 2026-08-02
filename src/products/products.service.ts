@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, Repository, ILike, FindOptionsWhere } from 'typeorm';
 import { RecipeService } from './services/recipe.service.js';
 import { ProductEssence } from './entities/product-essence.entity.js';
 import { Product } from './entities/product.entity.js';
@@ -401,6 +401,48 @@ export class ProductsService {
       relations: ['category', 'variants'],
       order: { createdAt: 'DESC' },
     });
+  }
+
+  /**
+   * Listado paginado + filtrado en el servidor (para la tabla de productos).
+   * Evita traer TODO el catálogo (payload de cientos de KB) en cada carga.
+   * `find` con take/skip pagina bien aunque haya relaciones one-to-many
+   * (TypeORM no cae en el bug del LIMIT sobre el JOIN).
+   */
+  async findPaginated(
+    tenantId: string,
+    opts: { page?: number; limit?: number; search?: string; categoryId?: string },
+  ): Promise<{
+    data: Product[];
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  }> {
+    const page = Math.max(1, opts.page || 1);
+    const limit = Math.min(200, Math.max(1, opts.limit || 30));
+    const base: FindOptionsWhere<Product> = { tenantId };
+    if (opts.categoryId) base.categoryId = opts.categoryId;
+
+    let where: FindOptionsWhere<Product> | FindOptionsWhere<Product>[] = base;
+    if (opts.search && opts.search.trim()) {
+      const q = ILike(`%${opts.search.trim()}%`);
+      // tenantId (+category) AND (name ILIKE q OR skuPrefix ILIKE q)
+      where = [
+        { ...base, name: q },
+        { ...base, skuPrefix: q },
+      ];
+    }
+
+    const [data, total] = await this.productRepository.findAndCount({
+      where,
+      relations: ['category', 'variants'],
+      order: { createdAt: 'DESC' },
+      take: limit,
+      skip: (page - 1) * limit,
+    });
+
+    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
   async findOne(id: string, tenantId: string): Promise<Product> {

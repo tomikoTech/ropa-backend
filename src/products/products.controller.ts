@@ -33,9 +33,34 @@ export class ProductsController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'Listar todos los productos' })
-  findAll(@TenantId() tenantId: string) {
-    return this.productsService.findAll(tenantId);
+  @ApiOperation({ summary: 'Listar productos (paginado si se envía page/limit/search)' })
+  @ApiQuery({ name: 'page', required: false })
+  @ApiQuery({ name: 'limit', required: false })
+  @ApiQuery({ name: 'search', required: false })
+  @ApiQuery({ name: 'categoryId', required: false })
+  findAll(
+    @TenantId() tenantId: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
+    @Query('categoryId') categoryId?: string,
+  ) {
+    // Backward-compatible: sin params de paginación devuelve el array completo
+    // (POS, gestión de storefront, etc. lo siguen consumiendo igual).
+    if (
+      page === undefined &&
+      limit === undefined &&
+      search === undefined &&
+      categoryId === undefined
+    ) {
+      return this.productsService.findAll(tenantId);
+    }
+    return this.productsService.findPaginated(tenantId, {
+      page: page ? Number(page) : 1,
+      limit: limit ? Number(limit) : 30,
+      search,
+      categoryId,
+    });
   }
 
   @Get('search')
