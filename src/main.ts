@@ -20,17 +20,41 @@ async function bootstrap() {
   app.use(urlencoded({ extended: true, limit: '20mb' }));
 
   app.setGlobalPrefix('api');
+
+  // Orígenes permitidos por CORS. Lista fija + cualquier subdominio de
+  // mipinta.shop (dashboard.mipinta.shop, tienda.mipinta.shop, etc. — así
+  // agregar un dominio nuevo no requiere tocar código) + override por env
+  // CORS_ORIGINS (lista separada por comas) para casos puntuales.
+  const staticOrigins = [
+    'http://localhost:3000',
+    'http://localhost:3001',
+    'http://localhost:3002',
+    'https://ecommerce-frontend-production-964f.up.railway.app',
+    'https://ropa-frontend-production.up.railway.app',
+    'https://mipintapos.up.railway.app',
+  ];
+  const envOrigins = (process.env.CORS_ORIGINS ?? '')
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
+  const allowedOrigins = [...staticOrigins, ...envOrigins];
+  // Apex y cualquier subdominio de mipinta.shop, solo https.
+  const mipintaShopRegex = /^https:\/\/([a-z0-9-]+\.)*mipinta\.shop$/i;
+
   app.enableCors({
-    origin: [
-      'http://localhost:3000',
-      'http://localhost:3001',
-      'http://localhost:3002',
-      'https://ecommerce-frontend-production-964f.up.railway.app',
-      'https://ropa-frontend-production.up.railway.app',
-      'https://mipintapos.up.railway.app',
-      'https://mipinta.shop',
-      'https://www.mipinta.shop',
-    ],
+    origin: (
+      origin: string | undefined,
+      callback: (err: Error | null, allow?: boolean) => void,
+    ) => {
+      // Peticiones sin Origin (curl, health checks, apps móviles) se permiten.
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.includes(origin) || mipintaShopRegex.test(origin)) {
+        return callback(null, true);
+      }
+      // Denegar sin lanzar: el navegador bloquea igual, pero evitamos un 500
+      // (y ruido en logs) por cada origen desconocido (bots, escáneres, etc.).
+      return callback(null, false);
+    },
     credentials: true,
   });
 
