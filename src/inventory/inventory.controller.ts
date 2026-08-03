@@ -185,4 +185,18 @@ export class InventoryController {
       tenantId,
     );
   }
+
+  @Patch('stock/min-by-warehouse/:warehouseId')
+  @ApiOperation({ summary: 'Fijar el mínimo de toda una bodega de una vez' })
+  setMinStockByWarehouse(
+    @Param('warehouseId', ParseUUIDPipe) warehouseId: string,
+    @Body('minStock') minStock: number,
+    @TenantId() tenantId: string,
+  ) {
+    return this.inventoryService.setMinStockByWarehouse(
+      warehouseId,
+      minStock,
+      tenantId,
+    );
+  }
 }

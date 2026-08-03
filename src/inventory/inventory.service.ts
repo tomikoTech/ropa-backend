@@ -467,4 +467,21 @@ export class InventoryService {
     stock.minStock = minStock;
     return this.stockRepository.save(stock);
   }
+
+  /**
+   * Fija el mínimo de TODAS las existencias de una bodega de una sola vez.
+   * Caso típico (Cesar): "avísame para reponer cuando una talla baje de 1"
+   * en cada local (una muestra por talla). Evita configurar variante por variante.
+   */
+  async setMinStockByWarehouse(
+    warehouseId: string,
+    minStock: number,
+    tenantId: string,
+  ): Promise<{ updated: number }> {
+    const res = await this.stockRepository.update(
+      { warehouseId, tenantId },
+      { minStock: Math.max(0, Math.floor(minStock)) },
+    );
+    return { updated: res.affected ?? 0 };
+  }
 }
