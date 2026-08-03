@@ -28,6 +28,7 @@ import { Tenant } from '../tenants/entities/tenant.entity.js';
 import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
 import { EcommerceOrder } from '../storefront/entities/ecommerce-order.entity.js';
 import { EcommerceOrderItem } from '../storefront/entities/ecommerce-order-item.entity.js';
+import { EcommerceCustomer } from '../storefront/entities/ecommerce-customer.entity.js';
 import { Role } from '../common/enums/role.enum.js';
 import { Gender } from '../common/enums/gender.enum.js';
 import { MovementType } from '../common/enums/movement-type.enum.js';
@@ -72,6 +73,7 @@ const dataSource = new DataSource({
     StoreSettings,
     EcommerceOrder,
     EcommerceOrderItem,
+    EcommerceCustomer,
   ],
   synchronize: true,
 });
