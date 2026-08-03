@@ -326,6 +326,7 @@ export class ProductsService {
       gender: dto.gender,
       categoryId: dto.categoryId,
       brand: dto.brand?.trim() || undefined,
+      lote: dto.lote?.trim() || undefined,
       frascoVariantId: dto.frascoVariantId ?? null,
       taxRate: dto.taxRate ?? 19,
       imageUrl: dto.imageUrl || dto.imageUrls?.[0],
@@ -521,6 +522,7 @@ export class ProductsService {
       product.brand = dto.brand?.trim() || (null as never);
       await this.brandsService.ensure(dto.brand, tenantId);
     }
+    if (dto.lote !== undefined) product.lote = dto.lote?.trim() || (null as never);
     if (dto.frascoVariantId !== undefined)
       product.frascoVariantId = dto.frascoVariantId || null;
     if (dto.status !== undefined) product.status = dto.status;

@@ -101,6 +101,11 @@ export class Product extends TenantAwareEntity {
   @Column({ name: 'source_ref', nullable: true })
   sourceRef: string;
 
+  // Lote / pedido al que pertenece el producto (etiqueta libre, ej. un pedido
+  // de compra o una carga). Para reportes "cuánto queda del pedido de X".
+  @Column({ nullable: true })
+  lote: string;
+
   @Column({ name: 'image_url', nullable: true })
   imageUrl: string;
 

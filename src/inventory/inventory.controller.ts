@@ -103,6 +103,12 @@ export class InventoryController {
     );
   }
 
+  @Get('lotes')
+  @ApiOperation({ summary: 'Resumen por lote/pedido (cuánto queda de cada uno)' })
+  getLotes(@TenantId() tenantId: string) {
+    return this.inventoryService.getLotes(tenantId);
+  }
+
   @Get('stock/warehouse/:warehouseId')
   @ApiOperation({ summary: 'Stock por bodega' })
   getStockByWarehouse(

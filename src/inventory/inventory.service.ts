@@ -224,6 +224,49 @@ export class InventoryService {
     return result.sort((a, b) => a.totalQty - b.totalQty);
   }
 
+  /**
+   * Resumen por LOTE/PEDIDO: cuántos productos, cuántas unidades quedan en
+   * stock y su valor, agrupado por la etiqueta `lote` del producto.
+   * Responde "¿cuánto queda del pedido de X?".
+   */
+  async getLotes(tenantId: string): Promise<
+    {
+      lote: string;
+      productCount: number;
+      unitsInStock: number;
+      stockValue: number;
+    }[]
+  > {
+    const rows = await this.stockRepository.find({
+      where: { tenantId },
+      relations: ['variant', 'variant.product'],
+    });
+    const byLote = new Map<
+      string,
+      { lote: string; productIds: Set<string>; units: number; value: number }
+    >();
+    for (const s of rows) {
+      const p = s.variant?.product;
+      if (!p || !p.lote) continue;
+      let agg = byLote.get(p.lote);
+      if (!agg) {
+        agg = { lote: p.lote, productIds: new Set(), units: 0, value: 0 };
+        byLote.set(p.lote, agg);
+      }
+      agg.productIds.add(p.id);
+      agg.units += s.quantity;
+      agg.value += s.quantity * Number(p.basePrice);
+    }
+    return [...byLote.values()]
+      .map((e) => ({
+        lote: e.lote,
+        productCount: e.productIds.size,
+        unitsInStock: e.units,
+        stockValue: e.value,
+      }))
+      .sort((a, b) => b.unitsInStock - a.unitsInStock);
+  }
+
   private async getOrCreateStock(
     variantId: string,
     warehouseId: string,

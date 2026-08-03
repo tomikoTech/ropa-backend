@@ -11,12 +11,12 @@ import {
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateConsignmentDto {
-  @ApiProperty({ example: 'Nico', description: 'Dueño del producto (tercero)' })
+  @ApiProperty({ example: 'Proveedor', description: 'Dueño del producto (tercero)' })
   @IsString()
   @IsNotEmpty()
   thirdPartyName: string;
 
-  @ApiProperty({ example: 'Nike Air Max 90 blanco' })
+  @ApiProperty({ example: 'Descripción del producto' })
   @IsString()
   @IsNotEmpty()
   productDescription: string;
@@ -47,7 +47,7 @@ export class CreateConsignmentDto {
   @Min(0)
   salePrice: number;
 
-  @ApiPropertyOptional({ example: 'María' })
+  @ApiPropertyOptional({ example: 'Nombre del cliente' })
   @IsOptional()
   @IsString()
   clientName?: string;

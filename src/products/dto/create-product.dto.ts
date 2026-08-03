@@ -75,6 +75,11 @@ export class CreateProductDto {
   @IsString()
   brand?: string;
 
+  @ApiPropertyOptional({ description: 'Lote/pedido (etiqueta libre)' })
+  @IsOptional()
+  @IsString()
+  lote?: string;
+
   @ApiPropertyOptional({
     example: 'uuid-variante-frasco',
     description: 'Frasco (variante) que se descuenta al vender este producto',

@@ -88,6 +88,11 @@ export class UpdateProductDto {
   @IsString()
   brand?: string;
 
+  @ApiPropertyOptional({ description: 'Lote/pedido (etiqueta libre)' })
+  @IsOptional()
+  @IsString()
+  lote?: string;
+
   @ApiPropertyOptional({ description: 'Frasco (variante) vinculado' })
   @IsOptional()
   @ValidateIf((_o, value) => value !== null)
