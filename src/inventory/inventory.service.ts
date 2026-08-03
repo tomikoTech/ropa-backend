@@ -141,6 +141,89 @@ export class InventoryService {
     return all.filter((s) => s.minStock > 0 && s.quantity <= s.minStock);
   }
 
+  /**
+   * "Puntas": referencias a las que solo les quedan pocas tallas con stock
+   * (para jornadas de promoción). Un producto es punta si tiene stock en
+   * `<= maxSizes` tallas distintas, pero llegó a tener más tallas (definidas).
+   * Usa las filas de stock (las variantes agotadas quedan en 0, así se conoce
+   * la curva original). Devuelve, por producto, las tallas que quedan y totales.
+   */
+  async getLeftovers(
+    tenantId: string,
+    maxSizes = 2,
+  ): Promise<
+    {
+      productId: string;
+      productName: string;
+      brand: string | null;
+      inStockSizes: number;
+      definedSizes: number;
+      totalQty: number;
+      remaining: { size: string; qty: number }[];
+    }[]
+  > {
+    const rows = await this.stockRepository.find({
+      where: { tenantId },
+      relations: ['variant', 'variant.product'],
+    });
+    type Agg = {
+      productId: string;
+      productName: string;
+      brand: string | null;
+      definedSizes: Set<string>;
+      remaining: Map<string, number>;
+    };
+    const byProduct = new Map<string, Agg>();
+    for (const s of rows) {
+      const p = s.variant?.product;
+      if (!p) continue;
+      const size = s.variant.size || '(única)';
+      let agg = byProduct.get(p.id);
+      if (!agg) {
+        agg = {
+          productId: p.id,
+          productName: p.name,
+          brand: p.brand ?? null,
+          definedSizes: new Set(),
+          remaining: new Map(),
+        };
+        byProduct.set(p.id, agg);
+      }
+      agg.definedSizes.add(size);
+      if (s.quantity > 0) {
+        agg.remaining.set(size, (agg.remaining.get(size) || 0) + s.quantity);
+      }
+    }
+
+    const result: {
+      productId: string;
+      productName: string;
+      brand: string | null;
+      inStockSizes: number;
+      definedSizes: number;
+      totalQty: number;
+      remaining: { size: string; qty: number }[];
+    }[] = [];
+    for (const agg of byProduct.values()) {
+      const inStockSizes = agg.remaining.size;
+      if (inStockSizes < 1 || inStockSizes > maxSizes) continue;
+      if (agg.definedSizes.size <= inStockSizes) continue; // nunca tuvo más tallas
+      const remaining = [...agg.remaining.entries()]
+        .map(([size, qty]) => ({ size, qty }))
+        .sort((a, b) => a.size.localeCompare(b.size));
+      result.push({
+        productId: agg.productId,
+        productName: agg.productName,
+        brand: agg.brand,
+        inStockSizes,
+        definedSizes: agg.definedSizes.size,
+        totalQty: remaining.reduce((sum, r) => sum + r.qty, 0),
+        remaining,
+      });
+    }
+    return result.sort((a, b) => a.totalQty - b.totalQty);
+  }
+
   private async getOrCreateStock(
     variantId: string,
     warehouseId: string,

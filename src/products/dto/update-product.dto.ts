@@ -66,6 +66,12 @@ export class UpdateProductDto {
   @Min(0)
   costPrice?: number;
 
+  @ApiPropertyOptional({ example: 40000, description: 'Precio al por mayor' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  wholesalePrice?: number;
+
   @ApiPropertyOptional({ enum: Gender })
   @IsOptional()
   @IsEnum(Gender)

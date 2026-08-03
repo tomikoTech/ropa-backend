@@ -85,9 +85,22 @@ export class InventoryController {
   }
 
   @Get('stock/low')
-  @ApiOperation({ summary: 'Stock por debajo del mínimo' })
+  @ApiOperation({ summary: 'Stock por debajo del mínimo (reposición)' })
   getLowStock(@TenantId() tenantId: string) {
     return this.inventoryService.getLowStock(tenantId);
+  }
+
+  @Get('leftovers')
+  @ApiOperation({ summary: 'Puntas: referencias con pocas tallas restantes' })
+  @ApiQuery({ name: 'maxSizes', required: false })
+  getLeftovers(
+    @TenantId() tenantId: string,
+    @Query('maxSizes') maxSizes?: string,
+  ) {
+    return this.inventoryService.getLeftovers(
+      tenantId,
+      maxSizes ? Number(maxSizes) : 2,
+    );
   }
 
   @Get('stock/warehouse/:warehouseId')

@@ -322,6 +322,7 @@ export class ProductsService {
       description: dto.description,
       basePrice: dto.basePrice,
       costPrice: dto.costPrice ?? 0,
+      wholesalePrice: dto.wholesalePrice ?? null,
       gender: dto.gender,
       categoryId: dto.categoryId,
       brand: dto.brand?.trim() || undefined,
@@ -512,6 +513,8 @@ export class ProductsService {
     if (dto.description !== undefined) product.description = dto.description;
     if (dto.basePrice !== undefined) product.basePrice = dto.basePrice;
     if (dto.costPrice !== undefined) product.costPrice = dto.costPrice;
+    if (dto.wholesalePrice !== undefined)
+      product.wholesalePrice = dto.wholesalePrice ?? null;
     if (dto.gender !== undefined) product.gender = dto.gender;
     if (dto.categoryId !== undefined) product.categoryId = dto.categoryId as string;
     if (dto.brand !== undefined) {

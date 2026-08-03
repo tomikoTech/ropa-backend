@@ -46,6 +46,17 @@ export class Product extends TenantAwareEntity {
   })
   costPrice: number;
 
+  // Precio al por mayor (opcional). Para vender a otros puntos/revendedores.
+  // Se usa en el POS con el modo "Mayorista". null = no definido.
+  @Column({
+    name: 'wholesale_price',
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+    nullable: true,
+  })
+  wholesalePrice: number | null;
+
   @Column({ type: 'enum', enum: Gender, default: Gender.UNISEX })
   gender: Gender;
 
