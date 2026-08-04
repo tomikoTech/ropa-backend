@@ -529,6 +529,66 @@ export class PosService {
     return sale;
   }
 
+  // Edita propiedades de una venta (sin tocar ítems/inventario). Recalcula el
+  // total si cambia el descuento y sincroniza la cuenta por cobrar si aplica.
+  async updateSale(
+    id: string,
+    dto: {
+      clientId?: string | null;
+      invoiceNumber?: string;
+      notes?: string;
+      saleChannel?: SaleChannel;
+      saleDate?: string;
+      discountAmount?: number;
+    },
+    tenantId: string,
+  ): Promise<Sale> {
+    await this.dataSource.transaction(async (manager) => {
+      const saleRepo = manager.getRepository(Sale);
+      const sale = await saleRepo.findOne({
+        where: { id, tenantId },
+        relations: ['accountsReceivable'],
+      });
+      if (!sale) throw new NotFoundException('Venta no encontrada');
+
+      if (dto.clientId !== undefined) {
+        sale.clientId = (dto.clientId ?? null) as unknown as string;
+      }
+      if (dto.notes !== undefined) sale.notes = dto.notes;
+      if (dto.saleChannel !== undefined) sale.saleChannel = dto.saleChannel;
+      if (dto.saleDate) sale.createdAt = new Date(dto.saleDate);
+
+      if (dto.invoiceNumber !== undefined) {
+        const dup = await saleRepo.findOne({
+          where: { tenantId, invoiceNumber: dto.invoiceNumber },
+        });
+        if (dup && dup.id !== sale.id) {
+          throw new BadRequestException(
+            `Ya existe una venta con la factura ${dto.invoiceNumber}`,
+          );
+        }
+        sale.invoiceNumber = dto.invoiceNumber;
+      }
+
+      if (dto.discountAmount !== undefined) {
+        const subtotal = Number(sale.subtotal);
+        const tax = Number(sale.taxAmount);
+        sale.discountAmount = dto.discountAmount;
+        sale.total = Math.max(0, subtotal - dto.discountAmount + tax);
+      }
+
+      await saleRepo.save(sale);
+
+      // Sincronizar CxC (crédito) no pagada por completo con el nuevo total.
+      const ar = (sale.accountsReceivable || []).find((a) => !a.isFullyPaid);
+      if (ar) {
+        ar.totalAmount = sale.total;
+        await manager.getRepository(AccountsReceivable).save(ar);
+      }
+    });
+    return this.findOne(id, tenantId);
+  }
+
   async getReceipt(id: string, tenantId: string): Promise<ReceiptData> {
     const sale = await this.findOne(id, tenantId);
     return this.receiptService.generateReceipt(sale);

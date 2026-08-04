@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Body,
   Param,
   Query,
@@ -13,6 +14,7 @@ import type { Response } from 'express';
 import { PosService } from './pos.service.js';
 import { buildStatementWorkbook } from '../common/utils/statement-excel.util.js';
 import { CreateSaleDto } from './dto/create-sale.dto.js';
+import { UpdateSaleDto } from './dto/update-sale.dto.js';
 import { MarkSalePaidDto } from './dto/mark-sale-paid.dto.js';
 import { RecordArPaymentDto } from './dto/record-ar-payment.dto.js';
 import { SendInvoiceDto } from './dto/send-invoice.dto.js';
@@ -225,6 +227,15 @@ export class PosController {
     @TenantId() tenantId: string,
   ) {
     return this.posService.cancelSale(id, user.id, tenantId);
+  }
+
+  @Patch('sales/:id')
+  updateSale(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateSaleDto,
+    @TenantId() tenantId: string,
+  ) {
+    return this.posService.updateSale(id, dto, tenantId);
   }
 
   @Post('sales/:id/mark-paid')
