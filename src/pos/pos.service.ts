@@ -210,7 +210,11 @@ export class PosService {
       );
       const totalCredit = creditPayments.reduce((sum, p) => sum + p.amount, 0);
 
-      if (totalRegular + totalCredit < saleTotals.total) {
+      // Venta PENDIENTE DE PAGO: no-crédito que no se marca como pagada al crear.
+      // No exige cubrir el total ni registra pagos; se marca luego desde Ventas.
+      const isPending = dto.markAsPaid === false && totalCredit === 0;
+
+      if (!isPending && totalRegular + totalCredit < saleTotals.total) {
         throw new BadRequestException(
           `Pago insuficiente. Total: $${saleTotals.total}, Pagado: $${totalRegular + totalCredit}`,
         );
@@ -253,6 +257,7 @@ export class PosService {
         total: saleTotals.total,
         status: SaleStatus.COMPLETED,
         saleChannel: dto.saleChannel || SaleChannel.POS,
+        isPaid: !isPending,
         notes: dto.notes,
         tenantId,
       });
@@ -345,8 +350,9 @@ export class PosService {
         }
       }
 
-      // Create payments (only regular, not credit)
-      for (const p of regularPayments) {
+      // Create payments (only regular, not credit). Si la venta queda pendiente
+      // de pago, no se registra ningún pago (se hará al marcarla como pagada).
+      for (const p of isPending ? [] : regularPayments) {
         const receivedAmount = p.receivedAmount ?? p.amount;
         const changeAmount =
           p.method === PaymentMethod.EFECTIVO
@@ -478,6 +484,7 @@ export class PosService {
           to?: string;
           limit?: number;
           saleChannel?: string;
+          paid?: boolean;
         }
       | undefined,
     tenantId: string,
@@ -487,6 +494,7 @@ export class PosService {
     if (filters?.warehouseId) where.warehouseId = filters.warehouseId;
     if (filters?.userId) where.userId = filters.userId;
     if (filters?.saleChannel) where.saleChannel = filters.saleChannel;
+    if (filters?.paid !== undefined) where.isPaid = filters.paid;
 
     return this.saleRepository.find({
       where,
@@ -524,6 +532,54 @@ export class PosService {
   async getReceipt(id: string, tenantId: string): Promise<ReceiptData> {
     const sale = await this.findOne(id, tenantId);
     return this.receiptService.generateReceipt(sale);
+  }
+
+  // Marca como pagada una venta pendiente (no-crédito), registrando el pago
+  // (método, banco, recibo, foto). Suma el total al banco vía Payment.bankId.
+  async markSalePaid(
+    id: string,
+    dto: {
+      method: PaymentMethod;
+      bankId?: string;
+      reference?: string;
+      receiptImageUrl?: string;
+    },
+    tenantId: string,
+  ): Promise<Sale> {
+    await this.dataSource.transaction(async (manager) => {
+      const saleRepo = manager.getRepository(Sale);
+      const sale = await saleRepo.findOne({ where: { id, tenantId } });
+      if (!sale) throw new NotFoundException('Venta no encontrada');
+      if (sale.status !== SaleStatus.COMPLETED) {
+        throw new BadRequestException('La venta no está activa');
+      }
+      if (sale.isPaid) {
+        throw new BadRequestException('La venta ya está pagada');
+      }
+      if (dto.method === PaymentMethod.CREDITO) {
+        throw new BadRequestException('Método de pago inválido');
+      }
+
+      const total = Number(sale.total);
+      await manager.getRepository(Payment).save(
+        manager.getRepository(Payment).create({
+          saleId: sale.id,
+          method: dto.method,
+          amount: total,
+          reference: dto.reference,
+          bankId: dto.bankId ?? null,
+          receiptImageUrl: dto.receiptImageUrl,
+          receivedAmount: total,
+          changeAmount: 0,
+          tenantId,
+        }),
+      );
+
+      sale.isPaid = true;
+      await saleRepo.save(sale);
+    });
+    // Leer fuera de la transacción para devolver el estado ya confirmado.
+    return this.findOne(id, tenantId);
   }
 
   async cancelSale(

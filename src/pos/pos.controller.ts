@@ -13,6 +13,7 @@ import type { Response } from 'express';
 import { PosService } from './pos.service.js';
 import { buildStatementWorkbook } from '../common/utils/statement-excel.util.js';
 import { CreateSaleDto } from './dto/create-sale.dto.js';
+import { MarkSalePaidDto } from './dto/mark-sale-paid.dto.js';
 import { RecordArPaymentDto } from './dto/record-ar-payment.dto.js';
 import { SendInvoiceDto } from './dto/send-invoice.dto.js';
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
@@ -44,6 +45,7 @@ export class PosController {
     @Query('to') to?: string,
     @Query('limit') limit?: string,
     @Query('saleChannel') saleChannel?: string,
+    @Query('paid') paid?: string,
   ) {
     return this.posService.findAll(
       {
@@ -54,6 +56,7 @@ export class PosController {
         to,
         limit: limit ? parseInt(limit, 10) : undefined,
         saleChannel,
+        paid: paid === undefined ? undefined : paid === 'true',
       },
       tenantId,
     );
@@ -222,5 +225,14 @@ export class PosController {
     @TenantId() tenantId: string,
   ) {
     return this.posService.cancelSale(id, user.id, tenantId);
+  }
+
+  @Post('sales/:id/mark-paid')
+  markSalePaid(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: MarkSalePaidDto,
+    @TenantId() tenantId: string,
+  ) {
+    return this.posService.markSalePaid(id, dto, tenantId);
   }
 }

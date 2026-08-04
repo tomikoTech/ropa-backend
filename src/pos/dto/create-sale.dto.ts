@@ -95,4 +95,11 @@ export class CreateSaleDto {
   @IsBoolean()
   @IsOptional()
   applyTax?: boolean;
+
+  // Confirmar el pago al crear la venta (métodos no-crédito). Si es false, la
+  // venta queda PENDIENTE DE PAGO (sin registrar el pago) y se marca luego desde
+  // Ventas. Si se omite, se asume true (comportamiento previo).
+  @IsBoolean()
+  @IsOptional()
+  markAsPaid?: boolean;
 }

@@ -102,6 +102,12 @@ export class Sale extends TenantAwareEntity {
   })
   saleChannel: SaleChannel;
 
+  // Pago confirmado. Ventas no-crédito pueden quedar "pendientes de pago"
+  // (is_paid=false) y marcarse como pagadas después desde la vista de Ventas.
+  // Las de crédito quedan is_paid=true (su deuda se gestiona en cartera/CxC).
+  @Column({ name: 'is_paid', default: true })
+  isPaid: boolean;
+
   @Column({ nullable: true })
   notes: string;
 
