@@ -233,9 +233,10 @@ export class PosController {
   updateSale(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateSaleDto,
+    @CurrentUser() user: { id: string },
     @TenantId() tenantId: string,
   ) {
-    return this.posService.updateSale(id, dto, tenantId);
+    return this.posService.updateSale(id, dto, user.id, tenantId);
   }
 
   @Post('sales/:id/mark-paid')

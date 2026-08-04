@@ -540,7 +540,9 @@ export class PosService {
       saleChannel?: SaleChannel;
       saleDate?: string;
       discountAmount?: number;
+      items?: { variantId: string; quantity: number }[];
     },
+    userId: string,
     tenantId: string,
   ): Promise<Sale> {
     await this.dataSource.transaction(async (manager) => {
@@ -550,6 +552,9 @@ export class PosService {
         relations: ['accountsReceivable'],
       });
       if (!sale) throw new NotFoundException('Venta no encontrada');
+      if (sale.status === SaleStatus.CANCELLED) {
+        throw new BadRequestException('No se puede editar una venta cancelada');
+      }
 
       if (dto.clientId !== undefined) {
         sale.clientId = (dto.clientId ?? null) as unknown as string;
@@ -570,7 +575,175 @@ export class PosService {
         sale.invoiceNumber = dto.invoiceNumber;
       }
 
-      if (dto.discountAmount !== undefined) {
+      const discount =
+        dto.discountAmount !== undefined
+          ? dto.discountAmount
+          : Number(sale.discountAmount);
+
+      if (dto.items) {
+        if (dto.items.length === 0) {
+          throw new BadRequestException('La venta debe tener al menos un ítem');
+        }
+        const stockRepo = manager.getRepository(Stock);
+        const movementRepo = manager.getRepository(StockMovement);
+        const saleItemRepo = manager.getRepository(SaleItem);
+        const variantRepo = manager.getRepository(ProductVariant);
+
+        // Proporción de IVA de la venta original (para conservar su régimen).
+        const origSubtotal = Number(sale.subtotal) || 0;
+        const taxRatio =
+          origSubtotal > 0 ? Number(sale.taxAmount) / origSubtotal : 0;
+
+        // 1) Revertir inventario de los ítems previos (soporta frasco/cascada).
+        const prevMovs = await movementRepo.find({
+          where: { referenceType: 'SALE', referenceId: sale.id, tenantId },
+        });
+        for (const m of prevMovs) {
+          const st = await stockRepo.findOne({
+            where: {
+              variantId: m.variantId,
+              warehouseId: m.warehouseId,
+              tenantId,
+            },
+          });
+          if (st) {
+            st.quantity += Math.abs(Number(m.quantity));
+            await stockRepo.save(st);
+          }
+        }
+        await movementRepo.delete({
+          referenceType: 'SALE',
+          referenceId: sale.id,
+          tenantId,
+        });
+        await saleItemRepo.delete({ saleId: sale.id, tenantId });
+
+        // 2) Aplicar los ítems nuevos (mismo patrón que createSale).
+        let newSubtotal = 0;
+        for (const item of dto.items) {
+          const variant = await variantRepo.findOne({
+            where: { id: item.variantId },
+            relations: ['product'],
+          });
+          if (!variant || variant.tenantId !== tenantId) {
+            throw new NotFoundException(
+              `Variante ${item.variantId} no encontrada`,
+            );
+          }
+          const itemStocks = await stockRepo.find({
+            where: { variantId: item.variantId, tenantId },
+          });
+          itemStocks.sort((a, b) => {
+            if (a.warehouseId === sale.warehouseId) return -1;
+            if (b.warehouseId === sale.warehouseId) return 1;
+            return Number(b.quantity) - Number(a.quantity);
+          });
+          const totalAvailable = itemStocks.reduce(
+            (s, st) => s + Number(st.quantity),
+            0,
+          );
+          if (totalAvailable < item.quantity) {
+            throw new BadRequestException(
+              `Stock insuficiente para "${variant.product.name}" ${variant.size}/${variant.color}. ` +
+                `Disponible total: ${totalAvailable}, Solicitado: ${item.quantity}`,
+            );
+          }
+
+          const unitPrice = variant.priceOverride
+            ? Number(variant.priceOverride)
+            : Number(variant.product.basePrice);
+          const lineTotal = unitPrice * item.quantity;
+          newSubtotal += lineTotal;
+
+          await saleItemRepo.save(
+            saleItemRepo.create({
+              saleId: sale.id,
+              variantId: variant.id,
+              productName: variant.product.name,
+              variantSku: variant.sku,
+              variantSize: variant.size,
+              variantColor: variant.color,
+              quantity: item.quantity,
+              unitPrice,
+              discountPercent: 0,
+              taxRate: 0,
+              taxAmount: 0,
+              lineTotal,
+              tenantId,
+            }),
+          );
+
+          // Descontar inventario en cascada (bodega de la venta primero).
+          let remaining = item.quantity;
+          for (const stock of itemStocks) {
+            if (remaining <= 0) break;
+            const available = Number(stock.quantity);
+            if (available <= 0) continue;
+            const toDeduct = Math.min(available, remaining);
+            stock.quantity = available - toDeduct;
+            remaining -= toDeduct;
+            await stockRepo.save(stock);
+            await movementRepo.save(
+              movementRepo.create({
+                variantId: variant.id,
+                warehouseId: stock.warehouseId,
+                movementType: MovementType.OUT,
+                quantity: -toDeduct,
+                referenceType: 'SALE',
+                referenceId: sale.id,
+                notes: `Edición venta ${sale.saleNumber}`,
+                createdById: userId,
+                tenantId,
+              }),
+            );
+          }
+
+          // Perfumería: descontar 1 frasco por unidad si el producto lo tiene.
+          const frascoVariantId = variant.product.frascoVariantId;
+          if (frascoVariantId) {
+            const frascoStocks = await stockRepo.find({
+              where: { variantId: frascoVariantId, tenantId },
+              order: { quantity: 'DESC' },
+            });
+            let frascoRemaining = item.quantity;
+            for (
+              let i = 0;
+              i < frascoStocks.length && frascoRemaining > 0;
+              i++
+            ) {
+              const fs = frascoStocks[i];
+              const isLast = i === frascoStocks.length - 1;
+              const avail = Number(fs.quantity);
+              const toDeduct = isLast
+                ? frascoRemaining
+                : Math.min(Math.max(avail, 0), frascoRemaining);
+              if (toDeduct <= 0) continue;
+              fs.quantity = avail - toDeduct;
+              frascoRemaining -= toDeduct;
+              await stockRepo.save(fs);
+              await movementRepo.save(
+                movementRepo.create({
+                  variantId: frascoVariantId,
+                  warehouseId: fs.warehouseId,
+                  movementType: MovementType.OUT,
+                  quantity: -toDeduct,
+                  referenceType: 'SALE',
+                  referenceId: sale.id,
+                  notes: `Frasco por edición venta ${sale.saleNumber}`,
+                  createdById: userId,
+                  tenantId,
+                }),
+              );
+            }
+          }
+        }
+
+        const newTax = Math.round(newSubtotal * taxRatio);
+        sale.subtotal = newSubtotal;
+        sale.taxAmount = newTax;
+        sale.discountAmount = discount;
+        sale.total = Math.max(0, newSubtotal - discount + newTax);
+      } else if (dto.discountAmount !== undefined) {
         const subtotal = Number(sale.subtotal);
         const tax = Number(sale.taxAmount);
         sale.discountAmount = dto.discountAmount;
