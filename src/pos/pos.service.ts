@@ -561,7 +561,14 @@ export class PosService {
       }
       if (dto.notes !== undefined) sale.notes = dto.notes;
       if (dto.saleChannel !== undefined) sale.saleChannel = dto.saleChannel;
-      if (dto.saleDate) sale.createdAt = new Date(dto.saleDate);
+      if (dto.saleDate) {
+        // Fecha sola (YYYY-MM-DD) -> mediodía, para que no corra al día
+        // anterior por zona horaria (el servidor está en UTC).
+        const iso = /^\d{4}-\d{2}-\d{2}$/.test(dto.saleDate)
+          ? `${dto.saleDate}T12:00:00`
+          : dto.saleDate;
+        sale.createdAt = new Date(iso);
+      }
 
       if (dto.invoiceNumber !== undefined) {
         const dup = await saleRepo.findOne({
