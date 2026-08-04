@@ -94,6 +94,8 @@ export class StoreSettingsService {
       settings.invoiceTagline = dto.invoiceTagline;
     if (dto.invoiceFooterNote !== undefined)
       settings.invoiceFooterNote = dto.invoiceFooterNote;
+    if (dto.invoiceDueNote !== undefined)
+      settings.invoiceDueNote = dto.invoiceDueNote;
     if (dto.invoiceThankYouNote !== undefined)
       settings.invoiceThankYouNote = dto.invoiceThankYouNote;
     if (dto.collaboratorModules !== undefined)

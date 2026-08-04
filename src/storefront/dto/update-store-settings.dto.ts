@@ -112,6 +112,13 @@ export class UpdateStoreSettingsDto {
   @IsString()
   invoiceFooterNote?: string;
 
+  @ApiPropertyOptional({
+    example: 'Esta factura tiene fecha de vencimiento a 30 días.',
+  })
+  @IsOptional()
+  @IsString()
+  invoiceDueNote?: string;
+
   @ApiPropertyOptional({ example: 'GRACIAS POR SU CONFIANZA' })
   @IsOptional()
   @IsString()

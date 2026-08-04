@@ -296,6 +296,10 @@ export class StoreSettings extends TenantAwareEntity {
   @Column({ name: 'invoice_footer_note', type: 'text', nullable: true })
   invoiceFooterNote: string | null;
 
+  // Nota que SIEMPRE se muestra en la factura (p. ej. "vencimiento a 30 días").
+  @Column({ name: 'invoice_due_note', type: 'text', nullable: true })
+  invoiceDueNote: string | null;
+
   @Column({ name: 'invoice_thank_you_note', type: 'text', nullable: true })
   invoiceThankYouNote: string | null;
 
