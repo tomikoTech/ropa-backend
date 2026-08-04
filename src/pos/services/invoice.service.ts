@@ -40,20 +40,22 @@ export class InvoiceService {
    * (Simplified — real DIAN integration would use authorized ranges)
    */
   async generateInvoiceNumber(tenantId: string): Promise<string> {
-    const lastSale = await this.dataSource
+    // Siguiente = MÁXIMO número de factura existente + 1. Se basa en el número
+    // real (no en created_at), porque editar la fecha de una venta puede dejar
+    // created_at desordenado respecto al número y causar colisiones (duplicados).
+    // Extrae el número inicial de "FE-000714" o "FE-000525-2" (ignora el sufijo).
+    const row = await this.dataSource
       .getRepository(Sale)
       .createQueryBuilder('s')
-      .where('s.invoice_number IS NOT NULL')
-      .andWhere('s.tenant_id = :tenantId', { tenantId })
-      .orderBy('s.created_at', 'DESC')
-      .getOne();
+      .select(
+        "MAX(CAST(substring(s.invoice_number FROM '^FE-0*([0-9]+)') AS integer))",
+        'maxnum',
+      )
+      .where('s.tenant_id = :tenantId', { tenantId })
+      .andWhere("s.invoice_number ~ '^FE-[0-9]+'")
+      .getRawOne<{ maxnum: string | null }>();
 
-    let nextNum = 1;
-    if (lastSale?.invoiceNumber) {
-      const lastNum = parseInt(lastSale.invoiceNumber.replace('FE-', ''), 10);
-      nextNum = lastNum + 1;
-    }
-
+    const nextNum = (row?.maxnum ? parseInt(row.maxnum, 10) : 0) + 1;
     return `FE-${String(nextNum).padStart(6, '0')}`;
   }
 }
