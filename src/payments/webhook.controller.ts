@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Body, Query, Logger } from '@nestjs/common';
+import { Controller, Post, Body, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Public } from '../common/decorators/public.decorator.js';
@@ -23,42 +23,6 @@ export class WebhookController {
     private readonly settingsRepo: Repository<StoreSettings>,
     private readonly invoiceEmailService: InvoiceEmailService,
   ) {}
-
-  /**
-   * Diagnostic endpoint: GET /payments/wava/debug-orders?limit=10
-   * Shows recent orders with Wava-related fields for debugging webhook matching.
-   * TODO: Remove or protect before going to production.
-   */
-  @Public()
-  @Get('debug-orders')
-  async debugOrders(@Query('limit') limit?: string) {
-    const take = Math.min(Number(limit) || 10, 50);
-    const orders = await this.orderRepo.find({
-      order: { createdAt: 'DESC' },
-      take,
-      select: [
-        'id', 'orderNumber', 'status', 'paymentMethod',
-        'wavaOrderId', 'wavaPaymentStatus', 'wavaPaymentUrl',
-        'total', 'shippingCost', 'customerName', 'createdAt',
-      ],
-    });
-    return {
-      count: orders.length,
-      orders: orders.map((o) => ({
-        id: o.id,
-        orderNumber: o.orderNumber,
-        status: o.status,
-        paymentMethod: o.paymentMethod,
-        wavaOrderId: o.wavaOrderId,
-        wavaPaymentStatus: o.wavaPaymentStatus,
-        wavaPaymentUrl: o.wavaPaymentUrl,
-        total: o.total,
-        shippingCost: o.shippingCost,
-        customerName: o.customerName,
-        createdAt: o.createdAt,
-      })),
-    };
-  }
 
   @Public()
   @Post('webhook')
@@ -128,15 +92,10 @@ export class WebhookController {
       }
     }
 
-    // Strategy 4: find the most recent pending order (last resort for single-store)
-    if (!order && possibleIds.length > 0) {
-      order = await this.orderRepo.findOne({
-        where: { wavaPaymentStatus: 'pending' },
-        relations: ['items'],
-        order: { createdAt: 'DESC' },
-      });
-      if (order) matchedBy = 'most recent pending order (fallback)';
-    }
+    // NOTA: se eliminó el antiguo "Strategy 4" que, si no había match por
+    // identificador, tomaba la orden pendiente más reciente de CUALQUIER tenant.
+    // Era una fuga cross-tenant: podía confirmar/cancelar la orden equivocada.
+    // Preferimos no hacer match (matched:false) antes que tocar una orden ajena.
 
     if (!order) {
       this.logger.warn(`[WEBHOOK] Order NOT FOUND. ids=${JSON.stringify(possibleIds)}, orderKey="${orderKey}"`);

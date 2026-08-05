@@ -252,12 +252,17 @@ export class PaymentController {
     @Param('orderId') orderId: string,
     @Query('transactionId') transactionId?: string,
   ) {
-    const order = await this.orderRepo.findOne({ where: { id: orderId } });
+    // Aislamiento multi-tenant: la orden debe pertenecer a la tienda del slug.
+    // Sin este filtro, cualquiera podría consultar el estado de pago de una
+    // orden ajena con solo adivinar/enumerar su UUID.
+    const settings = await this.getSettings(tenantSlug);
+    const order = await this.orderRepo.findOne({
+      where: { id: orderId, tenantId: settings.tenantId },
+    });
     if (!order) throw new NotFoundException('Orden no encontrada');
 
     // If Wompi transaction ID is passed (from redirect), verify with Wompi API
     if (transactionId && order.paymentMethod === 'wompi') {
-      const settings = await this.getSettings(tenantSlug);
       if (this.hasWompi(settings)) {
         try {
           const tx = await this.wompiService.getTransaction(
