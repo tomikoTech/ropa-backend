@@ -26,6 +26,14 @@ export class SaleItemDto {
   @Min(0)
   @IsOptional()
   discountPercent?: number;
+
+  // Precio unitario editado manualmente en el POS. Si viene, reemplaza el
+  // precio de la variante/producto de la BD. Se refleja automáticamente en el
+  // total de la venta (y por ende en ingresos, que derivan de payments.amount).
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  unitPrice?: number;
 }
 
 export class PaymentDto {

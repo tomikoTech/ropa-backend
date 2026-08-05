@@ -170,9 +170,15 @@ export class PosService {
           );
         }
 
-        const unitPrice = variant.priceOverride
+        // Precio: el editado manualmente en el POS tiene prioridad; si no,
+        // priceOverride de la variante y luego basePrice del producto.
+        const defaultPrice = variant.priceOverride
           ? Number(variant.priceOverride)
           : Number(variant.product.basePrice);
+        const unitPrice =
+          item.unitPrice != null && Number(item.unitPrice) >= 0
+            ? Number(item.unitPrice)
+            : defaultPrice;
         const taxRate = effectiveTaxRate;
         const discountPercent = item.discountPercent || 0;
 
