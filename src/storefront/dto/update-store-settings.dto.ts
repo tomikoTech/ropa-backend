@@ -181,6 +181,22 @@ export class UpdateStoreSettingsDto {
   @IsBoolean()
   reservationsEnabled?: boolean;
 
+  @ApiPropertyOptional({
+    example: true,
+    description: 'Traslados requieren confirmación de recepción (remisiones)',
+  })
+  @IsOptional()
+  @IsBoolean()
+  transferConfirmationEnabled?: boolean;
+
+  @ApiPropertyOptional({
+    example: true,
+    description: 'Habilita préstamos rápidos entre locales (con retorno)',
+  })
+  @IsOptional()
+  @IsBoolean()
+  quickLoanEnabled?: boolean;
+
   @ApiPropertyOptional({ example: 'Bienvenidos a nuestra tienda' })
   @IsOptional()
   @IsString()

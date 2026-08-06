@@ -334,6 +334,16 @@ export class StoreSettings extends TenantAwareEntity {
   @Column({ name: 'reservations_enabled', default: false })
   reservationsEnabled: boolean;
 
+  // Remisiones: el traslado bodega→bodega requiere confirmación de recepción
+  // (queda en tránsito hasta que el destino lo recibe). Off por defecto → el
+  // traslado sigue siendo inmediato (comportamiento actual).
+  @Column({ name: 'transfer_confirmation_enabled', default: false })
+  transferConfirmationEnabled: boolean;
+
+  // Préstamos rápidos entre locales (remisión rápida) con retorno. Off por defecto.
+  @Column({ name: 'quick_loan_enabled', default: false })
+  quickLoanEnabled: boolean;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 

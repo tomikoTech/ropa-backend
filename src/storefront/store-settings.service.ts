@@ -110,6 +110,10 @@ export class StoreSettingsService {
       settings.quotationsEnabled = dto.quotationsEnabled;
     if (dto.reservationsEnabled !== undefined)
       settings.reservationsEnabled = dto.reservationsEnabled;
+    if (dto.transferConfirmationEnabled !== undefined)
+      settings.transferConfirmationEnabled = dto.transferConfirmationEnabled;
+    if (dto.quickLoanEnabled !== undefined)
+      settings.quickLoanEnabled = dto.quickLoanEnabled;
     if (dto.heroTitle !== undefined) settings.heroTitle = dto.heroTitle;
     if (dto.heroSubtitle !== undefined)
       settings.heroSubtitle = dto.heroSubtitle;

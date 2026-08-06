@@ -151,6 +151,66 @@ export class InventoryController {
     return this.inventoryService.transferStock(dto, user.id, tenantId);
   }
 
+  // ─── Remisiones (traslados con confirmación) y préstamos ───
+
+  @Get('transfers')
+  @ApiOperation({ summary: 'Listar remisiones/préstamos' })
+  @ApiQuery({ name: 'type', required: false })
+  @ApiQuery({ name: 'status', required: false })
+  @ApiQuery({ name: 'warehouseId', required: false })
+  listTransfers(
+    @TenantId() tenantId: string,
+    @Query('type') type?: string,
+    @Query('status') status?: string,
+    @Query('warehouseId') warehouseId?: string,
+  ) {
+    return this.inventoryService.listTransfers(tenantId, {
+      type,
+      status,
+      warehouseId,
+    });
+  }
+
+  @Post('transfers/:id/receive')
+  @ApiOperation({ summary: 'Recibir una remisión (traslado)' })
+  receiveTransfer(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: User,
+    @TenantId() tenantId: string,
+  ) {
+    return this.inventoryService.receiveTransfer(id, user.id, tenantId);
+  }
+
+  @Post('transfers/:id/cancel')
+  @ApiOperation({ summary: 'Cancelar una remisión pendiente' })
+  cancelTransfer(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: User,
+    @TenantId() tenantId: string,
+  ) {
+    return this.inventoryService.cancelTransfer(id, user.id, tenantId);
+  }
+
+  @Post('loans')
+  @ApiOperation({ summary: 'Crear un préstamo rápido entre locales' })
+  createLoan(
+    @Body() dto: TransferStockDto,
+    @CurrentUser() user: User,
+    @TenantId() tenantId: string,
+  ) {
+    return this.inventoryService.createLoan(dto, user.id, tenantId);
+  }
+
+  @Post('loans/:id/return')
+  @ApiOperation({ summary: 'Retornar un préstamo (devolver a origen)' })
+  returnLoan(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: User,
+    @TenantId() tenantId: string,
+  ) {
+    return this.inventoryService.returnLoan(id, user.id, tenantId);
+  }
+
   // ─── Movements ───
 
   @Get('movements')
