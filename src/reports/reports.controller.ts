@@ -43,6 +43,20 @@ export class ReportsController {
     );
   }
 
+  @Get('commissions')
+  @ApiOperation({ summary: 'Comisiones por venta de puntas (por vendedor)' })
+  getCommissions(
+    @TenantId() tenantId: string,
+    @Query('from') from: string,
+    @Query('to') to: string,
+    @Query('userId') userId?: string,
+  ) {
+    if (!from || !to) {
+      throw new BadRequestException('Parámetros from y to son requeridos');
+    }
+    return this.reportsService.getCommissions({ from, to, userId }, tenantId);
+  }
+
   @Get('top-products')
   @ApiOperation({ summary: 'Productos más vendidos' })
   getTopProducts(

@@ -114,6 +114,16 @@ export class StoreSettingsService {
       settings.transferConfirmationEnabled = dto.transferConfirmationEnabled;
     if (dto.quickLoanEnabled !== undefined)
       settings.quickLoanEnabled = dto.quickLoanEnabled;
+    if (dto.leftoverAgeMonths !== undefined)
+      settings.leftoverAgeMonths = dto.leftoverAgeMonths;
+    if (dto.leftoverMaxSizes !== undefined)
+      settings.leftoverMaxSizes = dto.leftoverMaxSizes;
+    if (dto.leftoverCommissionEnabled !== undefined)
+      settings.leftoverCommissionEnabled = dto.leftoverCommissionEnabled;
+    if (dto.leftoverCommissionMode !== undefined)
+      settings.leftoverCommissionMode = dto.leftoverCommissionMode;
+    if (dto.leftoverCommissionValue !== undefined)
+      settings.leftoverCommissionValue = dto.leftoverCommissionValue;
     if (dto.heroTitle !== undefined) settings.heroTitle = dto.heroTitle;
     if (dto.heroSubtitle !== undefined)
       settings.heroSubtitle = dto.heroSubtitle;

@@ -176,6 +176,48 @@ export class ReportsService {
     }));
   }
 
+  // F2: comisiones por venta de puntas, agrupadas por vendedor (corte mensual).
+  async getCommissions(
+    filters: { from: string; to: string; userId?: string },
+    tenantId: string,
+  ): Promise<
+    {
+      sellerId: string;
+      sellerName: string;
+      unidades: number;
+      comisionTotal: number;
+    }[]
+  > {
+    const qb = this.saleItemRepository
+      .createQueryBuilder('si')
+      .innerJoin('si.sale', 's')
+      .leftJoin('s.user', 'u')
+      .select('s.user_id', 'sellerId')
+      .addSelect('u.first_name', 'firstName')
+      .addSelect('u.last_name', 'lastName')
+      .addSelect('SUM(si.quantity)', 'unidades')
+      .addSelect('SUM(si.commission_amount)', 'comisionTotal')
+      .where('si.is_leftover = true')
+      .andWhere('s.status = :status', { status: SaleStatus.COMPLETED })
+      .andWhere('s.created_at >= :from', { from: filters.from })
+      .andWhere('s.created_at <= :to', { to: filters.to })
+      .andWhere('s.tenant_id = :tenantId', { tenantId })
+      .groupBy('s.user_id')
+      .addGroupBy('u.first_name')
+      .addGroupBy('u.last_name')
+      .orderBy('"comisionTotal"', 'DESC');
+    if (filters.userId) {
+      qb.andWhere('s.user_id = :uid', { uid: filters.userId });
+    }
+    const rows = await qb.getRawMany();
+    return rows.map((r) => ({
+      sellerId: r.sellerId,
+      sellerName: `${r.firstName ?? ''} ${r.lastName ?? ''}`.trim() || '—',
+      unidades: Number(r.unidades),
+      comisionTotal: Number(r.comisionTotal),
+    }));
+  }
+
   async getInventoryValuation(
     warehouseId: string | undefined,
     tenantId: string,

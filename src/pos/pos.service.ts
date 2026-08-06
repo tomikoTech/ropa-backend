@@ -302,8 +302,31 @@ export class PosService {
       });
       const savedSale = await saleRepo.save(sale);
 
+      // Puntas + comisión (F2): si el tenant activó la comisión por punta, se
+      // marca el ítem y se calcula la comisión (fija por par o % del valor).
+      const leftoverCommissionEnabled = !!storeSettings?.leftoverCommissionEnabled;
+
       // Create sale items
       for (const data of variantData) {
+        let isLeftover = false;
+        let commissionAmount = 0;
+        if (leftoverCommissionEnabled) {
+          isLeftover = await this.isProductLeftover(
+            manager,
+            data.variant.product,
+            storeSettings!,
+            tenantId,
+          );
+          if (isLeftover) {
+            const mode = storeSettings!.leftoverCommissionMode;
+            const value = Number(storeSettings!.leftoverCommissionValue) || 0;
+            commissionAmount =
+              mode === 'percent'
+                ? Math.round(data.lineCalc.lineTotal * value) / 100
+                : value * data.quantity;
+          }
+        }
+
         const saleItem = saleItemRepo.create({
           saleId: savedSale.id,
           variantId: data.variant.id,
@@ -317,6 +340,8 @@ export class PosService {
           taxRate: data.lineCalc.taxRate,
           taxAmount: data.lineCalc.taxAmount,
           lineTotal: data.lineCalc.lineTotal,
+          isLeftover,
+          commissionAmount,
           tenantId,
         });
         await saleItemRepo.save(saleItem);
@@ -533,6 +558,37 @@ export class PosService {
     });
 
     return result;
+  }
+
+  // Determina si un producto es "punta" (F2): override manual si está definido;
+  // si no, criterio automático (antigüedad ≥ meses Y ≤ tallas restantes con stock).
+  private async isProductLeftover(
+    manager: import('typeorm').EntityManager,
+    product: { id: string; isLeftover?: boolean | null; createdAt: Date },
+    settings: StoreSettings,
+    tenantId: string,
+  ): Promise<boolean> {
+    if (product.isLeftover !== null && product.isLeftover !== undefined) {
+      return product.isLeftover;
+    }
+    const now = new Date();
+    const created = new Date(product.createdAt);
+    const ageMonths =
+      (now.getFullYear() - created.getFullYear()) * 12 +
+      (now.getMonth() - created.getMonth());
+    if (ageMonths < Number(settings.leftoverAgeMonths ?? 8)) return false;
+
+    const raw = await manager
+      .getRepository(Stock)
+      .createQueryBuilder('s')
+      .innerJoin('product_variants', 'pv', 'pv.id = s.variant_id')
+      .where('pv.product_id = :pid', { pid: product.id })
+      .andWhere('s.tenant_id = :t', { t: tenantId })
+      .andWhere('s.quantity > 0')
+      .select('COUNT(DISTINCT pv.size)', 'cnt')
+      .getRawOne<{ cnt: string }>();
+    const remainingSizes = Number(raw?.cnt ?? 0);
+    return remainingSizes <= Number(settings.leftoverMaxSizes ?? 2);
   }
 
   async findAll(

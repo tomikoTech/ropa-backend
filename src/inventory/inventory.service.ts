@@ -166,6 +166,7 @@ export class InventoryService {
       definedSizes: number;
       totalQty: number;
       remaining: { size: string; qty: number }[];
+      isLeftover: boolean | null;
     }[]
   > {
     const rows = await this.stockRepository.find({
@@ -176,6 +177,7 @@ export class InventoryService {
       productId: string;
       productName: string;
       brand: string | null;
+      isLeftover: boolean | null;
       definedSizes: Set<string>;
       remaining: Map<string, number>;
     };
@@ -190,6 +192,7 @@ export class InventoryService {
           productId: p.id,
           productName: p.name,
           brand: p.brand ?? null,
+          isLeftover: p.isLeftover ?? null,
           definedSizes: new Set(),
           remaining: new Map(),
         };
@@ -209,6 +212,7 @@ export class InventoryService {
       definedSizes: number;
       totalQty: number;
       remaining: { size: string; qty: number }[];
+      isLeftover: boolean | null;
     }[] = [];
     for (const agg of byProduct.values()) {
       const inStockSizes = agg.remaining.size;
@@ -225,6 +229,7 @@ export class InventoryService {
         definedSizes: agg.definedSizes.size,
         totalQty: remaining.reduce((sum, r) => sum + r.qty, 0),
         remaining,
+        isLeftover: agg.isLeftover,
       });
     }
     return result.sort((a, b) => a.totalQty - b.totalQty);

@@ -127,6 +127,11 @@ export class Product extends TenantAwareEntity {
   @Column({ name: 'is_available', default: true })
   isAvailable: boolean;
 
+  // Override manual de "punta" (F2). null = decide el criterio automático
+  // (antigüedad + tallas restantes); true/false = forzado por el admin.
+  @Column({ name: 'is_leftover', type: 'boolean', nullable: true })
+  isLeftover?: boolean | null;
+
   @OneToMany(() => ProductVariant, (v) => v.product, {
     cascade: true,
     eager: false,

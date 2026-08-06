@@ -535,6 +535,8 @@ export class ProductsService {
       product.isPublished = dto.isPublished;
       product.publishedAt = dto.isPublished ? new Date() : null!;
     }
+    // Override manual de punta: null vuelve al criterio automático.
+    if (dto.isLeftover !== undefined) product.isLeftover = dto.isLeftover;
 
     await this.productRepository.save(product);
 

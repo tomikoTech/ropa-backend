@@ -197,6 +197,31 @@ export class UpdateStoreSettingsDto {
   @IsBoolean()
   quickLoanEnabled?: boolean;
 
+  @ApiPropertyOptional({ example: 8, description: 'Antigüedad (meses) para punta' })
+  @IsOptional()
+  @IsNumber()
+  leftoverAgeMonths?: number;
+
+  @ApiPropertyOptional({ example: 2, description: 'Máx. tallas restantes para punta' })
+  @IsOptional()
+  @IsNumber()
+  leftoverMaxSizes?: number;
+
+  @ApiPropertyOptional({ example: true, description: 'Habilita comisión por punta' })
+  @IsOptional()
+  @IsBoolean()
+  leftoverCommissionEnabled?: boolean;
+
+  @ApiPropertyOptional({ example: 'fixed', enum: ['fixed', 'percent'] })
+  @IsOptional()
+  @IsIn(['fixed', 'percent'])
+  leftoverCommissionMode?: string;
+
+  @ApiPropertyOptional({ example: 3000, description: 'Monto fijo por par o % según el modo' })
+  @IsOptional()
+  @IsNumber()
+  leftoverCommissionValue?: number;
+
   @ApiPropertyOptional({ example: 'Bienvenidos a nuestra tienda' })
   @IsOptional()
   @IsString()

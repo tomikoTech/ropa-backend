@@ -344,6 +344,32 @@ export class StoreSettings extends TenantAwareEntity {
   @Column({ name: 'quick_loan_enabled', default: false })
   quickLoanEnabled: boolean;
 
+  // Puntas (leftovers) + comisiones. Criterio automático: una referencia es
+  // "punta" si su antigüedad ≥ leftover_age_months Y le quedan ≤ leftover_max_sizes
+  // tallas. Se puede sobreescribir manualmente por producto (products.is_leftover).
+  @Column({ name: 'leftover_age_months', type: 'int', default: 8 })
+  leftoverAgeMonths: number;
+
+  @Column({ name: 'leftover_max_sizes', type: 'int', default: 2 })
+  leftoverMaxSizes: number;
+
+  // Comisión al vendedor por vender una punta. Off por defecto.
+  @Column({ name: 'leftover_commission_enabled', default: false })
+  leftoverCommissionEnabled: boolean;
+
+  // 'fixed' = monto fijo por par; 'percent' = % del valor de la línea.
+  @Column({ name: 'leftover_commission_mode', type: 'varchar', default: 'fixed' })
+  leftoverCommissionMode: string;
+
+  @Column({
+    name: 'leftover_commission_value',
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+    default: 0,
+  })
+  leftoverCommissionValue: number;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 

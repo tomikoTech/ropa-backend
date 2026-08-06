@@ -88,6 +88,20 @@ export class SaleItem extends TenantAwareEntity {
   })
   lineTotal: number;
 
+  // Snapshot de "punta" (F2): si este ítem era una punta al momento de la venta
+  // y la comisión calculada para el vendedor. Inmutables (no se recalculan).
+  @Column({ name: 'is_leftover', default: false })
+  isLeftover: boolean;
+
+  @Column({
+    name: 'commission_amount',
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+    default: 0,
+  })
+  commissionAmount: number;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 }

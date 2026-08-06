@@ -135,6 +135,12 @@ export class UpdateProductDto {
   @IsBoolean()
   isPublished?: boolean;
 
+  // Override manual de "punta" (F2). Enviar null para volver al criterio automático.
+  @ApiPropertyOptional({ nullable: true })
+  @IsOptional()
+  @IsBoolean()
+  isLeftover?: boolean | null;
+
   @ApiPropertyOptional({ type: [UpdateVariantDto] })
   @IsOptional()
   @IsArray()
