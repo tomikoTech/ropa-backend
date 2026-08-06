@@ -4,7 +4,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource, In } from 'typeorm';
+import { Repository, DataSource, In, ILike } from 'typeorm';
 import { Sale } from './entities/sale.entity.js';
 import { SaleItem } from './entities/sale-item.entity.js';
 import { Payment } from './entities/payment.entity.js';
@@ -491,6 +491,7 @@ export class PosService {
           limit?: number;
           saleChannel?: string;
           paid?: boolean;
+          clientPhone?: string;
         }
       | undefined,
     tenantId: string,
@@ -501,6 +502,11 @@ export class PosService {
     if (filters?.userId) where.userId = filters.userId;
     if (filters?.saleChannel) where.saleChannel = filters.saleChannel;
     if (filters?.paid !== undefined) where.isPaid = filters.paid;
+    // Buscar venta por teléfono del cliente (para recuperar una venta cuando
+    // solo se tiene el número de WhatsApp).
+    if (filters?.clientPhone?.trim()) {
+      where.client = { phone: ILike(`%${filters.clientPhone.trim()}%`) };
+    }
 
     return this.saleRepository.find({
       where,

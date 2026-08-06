@@ -48,6 +48,7 @@ export class PosController {
     @Query('limit') limit?: string,
     @Query('saleChannel') saleChannel?: string,
     @Query('paid') paid?: string,
+    @Query('clientPhone') clientPhone?: string,
   ) {
     return this.posService.findAll(
       {
@@ -59,6 +60,7 @@ export class PosController {
         limit: limit ? parseInt(limit, 10) : undefined,
         saleChannel,
         paid: paid === undefined ? undefined : paid === 'true',
+        clientPhone,
       },
       tenantId,
     );

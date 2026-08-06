@@ -104,14 +104,26 @@ describe('Clients (e2e)', () => {
 
   // ─── VALIDATION ───
 
-  it('POST /api/clients → rejects missing required fields', async () => {
+  it('POST /api/clients → rejects when no identifier is provided', async () => {
+    // Tras el "cliente rápido" (F1) basta un identificador (teléfono/documento/
+    // nombre); un cuerpo vacío sigue siendo inválido.
     const res = await request(app.getHttpServer())
       .post('/api/clients')
       .set('Authorization', `Bearer ${token}`)
-      .send({ phone: '123' })
+      .send({})
       .expect(400);
 
     expect(res.body.statusCode).toBe(400);
+  });
+
+  it('POST /api/clients → accepts a phone-only quick client', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/clients')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ phone: `39${Date.now().toString().slice(-8)}` })
+      .expect(201);
+
+    expect(res.body.id).toBeDefined();
   });
 
   it('POST /api/clients → rejects duplicate documentNumber', async () => {

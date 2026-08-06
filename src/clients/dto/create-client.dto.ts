@@ -2,11 +2,15 @@ import { IsString, IsOptional, IsEnum, IsEmail } from 'class-validator';
 import { DocumentType } from '../../common/enums/document-type.enum.js';
 
 export class CreateClientDto {
+  // firstName/lastName son opcionales: permite el "cliente rápido" (solo
+  // celular). El service rellena valores por defecto desde el teléfono.
   @IsString()
-  firstName: string;
+  @IsOptional()
+  firstName?: string;
 
   @IsString()
-  lastName: string;
+  @IsOptional()
+  lastName?: string;
 
   @IsEnum(DocumentType)
   @IsOptional()

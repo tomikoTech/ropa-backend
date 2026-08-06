@@ -17,7 +17,11 @@ export const getDatabaseConfig = (
     password: configService.get<string>('database.password'),
     database: configService.get<string>('database.database'),
     autoLoadEntities: true,
+    // Local: auto-sincroniza el esquema (dev rápido). Prod: no sincroniza y
+    // corre las migraciones pendientes automáticamente al bootear (Railway).
     synchronize: isLocal,
+    migrations: [__dirname + '/../migrations/*.{js,ts}'],
+    migrationsRun: !isLocal,
     logging: configService.get<string>('NODE_ENV') === 'development',
     ...(sslEnabled && { ssl: { rejectUnauthorized: false } }),
   };

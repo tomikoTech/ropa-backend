@@ -18,6 +18,16 @@ export class ClientsService {
   ) {}
 
   async create(dto: CreateClientDto, tenantId: string): Promise<Client> {
+    // Cliente rápido: se admite crear con solo el celular. Debe venir al menos
+    // un identificador (nombre, documento o teléfono).
+    const firstName = dto.firstName?.trim();
+    const phone = dto.phone?.trim();
+    if (!firstName && !dto.documentNumber?.trim() && !phone) {
+      throw new BadRequestException(
+        'Debe indicar al menos un nombre, documento o teléfono',
+      );
+    }
+
     if (dto.documentNumber) {
       const existing = await this.clientRepository.findOne({
         where: { documentNumber: dto.documentNumber, tenantId },
@@ -29,7 +39,14 @@ export class ClientsService {
       }
     }
 
-    const client = this.clientRepository.create({ ...dto, tenantId });
+    const client = this.clientRepository.create({
+      ...dto,
+      // Rellenar nombres si faltan (columnas NOT NULL): usar el teléfono como
+      // identificador visible del cliente rápido.
+      firstName: firstName || phone || 'Cliente',
+      lastName: dto.lastName?.trim() || '',
+      tenantId,
+    });
     return this.clientRepository.save(client);
   }
 
