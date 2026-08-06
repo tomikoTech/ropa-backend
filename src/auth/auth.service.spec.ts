@@ -34,6 +34,7 @@ describe('AuthService', () => {
   beforeEach(async () => {
     usersService = {
       findByEmail: jest.fn(),
+      findByEmailOrUsername: jest.fn(),
       create: jest.fn(),
       findOne: jest.fn(),
     };
@@ -75,7 +76,7 @@ describe('AuthService', () => {
 
   describe('login', () => {
     it('should return tokens when credentials are valid', async () => {
-      usersService.findByEmail!.mockResolvedValue(mockUser);
+      usersService.findByEmailOrUsername!.mockResolvedValue(mockUser);
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
 
       const result = await service.login({
@@ -87,12 +88,14 @@ describe('AuthService', () => {
       expect(result).toHaveProperty('refreshToken');
       expect(result).toHaveProperty('user');
       expect(result.user.email).toBe('admin@mipinta.co');
-      expect(usersService.findByEmail).toHaveBeenCalledWith('admin@mipinta.co');
+      expect(usersService.findByEmailOrUsername).toHaveBeenCalledWith(
+        'admin@mipinta.co',
+      );
       expect(jwtService.sign).toHaveBeenCalled();
     });
 
     it('should throw UnauthorizedException when email is not found', async () => {
-      usersService.findByEmail!.mockResolvedValue(null);
+      usersService.findByEmailOrUsername!.mockResolvedValue(null);
 
       await expect(
         service.login({ email: 'wrong@email.com', password: 'admin123' }),
@@ -100,7 +103,7 @@ describe('AuthService', () => {
     });
 
     it('should throw UnauthorizedException when password is wrong', async () => {
-      usersService.findByEmail!.mockResolvedValue(mockUser);
+      usersService.findByEmailOrUsername!.mockResolvedValue(mockUser);
       (bcrypt.compare as jest.Mock).mockResolvedValue(false);
 
       await expect(
@@ -109,7 +112,7 @@ describe('AuthService', () => {
     });
 
     it('should throw UnauthorizedException when user is inactive', async () => {
-      usersService.findByEmail!.mockResolvedValue({
+      usersService.findByEmailOrUsername!.mockResolvedValue({
         ...mockUser,
         isActive: false,
       });

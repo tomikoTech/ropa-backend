@@ -20,14 +20,17 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from '../../src/app.module';
+import { HttpExceptionFilter } from '../../src/common/filters/http-exception.filter';
 
 let app: INestApplication;
 let accessToken: string;
 
 /**
  * Creates and configures the NestJS app for E2E testing.
- * Minimal setup: prefix + validation only (no filter/interceptor)
- * so response shape matches raw controller output.
+ * Prefix + validation + el filtro global de excepciones (igual que main.ts),
+ * para que los tests vean los mismos códigos y mensajes que producción. No se
+ * registra el interceptor de respuesta, así el body sigue siendo la salida
+ * cruda del controlador.
  */
 export async function setupTestApp(): Promise<INestApplication> {
   const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -44,6 +47,8 @@ export async function setupTestApp(): Promise<INestApplication> {
       transform: true,
     }),
   );
+
+  app.useGlobalFilters(new HttpExceptionFilter());
 
   await app.init();
   return app;

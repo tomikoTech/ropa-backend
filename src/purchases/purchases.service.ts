@@ -19,6 +19,7 @@ import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto.js';
 import { ReceiveItemsDto } from './dto/receive-items.dto.js';
 import { PurchaseOrderStatus } from '../common/enums/purchase-order-status.enum.js';
 import { MovementType } from '../common/enums/movement-type.enum.js';
+import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
 
 @Injectable()
 export class PurchasesService {
@@ -185,17 +186,23 @@ export class PurchasesService {
     };
   }
 
+  // Primer consecutivo libre del día. Con el conteo, borrar una orden de compra
+  // hacía que la siguiente reutilizara un número existente y el guardado
+  // terminara en error interno.
   private async generateOrderNumber(tenantId: string): Promise<string> {
     const today = new Date();
     const prefix = `OC-${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
 
-    const count = await this.poRepository
+    const rows = await this.poRepository
       .createQueryBuilder('po')
+      .select('po.orderNumber', 'number')
       .where('po.order_number LIKE :prefix', { prefix: `${prefix}%` })
       .andWhere('po.tenant_id = :tenantId', { tenantId })
-      .getCount();
-
-    return `${prefix}-${String(count + 1).padStart(4, '0')}`;
+      .getRawMany<{ number: string }>();
+    const taken = new Set(rows.map((r) => r.number));
+    let n = 1;
+    while (taken.has(`${prefix}-${String(n).padStart(4, '0')}`)) n++;
+    return `${prefix}-${String(n).padStart(4, '0')}`;
   }
 
   async create(
@@ -216,26 +223,26 @@ export class PurchasesService {
       variantImageMap.set(item.variantId, variant.product?.imageUrl || null);
     }
 
-    const orderNumber = await this.generateOrderNumber(tenantId);
     const { subtotal, taxRate, taxAmount, total } =
       await this.computePurchaseTotals(dto.items, dto.applyTax, tenantId);
 
-    const po = this.poRepository.create({
-      orderNumber,
-      supplierId: dto.supplierId,
-      warehouseId: dto.warehouseId,
-      createdById: userId,
-      subtotal,
-      taxRate,
-      taxAmount,
-      total,
-      notes: dto.notes,
-      supplierInvoiceNumber: dto.supplierInvoiceNumber,
-      status: PurchaseOrderStatus.DRAFT,
-      tenantId,
+    const savedPo = await retryOnUniqueViolation(async () => {
+      const po = this.poRepository.create({
+        orderNumber: await this.generateOrderNumber(tenantId),
+        supplierId: dto.supplierId,
+        warehouseId: dto.warehouseId,
+        createdById: userId,
+        subtotal,
+        taxRate,
+        taxAmount,
+        total,
+        notes: dto.notes,
+        supplierInvoiceNumber: dto.supplierInvoiceNumber,
+        status: PurchaseOrderStatus.DRAFT,
+        tenantId,
+      });
+      return this.poRepository.save(po);
     });
-
-    const savedPo = await this.poRepository.save(po);
 
     const items = dto.items.map((i) =>
       this.poItemRepository.create({

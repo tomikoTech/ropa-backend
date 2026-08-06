@@ -106,8 +106,21 @@ export class QuotationsService {
     }
 
     const totals = this.taxService.calculateSaleTotals(lineCalcs);
-    const count = await this.quotationRepo.count({ where: { tenantId } });
-    const quoteNumber = `COT-${String(count + 1).padStart(6, '0')}`;
+    // Consecutivo por el máximo existente, no por el conteo: al borrar una
+    // cotización el conteo repite un número ya emitido (dos cotizaciones
+    // distintas con el mismo COT-xxxxxx).
+    const row = await this.quotationRepo
+      .createQueryBuilder('q')
+      .select(
+        "MAX(CAST(substring(q.quote_number FROM '^COT-0*([0-9]+)$') AS integer))",
+        'maxnum',
+      )
+      .where('q.tenant_id = :tenantId', { tenantId })
+      .andWhere("q.quote_number ~ '^COT-[0-9]+$'")
+      .getRawOne<{ maxnum: string | null }>();
+    const quoteNumber = `COT-${String(
+      (row?.maxnum ? parseInt(row.maxnum, 10) : 0) + 1,
+    ).padStart(6, '0')}`;
 
     const quotation = this.quotationRepo.create({
       quoteNumber,
@@ -152,9 +165,7 @@ export class QuotationsService {
   ): Promise<Quotation> {
     const quotation = await this.findOne(id, tenantId);
     if (quotation.status === 'CONVERTED') {
-      throw new BadRequestException(
-        'La cotización ya fue convertida en venta',
-      );
+      throw new BadRequestException('La cotización ya fue convertida en venta');
     }
     if (dto.status) quotation.status = dto.status as Quotation['status'];
     if (dto.notes !== undefined) quotation.notes = dto.notes;

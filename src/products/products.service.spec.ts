@@ -1,9 +1,29 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
 import { ProductsService } from './products.service.js';
 import { Product } from './entities/product.entity.js';
 import { ProductVariant } from './entities/product-variant.entity.js';
+import { ProductEssence } from './entities/product-essence.entity.js';
+import { Category } from '../categories/entities/category.entity.js';
+import { Warehouse } from '../inventory/entities/warehouse.entity.js';
+import { Stock } from '../inventory/entities/stock.entity.js';
+import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
+import { RecipeService } from './services/recipe.service.js';
+import { BrandsService } from '../brands/brands.service.js';
+
+// Query builder encadenable: getRawMany() devuelve las filas configuradas.
+function mockQueryBuilder(rows: unknown[] = []) {
+  const qb: Record<string, jest.Mock> = {
+    select: jest.fn(() => qb),
+    where: jest.fn(() => qb),
+    andWhere: jest.fn(() => qb),
+    getRawMany: jest.fn().mockResolvedValue(rows),
+    getOne: jest.fn().mockResolvedValue(null),
+  };
+  return qb;
+}
 
 describe('ProductsService', () => {
   let service: ProductsService;
@@ -11,6 +31,10 @@ describe('ProductsService', () => {
   let variantRepository: Record<string, jest.Mock>;
 
   const tenantId = 'tenant-1';
+
+  // SKU prefijos ya usados en el tenant, para el query builder de unicidad.
+  let takenPrefixes: string[];
+  let takenSkus: string[];
 
   const mockProduct: Partial<Product> = {
     id: 'product-uuid-1',
@@ -28,36 +52,74 @@ describe('ProductsService', () => {
   };
 
   beforeEach(async () => {
+    takenPrefixes = [];
+    takenSkus = [];
+
     productRepository = {
       create: jest
         .fn()
         .mockImplementation((dto) => ({ ...dto, id: 'product-uuid-1' })),
-      save: jest.fn().mockResolvedValue(mockProduct),
+      save: jest.fn().mockImplementation((p) => Promise.resolve(p)),
       find: jest.fn().mockResolvedValue([mockProduct]),
-      findOne: jest.fn(),
+      // Búsqueda por id (findOne del servicio) → producto; búsqueda por slug
+      // (chequeo de unicidad) → libre.
+      findOne: jest
+        .fn()
+        .mockImplementation(({ where }: { where: { id?: string } }) =>
+          Promise.resolve(where?.id ? mockProduct : null),
+        ),
       count: jest.fn().mockResolvedValue(0),
       remove: jest.fn().mockResolvedValue(undefined),
+      createQueryBuilder: jest.fn(() =>
+        mockQueryBuilder(takenPrefixes.map((prefix) => ({ prefix }))),
+      ),
     };
 
     variantRepository = {
       create: jest
         .fn()
         .mockImplementation((dto) => ({ ...dto, id: 'variant-uuid-1' })),
-      save: jest.fn().mockResolvedValue({}),
-      findOne: jest.fn(),
+      save: jest.fn().mockImplementation((v) => Promise.resolve(v)),
+      find: jest.fn().mockResolvedValue([]),
+      findOne: jest.fn().mockResolvedValue(null),
+      createQueryBuilder: jest.fn(() =>
+        mockQueryBuilder(takenSkus.map((sku) => ({ sku }))),
+      ),
     };
+
+    const emptyRepo = () => ({
+      create: jest.fn().mockImplementation((d) => d),
+      save: jest.fn().mockImplementation((d) => Promise.resolve(d)),
+      find: jest.fn().mockResolvedValue([]),
+      findOne: jest.fn().mockResolvedValue(null),
+      delete: jest.fn().mockResolvedValue(undefined),
+      createQueryBuilder: jest.fn(() => mockQueryBuilder()),
+    });
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ProductsService,
-        {
-          provide: getRepositoryToken(Product),
-          useValue: productRepository,
-        },
+        { provide: getRepositoryToken(Product), useValue: productRepository },
         {
           provide: getRepositoryToken(ProductVariant),
           useValue: variantRepository,
         },
+        { provide: getRepositoryToken(StoreSettings), useValue: emptyRepo() },
+        { provide: getRepositoryToken(Category), useValue: emptyRepo() },
+        { provide: getRepositoryToken(Warehouse), useValue: emptyRepo() },
+        { provide: getRepositoryToken(Stock), useValue: emptyRepo() },
+        { provide: getRepositoryToken(ProductEssence), useValue: emptyRepo() },
+        {
+          provide: RecipeService,
+          useValue: {
+            replaceRecipe: jest.fn(),
+            replaceUsedIn: jest.fn(),
+            getRecipe: jest.fn().mockResolvedValue([]),
+            getUsedIn: jest.fn().mockResolvedValue([]),
+          },
+        },
+        { provide: BrandsService, useValue: { ensure: jest.fn() } },
+        { provide: DataSource, useValue: { manager: {} } },
       ],
     }).compile();
 
@@ -70,12 +132,6 @@ describe('ProductsService', () => {
 
   describe('create', () => {
     it('should create a product with variants', async () => {
-      // ensureUniqueSlug calls findOne - return null to indicate slug is unique
-      productRepository.findOne
-        .mockResolvedValueOnce(null) // skuPrefix check
-        .mockResolvedValueOnce(null) // ensureUniqueSlug
-        .mockResolvedValueOnce({ ...mockProduct, variants: [] }); // final findOne
-
       const dto = {
         name: 'Camiseta Básica',
         basePrice: 50000,
@@ -92,6 +148,111 @@ describe('ProductsService', () => {
       expect(variantRepository.create).toHaveBeenCalledTimes(2);
       expect(variantRepository.save).toHaveBeenCalled();
       expect(result).toBeDefined();
+    });
+
+    it('usa el prefijo base cuando está libre', async () => {
+      await service.create(
+        { name: 'Camiseta Básica', basePrice: 1000, variants: [] } as any,
+        tenantId,
+      );
+      expect(productRepository.create.mock.calls[0][0].skuPrefix).toBe(
+        'CAMISE',
+      );
+    });
+
+    // Regresión del error 500 al crear esencias en Distri Amber: el prefijo se
+    // trunca a 6 caracteres, así que toda "Esencia X" comparte "ESENCI". El
+    // fallback anterior era "ESENCI" + total de productos del tenant, que con
+    // productos borrados apuntaba a un prefijo ya existente y reventaba contra
+    // el índice único (tenant_id, sku_prefix).
+    it('no reutiliza un prefijo existente aunque el nombre se trunque igual', async () => {
+      takenPrefixes = ['ESENCI', 'ESENCI2', 'ESENCI377'];
+      productRepository.count.mockResolvedValue(377);
+
+      await service.create(
+        {
+          name: 'Esencia Versace Bright Crystal',
+          basePrice: 0,
+          variants: [],
+        } as any,
+        tenantId,
+      );
+
+      const used = productRepository.create.mock.calls[0][0].skuPrefix;
+      expect(takenPrefixes).not.toContain(used);
+      expect(used).toBe('ESENCI3');
+    });
+
+    it('no deriva el prefijo del número de productos del tenant', async () => {
+      takenPrefixes = ['ESENCI'];
+      productRepository.count.mockResolvedValue(50);
+
+      await service.create(
+        { name: 'Esencia Amber', basePrice: 0, variants: [] } as any,
+        tenantId,
+      );
+
+      expect(productRepository.create.mock.calls[0][0].skuPrefix).not.toBe(
+        'ESENCI50',
+      );
+    });
+
+    it('usa un prefijo por defecto cuando el nombre no tiene letras ni números', async () => {
+      await service.create(
+        { name: '★★★', basePrice: 1000, variants: [] } as any,
+        tenantId,
+      );
+      expect(productRepository.create.mock.calls[0][0].skuPrefix).toBe('PROD');
+    });
+
+    it('reintenta cuando dos creaciones simultáneas eligen el mismo prefijo', async () => {
+      const duplicate = Object.assign(new Error('duplicate key'), {
+        code: '23505',
+        detail: 'Key (tenant_id, sku_prefix)=(t1, CAMISE) already exists.',
+      });
+      productRepository.save
+        .mockRejectedValueOnce(duplicate)
+        .mockImplementation((p) => Promise.resolve(p));
+
+      await expect(
+        service.create(
+          { name: 'Camiseta Básica', basePrice: 1000, variants: [] } as any,
+          tenantId,
+        ),
+      ).resolves.toBeDefined();
+
+      expect(productRepository.save).toHaveBeenCalledTimes(2);
+    });
+
+    it('rechaza con 404 una categoría que no pertenece al tenant', async () => {
+      await expect(
+        service.create(
+          {
+            name: 'Producto',
+            basePrice: 1000,
+            variants: [],
+            categoryId: 'categoria-inexistente',
+          } as any,
+          tenantId,
+        ),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('genera SKUs distintos para variantes con la misma talla y color', async () => {
+      takenSkus = ['CAMISE-M-NEG'];
+
+      await service.create(
+        {
+          name: 'Camiseta Básica',
+          basePrice: 1000,
+          variants: [{ size: 'M', color: 'Negro' }],
+        } as any,
+        tenantId,
+      );
+
+      expect(variantRepository.create.mock.calls[0][0].sku).toBe(
+        'CAMISE-M-NEG-2',
+      );
     });
   });
 
@@ -134,11 +295,10 @@ describe('ProductsService', () => {
     it('should update a product', async () => {
       const updatedProduct = { ...mockProduct, name: 'Camiseta Premium' };
 
-      // findOne for the initial fetch in update()
       productRepository.findOne
-        .mockResolvedValueOnce(mockProduct) // findOne inside update (initial)
+        .mockResolvedValueOnce(mockProduct) // findOne inicial dentro de update
         .mockResolvedValueOnce(null) // ensureUniqueSlug
-        .mockResolvedValueOnce(updatedProduct); // findOne at the end of update
+        .mockResolvedValueOnce(updatedProduct); // findOne final
 
       const result = await service.update(
         'product-uuid-1',

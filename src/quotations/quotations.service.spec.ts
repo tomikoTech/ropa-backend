@@ -9,6 +9,17 @@ import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
 import { TaxService } from '../pos/services/tax.service.js';
 import { PosService } from '../pos/pos.service.js';
 
+// Query builder encadenable que devuelve el valor dado en getRawOne().
+function mockQueryBuilder(rawOne: unknown) {
+  const qb: Record<string, jest.Mock> = {
+    select: jest.fn(() => qb),
+    where: jest.fn(() => qb),
+    andWhere: jest.fn(() => qb),
+    getRawOne: jest.fn().mockResolvedValue(rawOne),
+  };
+  return qb;
+}
+
 describe('QuotationsService', () => {
   let service: QuotationsService;
   let quotationRepo: Record<string, jest.Mock>;
@@ -28,8 +39,11 @@ describe('QuotationsService', () => {
   beforeEach(async () => {
     quotationRepo = {
       count: jest.fn().mockResolvedValue(0),
+      createQueryBuilder: jest.fn(() => mockQueryBuilder({ maxnum: null })),
       create: jest.fn().mockImplementation((d) => d),
-      save: jest.fn().mockImplementation((d) => Promise.resolve({ ...d, id: 'q1' })),
+      save: jest
+        .fn()
+        .mockImplementation((d) => Promise.resolve({ ...d, id: 'q1' })),
       findOne: jest.fn().mockResolvedValue({ id: 'q1', items: [] }),
     };
     variantRepo = {
@@ -49,7 +63,10 @@ describe('QuotationsService', () => {
         QuotationsService,
         TaxService,
         { provide: getRepositoryToken(Quotation), useValue: quotationRepo },
-        { provide: getRepositoryToken(QuotationItem), useValue: { create: (d: unknown) => d } },
+        {
+          provide: getRepositoryToken(QuotationItem),
+          useValue: { create: (d: unknown) => d },
+        },
         { provide: getRepositoryToken(ProductVariant), useValue: variantRepo },
         { provide: getRepositoryToken(StoreSettings), useValue: settingsRepo },
         { provide: PosService, useValue: { createSale: jest.fn() } },
@@ -74,9 +91,30 @@ describe('QuotationsService', () => {
     expect(saved.items[0].unitPrice).toBe(100000);
   });
 
+  // Regresión: el consecutivo salía del conteo de cotizaciones, así que borrar
+  // una cotización hacía que la siguiente reutilizara un número ya emitido.
+  it('continúa desde el número más alto emitido, no desde el conteo', async () => {
+    quotationRepo.count.mockResolvedValue(3);
+    quotationRepo.createQueryBuilder.mockReturnValue(
+      mockQueryBuilder({ maxnum: '7' }),
+    );
+
+    await service.create(
+      { warehouseId: 'w1', items: [{ variantId: 'v1', quantity: 1 }] },
+      'user-1',
+      tenantId,
+    );
+
+    const saved = quotationRepo.save.mock.calls[0][0];
+    expect(saved.quoteNumber).toBe('COT-000008');
+  });
+
   it('respeta el precio unitario cotizado cuando se envía', async () => {
     await service.create(
-      { warehouseId: 'w1', items: [{ variantId: 'v1', quantity: 1, unitPrice: 80000 }] },
+      {
+        warehouseId: 'w1',
+        items: [{ variantId: 'v1', quantity: 1, unitPrice: 80000 }],
+      },
       'user-1',
       tenantId,
     );

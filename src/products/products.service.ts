@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository, In } from 'typeorm';
 import { RecipeService } from './services/recipe.service.js';
@@ -12,6 +16,7 @@ import { Warehouse } from '../inventory/entities/warehouse.entity.js';
 import { Stock } from '../inventory/entities/stock.entity.js';
 import { CreateProductDto } from './dto/create-product.dto.js';
 import { UpdateProductDto } from './dto/update-product.dto.js';
+import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
 
 @Injectable()
 export class ProductsService {
@@ -50,14 +55,10 @@ export class ProductsService {
     if (!frascosCat) return null;
 
     const name = `Frasco ${locion.name}`;
-    let skuPrefix = this.generateSkuPrefix(name);
-    let n = 1;
-    while (
-      await this.productRepository.findOne({ where: { skuPrefix, tenantId } })
-    ) {
-      n += 1;
-      skuPrefix = `${this.generateSkuPrefix(name)}${n}`;
-    }
+    const skuPrefix = await this.ensureUniqueSkuPrefix(
+      this.generateSkuPrefix(name),
+      tenantId,
+    );
     const slug = await this.ensureUniqueSlug(this.generateSlug(name), tenantId);
 
     const frasco = this.productRepository.create({
@@ -78,19 +79,11 @@ export class ProductsService {
     });
     const savedFrasco = await this.productRepository.save(frasco);
 
-    const sku = await this.ensureUniqueSku(
-      this.generateSku(skuPrefix, 'Unica', 'Unico'),
+    const savedVariant = await this.createVariantFor(
+      savedFrasco,
+      { size: 'Única', color: 'Único' },
       tenantId,
     );
-    const variant = this.variantRepository.create({
-      productId: savedFrasco.id,
-      sku,
-      size: 'Única',
-      color: 'Único',
-      barcode: this.generateBarcode(),
-      tenantId,
-    });
-    const savedVariant = await this.variantRepository.save(variant);
 
     // Stock 0 en bodega FRASCOS (si existe)
     const frascosWh = await this.warehouseRepository
@@ -144,14 +137,10 @@ export class ProductsService {
     if (!essenceCat) return null;
 
     const name = `Esencia ${locion.name}`;
-    let skuPrefix = this.generateSkuPrefix(name);
-    let n = 1;
-    while (
-      await this.productRepository.findOne({ where: { skuPrefix, tenantId } })
-    ) {
-      n += 1;
-      skuPrefix = `${this.generateSkuPrefix(name)}${n}`;
-    }
+    const skuPrefix = await this.ensureUniqueSkuPrefix(
+      this.generateSkuPrefix(name),
+      tenantId,
+    );
     const slug = await this.ensureUniqueSlug(this.generateSlug(name), tenantId);
 
     const essence = this.productRepository.create({
@@ -168,19 +157,11 @@ export class ProductsService {
     });
     const savedEssence = await this.productRepository.save(essence);
 
-    const sku = await this.ensureUniqueSku(
-      this.generateSku(skuPrefix, 'Unica', 'Unico'),
+    const savedVariant = await this.createVariantFor(
+      savedEssence,
+      { size: 'Única', color: 'Único' },
       tenantId,
     );
-    const variant = this.variantRepository.create({
-      productId: savedEssence.id,
-      sku,
-      size: 'Única',
-      color: 'Único',
-      barcode: this.generateBarcode(),
-      tenantId,
-    });
-    const savedVariant = await this.variantRepository.save(variant);
 
     // Stock 0 en bodega ESENCIAS (si existe)
     const essenceWh = await this.warehouseRepository
@@ -214,12 +195,44 @@ export class ProductsService {
   }
 
   private generateSkuPrefix(name: string): string {
-    return name
+    const prefix = name
       .toUpperCase()
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '')
       .replace(/[^A-Z0-9]/g, '')
       .slice(0, 6);
+    // Un nombre sin letras ni n\u00fameros (p.ej. "\u2605\u2605\u2605") dejar\u00eda el prefijo vac\u00edo y
+    // todos esos productos chocar\u00edan entre s\u00ed.
+    return prefix || 'PROD';
+  }
+
+  /**
+   * Devuelve un skuPrefix libre dentro del tenant. Es obligatorio porque
+   * `generateSkuPrefix` trunca a 6 caracteres: en perfumer\u00eda todos los nombres
+   * "Esencia X" producen el mismo prefijo "ESENCI", as\u00ed que las colisiones son
+   * la norma, no la excepci\u00f3n. Resuelve en una sola consulta (trae los prefijos
+   * ya usados que empiezan por la base) y busca el primer sufijo libre.
+   */
+  private async ensureUniqueSkuPrefix(
+    base: string,
+    tenantId: string,
+    excludeId?: string,
+  ): Promise<string> {
+    const qb = this.productRepository
+      .createQueryBuilder('p')
+      .select('p.skuPrefix', 'prefix')
+      .where('p.tenantId = :tenantId', { tenantId })
+      // `base` solo contiene [A-Z0-9], as\u00ed que no necesita escape para LIKE.
+      .andWhere('p.skuPrefix LIKE :like', { like: `${base}%` });
+    if (excludeId) qb.andWhere('p.id != :excludeId', { excludeId });
+
+    const rows = await qb.getRawMany<{ prefix: string }>();
+    const taken = new Set(rows.map((r) => r.prefix));
+
+    if (!taken.has(base)) return base;
+    let n = 2;
+    while (taken.has(`${base}${n}`)) n++;
+    return `${base}${n}`;
   }
 
   private generateSku(prefix: string, size?: string, color?: string): string {
@@ -249,16 +262,60 @@ export class ProductsService {
     baseSku: string,
     tenantId: string,
   ): Promise<string> {
-    let candidate = baseSku;
+    // Una sola consulta con los SKU ya usados que arrancan por la base: con
+    // productos de muchas variantes, el bucle de un SELECT por candidato se
+    // volvía cientos de consultas por guardado.
+    const rows = await this.variantRepository
+      .createQueryBuilder('v')
+      .select('v.sku', 'sku')
+      .where('v.tenantId = :tenantId', { tenantId })
+      .andWhere('v.sku LIKE :like', { like: `${baseSku}%` })
+      .getRawMany<{ sku: string }>();
+    const taken = new Set(rows.map((r) => r.sku));
+
+    if (!taken.has(baseSku)) return baseSku;
     let counter = 2;
-    while (true) {
+    while (taken.has(`${baseSku}-${counter}`)) counter++;
+    return `${baseSku}-${counter}`;
+  }
+
+  // El código de barras se genera con timestamp + aleatorio: dos variantes
+  // creadas en el mismo milisegundo pueden chocar contra el índice único.
+  private async ensureUniqueBarcode(tenantId: string): Promise<string> {
+    for (let i = 0; i < 10; i++) {
+      const barcode = this.generateBarcode();
       const exists = await this.variantRepository.findOne({
-        where: { sku: candidate, tenantId },
+        where: { barcode, tenantId },
       });
-      if (!exists) return candidate;
-      candidate = `${baseSku}-${counter}`;
-      counter++;
+      if (!exists) return barcode;
     }
+    // Fallback prácticamente imposible de alcanzar; añade entropía extra.
+    return `${this.generateBarcode()}${Math.floor(Math.random() * 1000)}`;
+  }
+
+  // Crea una variante resolviendo SKU y código de barras libres. El retry cubre
+  // la carrera entre el cálculo y el INSERT (dos guardados simultáneos).
+  private async createVariantFor(
+    product: Pick<Product, 'id' | 'skuPrefix'>,
+    v: { size?: string; color?: string; priceOverride?: number | null },
+    tenantId: string,
+  ): Promise<ProductVariant> {
+    return retryOnUniqueViolation(async () => {
+      const sku = await this.ensureUniqueSku(
+        this.generateSku(product.skuPrefix, v.size, v.color),
+        tenantId,
+      );
+      const variant = this.variantRepository.create({
+        productId: product.id,
+        sku,
+        size: v.size || '',
+        color: v.color || '',
+        barcode: await this.ensureUniqueBarcode(tenantId),
+        priceOverride: v.priceOverride || null,
+        tenantId,
+      });
+      return this.variantRepository.save(variant);
+    });
   }
 
   private generateBarcode(): string {
@@ -298,63 +355,66 @@ export class ProductsService {
   }
 
   async create(dto: CreateProductDto, tenantId: string): Promise<Product> {
-    let skuPrefix = this.generateSkuPrefix(dto.name);
-
-    // Ensure unique prefix within tenant
-    const existingPrefix = await this.productRepository.findOne({
-      where: { skuPrefix, tenantId },
-    });
-    if (existingPrefix) {
-      const count = await this.productRepository.count({ where: { tenantId } });
-      skuPrefix = `${skuPrefix}${count}`;
+    if (dto.categoryId) {
+      const category = await this.categoryRepository.findOne({
+        where: { id: dto.categoryId, tenantId },
+      });
+      if (!category) {
+        throw new NotFoundException('La categoría seleccionada no existe');
+      }
+    }
+    if (dto.frascoVariantId) {
+      const frascoVariant = await this.variantRepository.findOne({
+        where: { id: dto.frascoVariantId, tenantId },
+      });
+      if (!frascoVariant) {
+        throw new NotFoundException('El frasco seleccionado no existe');
+      }
     }
 
-    const slug = await this.ensureUniqueSlug(
-      this.generateSlug(dto.name),
-      tenantId,
-    );
+    // El prefijo y el slug se calculan a partir del estado actual de la tabla,
+    // así que dos creaciones simultáneas pueden elegir el mismo valor. El retry
+    // recalcula ambos con el estado ya actualizado en vez de devolver un 500.
+    const saved = await retryOnUniqueViolation(async () => {
+      const skuPrefix = await this.ensureUniqueSkuPrefix(
+        this.generateSkuPrefix(dto.name),
+        tenantId,
+      );
+      const slug = await this.ensureUniqueSlug(
+        this.generateSlug(dto.name),
+        tenantId,
+      );
 
-    const product = this.productRepository.create({
-      name: dto.name,
-      displayName: dto.displayName,
-      skuPrefix,
-      slug,
-      description: dto.description,
-      basePrice: dto.basePrice,
-      costPrice: dto.costPrice ?? 0,
-      wholesalePrice: dto.wholesalePrice ?? null,
-      gender: dto.gender,
-      categoryId: dto.categoryId,
-      brand: dto.brand?.trim() || undefined,
-      lote: dto.lote?.trim() || undefined,
-      frascoVariantId: dto.frascoVariantId ?? null,
-      taxRate: dto.taxRate ?? 19,
-      imageUrl: dto.imageUrl || dto.imageUrls?.[0],
-      imageUrls: dto.imageUrls ?? [],
-      videoUrl: dto.videoUrl,
-      tenantId,
+      const product = this.productRepository.create({
+        name: dto.name,
+        displayName: dto.displayName,
+        skuPrefix,
+        slug,
+        description: dto.description,
+        basePrice: dto.basePrice,
+        costPrice: dto.costPrice ?? 0,
+        wholesalePrice: dto.wholesalePrice ?? null,
+        gender: dto.gender,
+        categoryId: dto.categoryId,
+        brand: dto.brand?.trim() || undefined,
+        lote: dto.lote?.trim() || undefined,
+        frascoVariantId: dto.frascoVariantId ?? null,
+        taxRate: dto.taxRate ?? 19,
+        imageUrl: dto.imageUrl || dto.imageUrls?.[0],
+        imageUrls: dto.imageUrls ?? [],
+        videoUrl: dto.videoUrl,
+        tenantId,
+      });
+
+      return this.productRepository.save(product);
     });
 
-    const saved = await this.productRepository.save(product);
     await this.brandsService.ensure(dto.brand, tenantId);
 
     // Create variants
     if (dto.variants && dto.variants.length > 0) {
       for (const v of dto.variants) {
-        const sku = await this.ensureUniqueSku(
-          this.generateSku(skuPrefix, v.size, v.color),
-          tenantId,
-        );
-        const variant = this.variantRepository.create({
-          productId: saved.id,
-          sku,
-          size: v.size || '',
-          color: v.color || '',
-          barcode: this.generateBarcode(),
-          priceOverride: v.priceOverride || null,
-          tenantId,
-        });
-        await this.variantRepository.save(variant);
+        await this.createVariantFor(saved, v, tenantId);
       }
     }
 
@@ -365,7 +425,10 @@ export class ProductsService {
       !dto.frascoVariantId &&
       (await this.isFrascoAutoManaged(tenantId))
     ) {
-      const frascoVariantId = await this.createFrascoForProduct(saved, tenantId);
+      const frascoVariantId = await this.createFrascoForProduct(
+        saved,
+        tenantId,
+      );
       if (frascoVariantId) {
         saved.frascoVariantId = frascoVariantId;
         await this.productRepository.save(saved);
@@ -517,12 +580,14 @@ export class ProductsService {
     if (dto.wholesalePrice !== undefined)
       product.wholesalePrice = dto.wholesalePrice ?? null;
     if (dto.gender !== undefined) product.gender = dto.gender;
-    if (dto.categoryId !== undefined) product.categoryId = dto.categoryId as string;
+    if (dto.categoryId !== undefined)
+      product.categoryId = dto.categoryId as string;
     if (dto.brand !== undefined) {
       product.brand = dto.brand?.trim() || (null as never);
       await this.brandsService.ensure(dto.brand, tenantId);
     }
-    if (dto.lote !== undefined) product.lote = dto.lote?.trim() || (null as never);
+    if (dto.lote !== undefined)
+      product.lote = dto.lote?.trim() || (null as never);
     if (dto.frascoVariantId !== undefined)
       product.frascoVariantId = dto.frascoVariantId || null;
     if (dto.status !== undefined) product.status = dto.status;
@@ -632,20 +697,7 @@ export class ProductsService {
             await this.variantRepository.save(existing);
           }
         } else {
-          const sku = await this.ensureUniqueSku(
-            this.generateSku(product.skuPrefix, v.size, v.color),
-            tenantId,
-          );
-          const newVariant = this.variantRepository.create({
-            productId: id,
-            sku,
-            size: v.size || '',
-            color: v.color || '',
-            barcode: this.generateBarcode(),
-            priceOverride: v.priceOverride || null,
-            tenantId,
-          });
-          await this.variantRepository.save(newVariant);
+          await this.createVariantFor(product, v, tenantId);
         }
       }
     }

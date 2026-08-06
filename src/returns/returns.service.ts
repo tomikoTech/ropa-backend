@@ -16,6 +16,7 @@ import { CreateReturnDto } from './dto/create-return.dto.js';
 import { ReturnStatus } from '../common/enums/return-status.enum.js';
 import { SaleStatus } from '../common/enums/sale-status.enum.js';
 import { MovementType } from '../common/enums/movement-type.enum.js';
+import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
 
 @Injectable()
 export class ReturnsService {
@@ -27,22 +28,36 @@ export class ReturnsService {
     private readonly dataSource: DataSource,
   ) {}
 
+  // Consecutivos por primer hueco libre, no por conteo: con registros borrados
+  // el conteo devuelve un número ya usado y la devolución falla con un error
+  // interno en vez de crearse.
   private async generateReturnNumber(tenantId: string): Promise<string> {
     const today = new Date();
     const prefix = `DEV-${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
-    const count = await this.returnRepository
+    const rows = await this.returnRepository
       .createQueryBuilder('r')
+      .select('r.returnNumber', 'number')
       .where('r.return_number LIKE :prefix', { prefix: `${prefix}%` })
       .andWhere('r.tenant_id = :tenantId', { tenantId })
-      .getCount();
-    return `${prefix}-${String(count + 1).padStart(4, '0')}`;
+      .getRawMany<{ number: string }>();
+    const taken = new Set(rows.map((r) => r.number));
+    let n = 1;
+    while (taken.has(`${prefix}-${String(n).padStart(4, '0')}`)) n++;
+    return `${prefix}-${String(n).padStart(4, '0')}`;
   }
 
   private async generateCreditNoteNumber(tenantId: string): Promise<string> {
-    const count = await this.creditNoteRepository.count({
-      where: { tenantId },
-    });
-    return `NC-${String(count + 1).padStart(6, '0')}`;
+    const row = await this.creditNoteRepository
+      .createQueryBuilder('cn')
+      .select(
+        "MAX(CAST(substring(cn.credit_note_number FROM '^NC-0*([0-9]+)$') AS integer))",
+        'maxnum',
+      )
+      .where('cn.tenant_id = :tenantId', { tenantId })
+      .andWhere("cn.credit_note_number ~ '^NC-[0-9]+$'")
+      .getRawOne<{ maxnum: string | null }>();
+    const next = (row?.maxnum ? parseInt(row.maxnum, 10) : 0) + 1;
+    return `NC-${String(next).padStart(6, '0')}`;
   }
 
   /**
@@ -54,133 +69,135 @@ export class ReturnsService {
     userId: string,
     tenantId: string,
   ): Promise<Return> {
-    return this.dataSource.transaction(async (manager) => {
-      const saleRepo = manager.getRepository(Sale);
-      const returnRepo = manager.getRepository(Return);
-      const returnItemRepo = manager.getRepository(ReturnItem);
-      const creditNoteRepo = manager.getRepository(CreditNote);
-      const stockRepo = manager.getRepository(Stock);
-      const movementRepo = manager.getRepository(StockMovement);
+    return retryOnUniqueViolation(async () =>
+      this.dataSource.transaction(async (manager) => {
+        const saleRepo = manager.getRepository(Sale);
+        const returnRepo = manager.getRepository(Return);
+        const returnItemRepo = manager.getRepository(ReturnItem);
+        const creditNoteRepo = manager.getRepository(CreditNote);
+        const stockRepo = manager.getRepository(Stock);
+        const movementRepo = manager.getRepository(StockMovement);
 
-      // Validate sale
-      const sale = await saleRepo.findOne({
-        where: { id: dto.saleId, tenantId },
-        relations: ['items', 'client'],
-      });
-      if (!sale) {
-        throw new NotFoundException('Venta no encontrada');
-      }
-      if (sale.status !== SaleStatus.COMPLETED) {
-        throw new BadRequestException(
-          'Solo se pueden devolver ventas completadas',
-        );
-      }
-
-      const returnNumber = await this.generateReturnNumber(tenantId);
-      let refundAmount = 0;
-
-      // Validate items and calculate refund
-      const returnItemsData: { saleItem: SaleItem; quantity: number }[] = [];
-
-      for (const itemDto of dto.items) {
-        const saleItem = sale.items.find((i) => i.id === itemDto.saleItemId);
-        if (!saleItem) {
-          throw new NotFoundException(
-            `Item de venta ${itemDto.saleItemId} no encontrado`,
-          );
+        // Validate sale
+        const sale = await saleRepo.findOne({
+          where: { id: dto.saleId, tenantId },
+          relations: ['items', 'client'],
+        });
+        if (!sale) {
+          throw new NotFoundException('Venta no encontrada');
         }
-        if (itemDto.quantity > saleItem.quantity) {
+        if (sale.status !== SaleStatus.COMPLETED) {
           throw new BadRequestException(
-            `Cantidad a devolver (${itemDto.quantity}) excede la vendida (${saleItem.quantity}) para "${saleItem.productName}"`,
+            'Solo se pueden devolver ventas completadas',
           );
         }
-        returnItemsData.push({ saleItem, quantity: itemDto.quantity });
-        refundAmount += itemDto.quantity * Number(saleItem.unitPrice);
-      }
 
-      // Create return
-      const returnEntity = returnRepo.create({
-        returnNumber,
-        saleId: sale.id,
-        clientId: sale.clientId,
-        userId,
-        reason: dto.reason,
-        status: ReturnStatus.COMPLETED,
-        refundAmount,
-        tenantId,
-      });
-      const savedReturn = await returnRepo.save(returnEntity);
+        const returnNumber = await this.generateReturnNumber(tenantId);
+        let refundAmount = 0;
 
-      // Create return items + restore inventory
-      for (const { saleItem, quantity } of returnItemsData) {
-        const ri = returnItemRepo.create({
-          returnId: savedReturn.id,
-          saleItemId: saleItem.id,
-          variantId: saleItem.variantId,
-          quantity,
-          unitPrice: saleItem.unitPrice,
+        // Validate items and calculate refund
+        const returnItemsData: { saleItem: SaleItem; quantity: number }[] = [];
+
+        for (const itemDto of dto.items) {
+          const saleItem = sale.items.find((i) => i.id === itemDto.saleItemId);
+          if (!saleItem) {
+            throw new NotFoundException(
+              `Item de venta ${itemDto.saleItemId} no encontrado`,
+            );
+          }
+          if (itemDto.quantity > saleItem.quantity) {
+            throw new BadRequestException(
+              `Cantidad a devolver (${itemDto.quantity}) excede la vendida (${saleItem.quantity}) para "${saleItem.productName}"`,
+            );
+          }
+          returnItemsData.push({ saleItem, quantity: itemDto.quantity });
+          refundAmount += itemDto.quantity * Number(saleItem.unitPrice);
+        }
+
+        // Create return
+        const returnEntity = returnRepo.create({
+          returnNumber,
+          saleId: sale.id,
+          clientId: sale.clientId,
+          userId,
+          reason: dto.reason,
+          status: ReturnStatus.COMPLETED,
+          refundAmount,
           tenantId,
         });
-        await returnItemRepo.save(ri);
+        const savedReturn = await returnRepo.save(returnEntity);
 
-        // Restore stock
-        const stock = await stockRepo.findOne({
-          where: {
+        // Create return items + restore inventory
+        for (const { saleItem, quantity } of returnItemsData) {
+          const ri = returnItemRepo.create({
+            returnId: savedReturn.id,
+            saleItemId: saleItem.id,
+            variantId: saleItem.variantId,
+            quantity,
+            unitPrice: saleItem.unitPrice,
+            tenantId,
+          });
+          await returnItemRepo.save(ri);
+
+          // Restore stock
+          const stock = await stockRepo.findOne({
+            where: {
+              variantId: saleItem.variantId,
+              warehouseId: sale.warehouseId,
+              tenantId,
+            },
+          });
+          if (stock) {
+            stock.quantity += quantity;
+            await stockRepo.save(stock);
+          }
+
+          // Record movement
+          const movement = movementRepo.create({
             variantId: saleItem.variantId,
             warehouseId: sale.warehouseId,
+            movementType: MovementType.IN,
+            quantity,
+            referenceType: 'RETURN',
+            referenceId: savedReturn.id,
+            notes: `Devolución ${returnNumber}`,
+            createdById: userId,
             tenantId,
-          },
-        });
-        if (stock) {
-          stock.quantity += quantity;
-          await stockRepo.save(stock);
+          });
+          await movementRepo.save(movement);
         }
 
-        // Record movement
-        const movement = movementRepo.create({
-          variantId: saleItem.variantId,
-          warehouseId: sale.warehouseId,
-          movementType: MovementType.IN,
-          quantity,
-          referenceType: 'RETURN',
-          referenceId: savedReturn.id,
-          notes: `Devolución ${returnNumber}`,
-          createdById: userId,
+        // Create credit note
+        const cnNumber = await this.generateCreditNoteNumber(tenantId);
+        const creditNote = creditNoteRepo.create({
+          creditNoteNumber: cnNumber,
+          returnId: savedReturn.id,
+          amount: refundAmount,
+          notes: `Nota crédito por devolución ${returnNumber}`,
           tenantId,
         });
-        await movementRepo.save(movement);
-      }
+        await creditNoteRepo.save(creditNote);
 
-      // Create credit note
-      const cnNumber = await this.generateCreditNoteNumber(tenantId);
-      const creditNote = creditNoteRepo.create({
-        creditNoteNumber: cnNumber,
-        returnId: savedReturn.id,
-        amount: refundAmount,
-        notes: `Nota crédito por devolución ${returnNumber}`,
-        tenantId,
-      });
-      await creditNoteRepo.save(creditNote);
-
-      // Return full entity
-      const fullReturn = await returnRepo.findOne({
-        where: { id: savedReturn.id, tenantId },
-        relations: [
-          'sale',
-          'client',
-          'user',
-          'items',
-          'items.variant',
-          'creditNotes',
-        ],
-      });
-      if (!fullReturn) {
-        throw new NotFoundException(
-          'Devolución no encontrada después de crear',
-        );
-      }
-      return fullReturn;
-    });
+        // Return full entity
+        const fullReturn = await returnRepo.findOne({
+          where: { id: savedReturn.id, tenantId },
+          relations: [
+            'sale',
+            'client',
+            'user',
+            'items',
+            'items.variant',
+            'creditNotes',
+          ],
+        });
+        if (!fullReturn) {
+          throw new NotFoundException(
+            'Devolución no encontrada después de crear',
+          );
+        }
+        return fullReturn;
+      }),
+    );
   }
 
   async findAll(tenantId: string): Promise<Return[]> {

@@ -26,6 +26,7 @@ import { InvoiceEmailService } from '../common/services/invoice-email.service.js
 import { EcommerceOrderStatus } from '../common/enums/ecommerce-order-status.enum.js';
 import { ProductStatus } from '../common/enums/product-status.enum.js';
 import { ShippingStatus } from '../common/enums/shipping-status.enum.js';
+import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
 
 @Injectable()
 export class StorefrontService {
@@ -63,7 +64,11 @@ export class StorefrontService {
   }
 
   async resolveByDomain(domain: string) {
-    const cleaned = domain.toLowerCase().replace(/^https?:\/\//, '').replace(/\/+$/, '').trim();
+    const cleaned = domain
+      .toLowerCase()
+      .replace(/^https?:\/\//, '')
+      .replace(/\/+$/, '')
+      .trim();
     const settings = await this.settingsRepo.findOne({
       where: { customDomain: cleaned, isStorefrontActive: true },
     });
@@ -93,7 +98,8 @@ export class StorefrontService {
       heroSubtitle: settings.heroSubtitle,
       accentColor: settings.accentColor,
       wavaEnabled: !!settings.wavaMerchantKey,
-      wompiEnabled: !!settings.wompiPublicKey && !!settings.wompiIntegritySecret,
+      wompiEnabled:
+        !!settings.wompiPublicKey && !!settings.wompiIntegritySecret,
       codEnabled: settings.codEnabled,
       flatShippingCost: Number(settings.flatShippingCost) || 0,
       storeCityName: settings.storeCityName || null,
@@ -103,8 +109,10 @@ export class StorefrontService {
       shippingCostNational: Number(settings.shippingCostNational) || 0,
       shippingCostRemote: Number(settings.shippingCostRemote) || 0,
       shippingExtraItemLocal: Number(settings.shippingExtraItemLocal) || 0,
-      shippingExtraItemRegional: Number(settings.shippingExtraItemRegional) || 0,
-      shippingExtraItemNational: Number(settings.shippingExtraItemNational) || 0,
+      shippingExtraItemRegional:
+        Number(settings.shippingExtraItemRegional) || 0,
+      shippingExtraItemNational:
+        Number(settings.shippingExtraItemNational) || 0,
       shippingExtraItemRemote: Number(settings.shippingExtraItemRemote) || 0,
       remoteDepartments: settings.remoteDepartments || null,
       customHeroHtml: settings.customHeroHtml || null,
@@ -407,8 +415,7 @@ export class StorefrontService {
     }
 
     const matched = cats.filter(
-      (c) =>
-        c.slug.toLowerCase() === needle || c.name.toLowerCase() === needle,
+      (c) => c.slug.toLowerCase() === needle || c.name.toLowerCase() === needle,
     );
 
     const ids = new Set<string>();
@@ -516,6 +523,24 @@ export class StorefrontService {
     });
   }
 
+  // Consecutivo diario de órdenes de e-commerce: EC-YYYYMMDD-NNNN. Busca el
+  // primer número libre del día (no el conteo), para que borrar una orden no
+  // deje el consecutivo pisando uno existente.
+  private async nextOrderNumber(tenantId: string): Promise<string> {
+    const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const prefix = `EC-${dateStr}-`;
+    const rows = await this.orderRepo
+      .createQueryBuilder('o')
+      .select('o.orderNumber', 'orderNumber')
+      .where('o.tenantId = :tenantId', { tenantId })
+      .andWhere('o.orderNumber LIKE :prefix', { prefix: `${prefix}%` })
+      .getRawMany<{ orderNumber: string }>();
+    const taken = new Set(rows.map((r) => r.orderNumber));
+    let n = 1;
+    while (taken.has(`${prefix}${String(n).padStart(4, '0')}`)) n++;
+    return `${prefix}${String(n).padStart(4, '0')}`;
+  }
+
   async createOrder(tenantSlug: string, dto: CreateOrderDto) {
     // Cross-optional: at least phone or email must be provided
     if (!dto.customerPhone && !dto.customerEmail) {
@@ -596,9 +621,8 @@ export class StorefrontService {
     let effectiveShippingAddress = dto.shippingAddress || undefined;
     let pickupDeadline: Date | undefined;
     let effectivePaymentMethod = dto.paymentMethod || 'whatsapp';
-    let effectiveShippingStatus: ShippingStatus | undefined = dto.shippingAddress
-      ? ShippingStatus.PENDING_SHIPMENT
-      : undefined;
+    let effectiveShippingStatus: ShippingStatus | undefined =
+      dto.shippingAddress ? ShippingStatus.PENDING_SHIPMENT : undefined;
 
     if (dto.deliveryMethod === 'pickup') {
       shippingCost = 0;
@@ -607,10 +631,17 @@ export class StorefrontService {
       pickupDeadline = new Date(Date.now() + 48 * 60 * 60 * 1000);
       effectiveShippingStatus = undefined;
       effectivePaymentMethod = 'pickup';
-    } else if (dto.deliveryMethod === 'shipping' || dto.deliveryMethod === 'cod') {
+    } else if (
+      dto.deliveryMethod === 'shipping' ||
+      dto.deliveryMethod === 'cod'
+    ) {
       const totalItemCount = dto.items.reduce((sum, i) => sum + i.quantity, 0);
       shippingCost = this.calculateShippingCost(
-        settings, dto.shippingCity, dto.shippingDepartment, totalItemCount, dto.deliveryMethod,
+        settings,
+        dto.shippingCity,
+        dto.shippingDepartment,
+        totalItemCount,
+        dto.deliveryMethod,
       );
       effectiveShippingStatus = ShippingStatus.PENDING_SHIPMENT;
       if (dto.deliveryMethod === 'cod') {
@@ -626,15 +657,8 @@ export class StorefrontService {
       settings,
     );
 
-    // Generate order number
-    const today = new Date();
-    const dateStr = today.toISOString().slice(0, 10).replace(/-/g, '');
-    const todayCount = await this.orderRepo.count({ where: { tenantId } });
-    const orderNumber = `EC-${dateStr}-${String(todayCount + 1).padStart(4, '0')}`;
-
     // Create order (PENDING — no stock deducted yet)
     const orderData: Partial<EcommerceOrder> = {
-      orderNumber,
       customerName: dto.customerName,
       customerPhone: dto.customerPhone,
       customerEmail: dto.customerEmail,
@@ -659,8 +683,17 @@ export class StorefrontService {
       codRemainingAmount: codPricing.codRemainingAmount,
       codSurchargeAmount: codPricing.codSurchargeAmount,
     };
-    const order = this.orderRepo.create(orderData as EcommerceOrder);
-    const savedOrder = await this.orderRepo.save(order);
+    // El consecutivo se resuelve justo antes de insertar y se reintenta ante
+    // duplicados: calcularlo con el total de órdenes del tenant hacía que, al
+    // borrar una orden, el número siguiente ya existiera y el checkout quedara
+    // roto para todos los clientes con un "error interno".
+    const savedOrder = await retryOnUniqueViolation(async () => {
+      const order = this.orderRepo.create({
+        ...(orderData as EcommerceOrder),
+        orderNumber: await this.nextOrderNumber(tenantId),
+      });
+      return this.orderRepo.save(order);
+    });
 
     // Create order items (snapshot product info)
     for (const data of variantData) {
@@ -756,10 +789,24 @@ export class StorefrontService {
   }
 
   private static readonly DEFAULT_REMOTE_DEPARTMENTS = [
-    'la guajira', 'cesar', 'magdalena', 'atlantico', 'bolivar',
-    'sucre', 'cordoba', 'san andres y providencia', 'arauca',
-    'casanare', 'vichada', 'guainia', 'guaviare', 'vaupes',
-    'amazonas', 'putumayo', 'norte de santander', 'caqueta',
+    'la guajira',
+    'cesar',
+    'magdalena',
+    'atlantico',
+    'bolivar',
+    'sucre',
+    'cordoba',
+    'san andres y providencia',
+    'arauca',
+    'casanare',
+    'vichada',
+    'guainia',
+    'guaviare',
+    'vaupes',
+    'amazonas',
+    'putumayo',
+    'norte de santander',
+    'caqueta',
   ];
 
   private static normalizeDept(s: string): string {
@@ -775,8 +822,12 @@ export class StorefrontService {
   ): number {
     if (deliveryMethod === 'pickup') return 0;
 
-    const storeCity = StorefrontService.normalizeDept(settings.storeCityName || '');
-    const storeDept = StorefrontService.normalizeDept(settings.storeDepartment || '');
+    const storeCity = StorefrontService.normalizeDept(
+      settings.storeCityName || '',
+    );
+    const storeDept = StorefrontService.normalizeDept(
+      settings.storeDepartment || '',
+    );
     const destCity = StorefrontService.normalizeDept(shippingCity || '');
     const destDept = StorefrontService.normalizeDept(shippingDepartment || '');
 
@@ -790,8 +841,10 @@ export class StorefrontService {
       baseCost = Number(settings.shippingCostRegional) || 0;
       extraItemCost = Number(settings.shippingExtraItemRegional) || 0;
     } else {
-      const remoteDepts = (settings.remoteDepartments || StorefrontService.DEFAULT_REMOTE_DEPARTMENTS)
-        .map(StorefrontService.normalizeDept);
+      const remoteDepts = (
+        settings.remoteDepartments ||
+        StorefrontService.DEFAULT_REMOTE_DEPARTMENTS
+      ).map(StorefrontService.normalizeDept);
       if (destDept && remoteDepts.includes(destDept)) {
         baseCost = Number(settings.shippingCostRemote) || 0;
         extraItemCost = Number(settings.shippingExtraItemRemote) || 0;
@@ -803,9 +856,10 @@ export class StorefrontService {
 
     if (baseCost === 0) baseCost = Number(settings.flatShippingCost) || 0;
 
-    let finalCost = totalItemCount <= 1
-      ? baseCost
-      : baseCost + (totalItemCount - 1) * extraItemCost;
+    let finalCost =
+      totalItemCount <= 1
+        ? baseCost
+        : baseCost + (totalItemCount - 1) * extraItemCost;
 
     const maxCost = Number(settings.maxShippingCost) || 0;
     if (maxCost > 0 && finalCost > maxCost) finalCost = maxCost;
@@ -825,7 +879,11 @@ export class StorefrontService {
     codRemainingAmount: number;
   } {
     if (deliveryMethod !== 'cod') {
-      return { codSurchargeAmount: 0, codUpfrontAmount: 0, codRemainingAmount: 0 };
+      return {
+        codSurchargeAmount: 0,
+        codUpfrontAmount: 0,
+        codRemainingAmount: 0,
+      };
     }
 
     const upfront = shippingCost;
@@ -839,10 +897,7 @@ export class StorefrontService {
   }
 
   /** Preview checkout totals including COD pricing. */
-  async calculateCheckout(
-    tenantSlug: string,
-    dto: CalculateCheckoutDto,
-  ) {
+  async calculateCheckout(tenantSlug: string, dto: CalculateCheckoutDto) {
     const { tenantId, settings } = await this.resolveTenant(tenantSlug);
 
     // Validate variants and calculate line totals
@@ -880,7 +935,11 @@ export class StorefrontService {
     if (dto.deliveryMethod === 'shipping' || dto.deliveryMethod === 'cod') {
       const totalItemCount = dto.items.reduce((sum, i) => sum + i.quantity, 0);
       shippingCost = this.calculateShippingCost(
-        settings, dto.shippingCity, dto.shippingDepartment, totalItemCount, dto.deliveryMethod,
+        settings,
+        dto.shippingCity,
+        dto.shippingDepartment,
+        totalItemCount,
+        dto.deliveryMethod,
       );
     }
 
@@ -892,7 +951,8 @@ export class StorefrontService {
       settings,
     );
 
-    const grandTotal = saleTotals.total + shippingCost + codPricing.codSurchargeAmount;
+    const grandTotal =
+      saleTotals.total + shippingCost + codPricing.codSurchargeAmount;
 
     return {
       subtotal: saleTotals.subtotal,

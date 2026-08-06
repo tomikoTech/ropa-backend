@@ -18,6 +18,7 @@ import { TransferStockDto } from './dto/transfer-stock.dto.js';
 import { MovementType } from '../common/enums/movement-type.enum.js';
 import { ProductVariant } from '../products/entities/product-variant.entity.js';
 import { RecipeService } from '../products/services/recipe.service.js';
+import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
 
 @Injectable()
 export class InventoryService {
@@ -42,32 +43,47 @@ export class InventoryService {
     dto: CreateWarehouseDto,
     tenantId: string,
   ): Promise<Warehouse> {
-    // Auto-generate code if not provided
-    let code = dto.code;
-    if (!code) {
-      const count = await this.warehouseRepository.count({
-        where: { tenantId },
-      });
-      code = `BOD-${String(count + 1).padStart(3, '0')}`;
+    const nameTaken = await this.warehouseRepository.findOne({
+      where: { name: dto.name, tenantId },
+    });
+    if (nameTaken) {
+      throw new ConflictException('Ya existe una bodega con ese nombre');
     }
 
-    const existing = await this.warehouseRepository.findOne({
-      where: [
-        { name: dto.name, tenantId },
-        { code, tenantId },
-      ],
-    });
-    if (existing) {
-      throw new ConflictException(
-        'Ya existe una bodega con ese nombre o código',
-      );
+    if (dto.code) {
+      const codeTaken = await this.warehouseRepository.findOne({
+        where: { code: dto.code, tenantId },
+      });
+      if (codeTaken) {
+        throw new ConflictException('Ya existe una bodega con ese código');
+      }
     }
-    const warehouse = this.warehouseRepository.create({
-      ...dto,
-      code,
-      tenantId,
+
+    // Con el código autogenerado, el retry recalcula el consecutivo: basarlo en
+    // el conteo hacía que, tras borrar una bodega, el siguiente código chocara
+    // con uno existente y ninguna bodega nueva se pudiera crear.
+    return retryOnUniqueViolation(async () => {
+      const code = dto.code || (await this.nextWarehouseCode(tenantId));
+      const warehouse = this.warehouseRepository.create({
+        ...dto,
+        code,
+        tenantId,
+      });
+      return this.warehouseRepository.save(warehouse);
     });
-    return this.warehouseRepository.save(warehouse);
+  }
+
+  private async nextWarehouseCode(tenantId: string): Promise<string> {
+    const rows = await this.warehouseRepository
+      .createQueryBuilder('w')
+      .select('w.code', 'code')
+      .where('w.tenantId = :tenantId', { tenantId })
+      .andWhere("w.code LIKE 'BOD-%'")
+      .getRawMany<{ code: string }>();
+    const taken = new Set(rows.map((r) => r.code));
+    let n = 1;
+    while (taken.has(`BOD-${String(n).padStart(3, '0')}`)) n++;
+    return `BOD-${String(n).padStart(3, '0')}`;
   }
 
   async findAllWarehouses(tenantId: string): Promise<Warehouse[]> {
@@ -885,10 +901,9 @@ export class InventoryService {
     if (filters?.status)
       qb.andWhere('t.status = :status', { status: filters.status });
     if (filters?.warehouseId) {
-      qb.andWhere(
-        '(t.from_warehouse_id = :wh OR t.to_warehouse_id = :wh)',
-        { wh: filters.warehouseId },
-      );
+      qb.andWhere('(t.from_warehouse_id = :wh OR t.to_warehouse_id = :wh)', {
+        wh: filters.warehouseId,
+      });
     }
     return qb.orderBy('t.created_at', 'DESC').getMany();
   }

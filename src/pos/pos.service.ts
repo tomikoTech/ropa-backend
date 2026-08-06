@@ -27,6 +27,7 @@ import { SaleStatus } from '../common/enums/sale-status.enum.js';
 import { SaleChannel } from '../common/enums/sale-channel.enum.js';
 import { PaymentMethod } from '../common/enums/payment-method.enum.js';
 import { MovementType } from '../common/enums/movement-type.enum.js';
+import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
 
 @Injectable()
 export class PosService {
@@ -68,429 +69,446 @@ export class PosService {
     userId: string,
     tenantId: string,
   ): Promise<Sale> {
-    const fullSale = await this.dataSource.transaction(async (manager) => {
-      const variantRepo = manager.getRepository(ProductVariant);
-      const stockRepo = manager.getRepository(Stock);
-      const movementRepo = manager.getRepository(StockMovement);
-      const saleRepo = manager.getRepository(Sale);
-      const saleItemRepo = manager.getRepository(SaleItem);
-      const paymentRepo = manager.getRepository(Payment);
+    // El consecutivo de venta/factura se calcula leyendo el último existente:
+    // dos cajas vendiendo a la vez pueden elegir el mismo número y chocar contra
+    // el índice único. Reintentar la transacción completa (rollback + recálculo)
+    // evita que la caja vea un "error interno" al cobrar.
+    const fullSale = await retryOnUniqueViolation(async () =>
+      this.dataSource.transaction(async (manager) => {
+        const variantRepo = manager.getRepository(ProductVariant);
+        const stockRepo = manager.getRepository(Stock);
+        const movementRepo = manager.getRepository(StockMovement);
+        const saleRepo = manager.getRepository(Sale);
+        const saleItemRepo = manager.getRepository(SaleItem);
+        const paymentRepo = manager.getRepository(Payment);
 
-      // If clientId not provided, use generic client
-      let clientId = dto.clientId;
-      if (!clientId) {
-        const generic = await manager.getRepository(Client).findOne({
-          where: { isGeneric: true, tenantId },
-        });
-        if (generic) {
-          clientId = generic.id;
-        }
-      } else {
-        // Validate specific client belongs to tenant
-        const client = await manager.getRepository(Client).findOne({
-          where: { id: dto.clientId, tenantId },
-        });
-        if (!client) {
-          throw new NotFoundException('Cliente no encontrado');
-        }
-      }
-
-      // IVA config per tenant. `applyTax` en el DTO permite decidir por venta;
-      // si no viene, se usa el default del tenant (ivaEnabled). La tasa es única
-      // por tienda (ivaRate), ignorando el tax_rate por producto.
-      const storeSettings = await manager
-        .getRepository(StoreSettings)
-        .findOne({ where: { tenantId } });
-      const ivaEnabled = storeSettings ? storeSettings.ivaEnabled : true;
-      const applyTax = dto.applyTax ?? ivaEnabled;
-      const storeIvaRate = storeSettings ? Number(storeSettings.ivaRate) : 19;
-      const effectiveTaxRate = applyTax ? storeIvaRate : 0;
-      const ivaMode = storeSettings?.ivaMode === 'added' ? 'added' : 'included';
-
-      // Load and validate all variants + stock
-      const lineCalcs: LineCalculation[] = [];
-      const variantData: {
-        variant: ProductVariant;
-        stocks: Stock[];
-        quantity: number;
-        discountPercent: number;
-        lineCalc: LineCalculation;
-      }[] = [];
-
-      // Batch load all stocks for requested variants (1 query instead of N)
-      const allVariantIds = dto.items.map((i) => i.variantId);
-      const allStocks = await stockRepo.find({
-        where: { variantId: In(allVariantIds), tenantId },
-      });
-      const stocksByVariant = new Map<string, Stock[]>();
-      for (const s of allStocks) {
-        const arr = stocksByVariant.get(s.variantId);
-        if (arr) arr.push(s);
-        else stocksByVariant.set(s.variantId, [s]);
-      }
-
-      // Separados / apartados (F6): si el tenant lo tiene habilitado, el stock
-      // reservado para OTROS clientes no está disponible para esta venta. Los
-      // apartados del mismo cliente se consumen al vender (ver más abajo).
-      const reservationsEnabled = !!storeSettings?.reservationsEnabled;
-      const reservationRepo = manager.getRepository(Reservation);
-      let activeReservations: Reservation[] = [];
-      const reservedTotal = new Map<string, number>();
-      const reservedByClient = new Map<string, number>();
-      if (reservationsEnabled) {
-        activeReservations = await reservationRepo.find({
-          where: { tenantId, status: 'ACTIVE', variantId: In(allVariantIds) },
-        });
-        for (const r of activeReservations) {
-          reservedTotal.set(
-            r.variantId,
-            (reservedTotal.get(r.variantId) ?? 0) + Number(r.quantity),
-          );
-          if (clientId && r.clientId === clientId) {
-            reservedByClient.set(
-              r.variantId,
-              (reservedByClient.get(r.variantId) ?? 0) + Number(r.quantity),
-            );
+        // If clientId not provided, use generic client
+        let clientId = dto.clientId;
+        if (!clientId) {
+          const generic = await manager.getRepository(Client).findOne({
+            where: { isGeneric: true, tenantId },
+          });
+          if (generic) {
+            clientId = generic.id;
+          }
+        } else {
+          // Validate specific client belongs to tenant
+          const client = await manager.getRepository(Client).findOne({
+            where: { id: dto.clientId, tenantId },
+          });
+          if (!client) {
+            throw new NotFoundException('Cliente no encontrado');
           }
         }
-      }
 
-      for (const item of dto.items) {
-        const variant = await variantRepo.findOne({
-          where: { id: item.variantId },
-          relations: ['product'],
+        // IVA config per tenant. `applyTax` en el DTO permite decidir por venta;
+        // si no viene, se usa el default del tenant (ivaEnabled). La tasa es única
+        // por tienda (ivaRate), ignorando el tax_rate por producto.
+        const storeSettings = await manager
+          .getRepository(StoreSettings)
+          .findOne({ where: { tenantId } });
+        const ivaEnabled = storeSettings ? storeSettings.ivaEnabled : true;
+        const applyTax = dto.applyTax ?? ivaEnabled;
+        const storeIvaRate = storeSettings ? Number(storeSettings.ivaRate) : 19;
+        const effectiveTaxRate = applyTax ? storeIvaRate : 0;
+        const ivaMode =
+          storeSettings?.ivaMode === 'added' ? 'added' : 'included';
+
+        // Load and validate all variants + stock
+        const lineCalcs: LineCalculation[] = [];
+        const variantData: {
+          variant: ProductVariant;
+          stocks: Stock[];
+          quantity: number;
+          discountPercent: number;
+          lineCalc: LineCalculation;
+        }[] = [];
+
+        // Batch load all stocks for requested variants (1 query instead of N)
+        const allVariantIds = dto.items.map((i) => i.variantId);
+        const allStocks = await stockRepo.find({
+          where: { variantId: In(allVariantIds), tenantId },
         });
-        if (!variant) {
-          throw new NotFoundException(
-            `Variante ${item.variantId} no encontrada`,
-          );
-        }
-        if (variant.tenantId !== tenantId) {
-          throw new NotFoundException(
-            `Variante ${item.variantId} no encontrada`,
-          );
-        }
-        if (
-          !variant.isActive ||
-          variant.product.status !== ProductStatus.ACTIVE
-        ) {
-          throw new BadRequestException(
-            `Producto "${variant.product.name}" (${variant.sku}) no está activo`,
-          );
+        const stocksByVariant = new Map<string, Stock[]>();
+        for (const s of allStocks) {
+          const arr = stocksByVariant.get(s.variantId);
+          if (arr) arr.push(s);
+          else stocksByVariant.set(s.variantId, [s]);
         }
 
-        // Cascade stock check: primary warehouse first, then others by qty desc
-        const itemStocks = stocksByVariant.get(item.variantId) || [];
-        itemStocks.sort((a, b) => {
-          if (a.warehouseId === dto.warehouseId) return -1;
-          if (b.warehouseId === dto.warehouseId) return 1;
-          return Number(b.quantity) - Number(a.quantity);
-        });
-        const totalAvailable = itemStocks.reduce(
-          (sum, s) => sum + Number(s.quantity),
+        // Separados / apartados (F6): si el tenant lo tiene habilitado, el stock
+        // reservado para OTROS clientes no está disponible para esta venta. Los
+        // apartados del mismo cliente se consumen al vender (ver más abajo).
+        const reservationsEnabled = !!storeSettings?.reservationsEnabled;
+        const reservationRepo = manager.getRepository(Reservation);
+        let activeReservations: Reservation[] = [];
+        const reservedTotal = new Map<string, number>();
+        const reservedByClient = new Map<string, number>();
+        if (reservationsEnabled) {
+          activeReservations = await reservationRepo.find({
+            where: { tenantId, status: 'ACTIVE', variantId: In(allVariantIds) },
+          });
+          for (const r of activeReservations) {
+            reservedTotal.set(
+              r.variantId,
+              (reservedTotal.get(r.variantId) ?? 0) + Number(r.quantity),
+            );
+            if (clientId && r.clientId === clientId) {
+              reservedByClient.set(
+                r.variantId,
+                (reservedByClient.get(r.variantId) ?? 0) + Number(r.quantity),
+              );
+            }
+          }
+        }
+
+        for (const item of dto.items) {
+          const variant = await variantRepo.findOne({
+            where: { id: item.variantId },
+            relations: ['product'],
+          });
+          if (!variant) {
+            throw new NotFoundException(
+              `Variante ${item.variantId} no encontrada`,
+            );
+          }
+          if (variant.tenantId !== tenantId) {
+            throw new NotFoundException(
+              `Variante ${item.variantId} no encontrada`,
+            );
+          }
+          if (
+            !variant.isActive ||
+            variant.product.status !== ProductStatus.ACTIVE
+          ) {
+            throw new BadRequestException(
+              `Producto "${variant.product.name}" (${variant.sku}) no está activo`,
+            );
+          }
+
+          // Cascade stock check: primary warehouse first, then others by qty desc
+          const itemStocks = stocksByVariant.get(item.variantId) || [];
+          itemStocks.sort((a, b) => {
+            if (a.warehouseId === dto.warehouseId) return -1;
+            if (b.warehouseId === dto.warehouseId) return 1;
+            return Number(b.quantity) - Number(a.quantity);
+          });
+          const totalAvailable = itemStocks.reduce(
+            (sum, s) => sum + Number(s.quantity),
+            0,
+          );
+          // Apartados de otros clientes reducen el disponible para esta venta.
+          const reservedOthers =
+            (reservedTotal.get(item.variantId) ?? 0) -
+            (reservedByClient.get(item.variantId) ?? 0);
+          const effectiveAvailable = totalAvailable - reservedOthers;
+          if (effectiveAvailable < item.quantity) {
+            const reservedMsg =
+              reservedOthers > 0 ? ` (${reservedOthers} apartado(s))` : '';
+            throw new BadRequestException(
+              `Stock insuficiente para "${variant.product.name}" ${variant.size}/${variant.color}. ` +
+                `Disponible: ${effectiveAvailable}${reservedMsg}, Solicitado: ${item.quantity}`,
+            );
+          }
+
+          // Precio: el editado manualmente en el POS tiene prioridad; si no,
+          // priceOverride de la variante y luego basePrice del producto.
+          const defaultPrice = variant.priceOverride
+            ? Number(variant.priceOverride)
+            : Number(variant.product.basePrice);
+          const unitPrice =
+            item.unitPrice != null && Number(item.unitPrice) >= 0
+              ? Number(item.unitPrice)
+              : defaultPrice;
+          const taxRate = effectiveTaxRate;
+          const discountPercent = item.discountPercent || 0;
+
+          const lineCalc = this.taxService.calculateLine(
+            unitPrice,
+            item.quantity,
+            discountPercent,
+            taxRate,
+            ivaMode,
+          );
+          lineCalcs.push(lineCalc);
+
+          variantData.push({
+            variant,
+            stocks: itemStocks,
+            quantity: item.quantity,
+            discountPercent,
+            lineCalc,
+          });
+        }
+
+        // Calculate sale totals
+        const saleTotals = this.taxService.calculateSaleTotals(lineCalcs);
+
+        // Separate regular payments from credit
+        const regularPayments = dto.payments.filter(
+          (p) => p.method !== PaymentMethod.CREDITO,
+        );
+        const creditPayments = dto.payments.filter(
+          (p) => p.method === PaymentMethod.CREDITO,
+        );
+        const totalRegular = regularPayments.reduce(
+          (sum, p) => sum + p.amount,
           0,
         );
-        // Apartados de otros clientes reducen el disponible para esta venta.
-        const reservedOthers =
-          (reservedTotal.get(item.variantId) ?? 0) -
-          (reservedByClient.get(item.variantId) ?? 0);
-        const effectiveAvailable = totalAvailable - reservedOthers;
-        if (effectiveAvailable < item.quantity) {
-          const reservedMsg = reservedOthers > 0 ? ` (${reservedOthers} apartado(s))` : '';
-          throw new BadRequestException(
-            `Stock insuficiente para "${variant.product.name}" ${variant.size}/${variant.color}. ` +
-              `Disponible: ${effectiveAvailable}${reservedMsg}, Solicitado: ${item.quantity}`,
-          );
-        }
-
-        // Precio: el editado manualmente en el POS tiene prioridad; si no,
-        // priceOverride de la variante y luego basePrice del producto.
-        const defaultPrice = variant.priceOverride
-          ? Number(variant.priceOverride)
-          : Number(variant.product.basePrice);
-        const unitPrice =
-          item.unitPrice != null && Number(item.unitPrice) >= 0
-            ? Number(item.unitPrice)
-            : defaultPrice;
-        const taxRate = effectiveTaxRate;
-        const discountPercent = item.discountPercent || 0;
-
-        const lineCalc = this.taxService.calculateLine(
-          unitPrice,
-          item.quantity,
-          discountPercent,
-          taxRate,
-          ivaMode,
+        const totalCredit = creditPayments.reduce(
+          (sum, p) => sum + p.amount,
+          0,
         );
-        lineCalcs.push(lineCalc);
 
-        variantData.push({
-          variant,
-          stocks: itemStocks,
-          quantity: item.quantity,
-          discountPercent,
-          lineCalc,
-        });
-      }
+        // Venta PENDIENTE DE PAGO: no-crédito que no se marca como pagada al crear.
+        // No exige cubrir el total ni registra pagos; se marca luego desde Ventas.
+        const isPending = dto.markAsPaid === false && totalCredit === 0;
 
-      // Calculate sale totals
-      const saleTotals = this.taxService.calculateSaleTotals(lineCalcs);
-
-      // Separate regular payments from credit
-      const regularPayments = dto.payments.filter(
-        (p) => p.method !== PaymentMethod.CREDITO,
-      );
-      const creditPayments = dto.payments.filter(
-        (p) => p.method === PaymentMethod.CREDITO,
-      );
-      const totalRegular = regularPayments.reduce(
-        (sum, p) => sum + p.amount,
-        0,
-      );
-      const totalCredit = creditPayments.reduce((sum, p) => sum + p.amount, 0);
-
-      // Venta PENDIENTE DE PAGO: no-crédito que no se marca como pagada al crear.
-      // No exige cubrir el total ni registra pagos; se marca luego desde Ventas.
-      const isPending = dto.markAsPaid === false && totalCredit === 0;
-
-      if (!isPending && totalRegular + totalCredit < saleTotals.total) {
-        throw new BadRequestException(
-          `Pago insuficiente. Total: $${saleTotals.total}, Pagado: $${totalRegular + totalCredit}`,
-        );
-      }
-
-      // If credit, require real client and due date
-      if (totalCredit > 0) {
-        const client = clientId
-          ? await manager
-              .getRepository(Client)
-              .findOne({ where: { id: clientId, tenantId } })
-          : null;
-        if (!client || client.isGeneric) {
+        if (!isPending && totalRegular + totalCredit < saleTotals.total) {
           throw new BadRequestException(
-            'Las ventas a crédito requieren un cliente registrado (no genérico)',
+            `Pago insuficiente. Total: $${saleTotals.total}, Pagado: $${totalRegular + totalCredit}`,
           );
         }
-        if (!dto.creditDueDate) {
-          throw new BadRequestException(
-            'Las ventas a crédito requieren fecha de vencimiento',
-          );
-        }
-      }
 
-      // Generate numbers
-      const saleNumber = await this.invoiceService.generateSaleNumber(tenantId);
-      const invoiceNumber =
-        await this.invoiceService.generateInvoiceNumber(tenantId);
-
-      // Create sale
-      const sale = saleRepo.create({
-        saleNumber,
-        invoiceNumber,
-        clientId,
-        userId,
-        warehouseId: dto.warehouseId,
-        subtotal: saleTotals.subtotal,
-        discountAmount: saleTotals.discountAmount,
-        taxAmount: saleTotals.taxAmount,
-        total: saleTotals.total,
-        status: SaleStatus.COMPLETED,
-        saleChannel: dto.saleChannel || SaleChannel.POS,
-        isPaid: !isPending,
-        notes: dto.notes,
-        tenantId,
-      });
-      const savedSale = await saleRepo.save(sale);
-
-      // Puntas + comisión (F2): si el tenant activó la comisión por punta, se
-      // marca el ítem y se calcula la comisión (fija por par o % del valor).
-      const leftoverCommissionEnabled = !!storeSettings?.leftoverCommissionEnabled;
-
-      // Create sale items
-      for (const data of variantData) {
-        let isLeftover = false;
-        let commissionAmount = 0;
-        if (leftoverCommissionEnabled) {
-          isLeftover = await this.isProductLeftover(
-            manager,
-            data.variant.product,
-            storeSettings!,
-            tenantId,
-          );
-          if (isLeftover) {
-            const mode = storeSettings!.leftoverCommissionMode;
-            const value = Number(storeSettings!.leftoverCommissionValue) || 0;
-            commissionAmount =
-              mode === 'percent'
-                ? Math.round(data.lineCalc.lineTotal * value) / 100
-                : value * data.quantity;
+        // If credit, require real client and due date
+        if (totalCredit > 0) {
+          const client = clientId
+            ? await manager
+                .getRepository(Client)
+                .findOne({ where: { id: clientId, tenantId } })
+            : null;
+          if (!client || client.isGeneric) {
+            throw new BadRequestException(
+              'Las ventas a crédito requieren un cliente registrado (no genérico)',
+            );
           }
-        }
-
-        const saleItem = saleItemRepo.create({
-          saleId: savedSale.id,
-          variantId: data.variant.id,
-          productName: data.variant.product.name,
-          variantSku: data.variant.sku,
-          variantSize: data.variant.size,
-          variantColor: data.variant.color,
-          quantity: data.quantity,
-          unitPrice: data.lineCalc.unitPrice,
-          discountPercent: data.discountPercent,
-          taxRate: data.lineCalc.taxRate,
-          taxAmount: data.lineCalc.taxAmount,
-          lineTotal: data.lineCalc.lineTotal,
-          isLeftover,
-          commissionAmount,
-          tenantId,
-        });
-        await saleItemRepo.save(saleItem);
-
-        // Deduct inventory — cascade: primary warehouse first, then others by qty desc
-        let remaining = data.quantity;
-        for (const stock of data.stocks) {
-          if (remaining <= 0) break;
-          const available = Number(stock.quantity);
-          if (available <= 0) continue;
-
-          const toDeduct = Math.min(available, remaining);
-          stock.quantity = available - toDeduct;
-          remaining -= toDeduct;
-
-          await stockRepo.save(stock);
-
-          const movement = movementRepo.create({
-            variantId: data.variant.id,
-            warehouseId: stock.warehouseId,
-            movementType: MovementType.OUT,
-            quantity: -toDeduct,
-            referenceType: 'SALE',
-            referenceId: savedSale.id,
-            notes: `Venta ${saleNumber}`,
-            createdById: userId,
-            tenantId,
-          });
-          await movementRepo.save(movement);
-        }
-
-        // Perfumería: si el producto (loción) tiene un frasco vinculado,
-        // descontar 1 frasco por cada unidad vendida. NO bloquea la venta:
-        // descuenta lo disponible y el remanente deja el frasco en negativo
-        // (aviso de que hay que reponer).
-        const frascoVariantId = data.variant.product.frascoVariantId;
-        if (frascoVariantId) {
-          const frascoStocks = await stockRepo.find({
-            where: { variantId: frascoVariantId, tenantId },
-            order: { quantity: 'DESC' },
-          });
-          let frascoRemaining = data.quantity;
-          for (let i = 0; i < frascoStocks.length && frascoRemaining > 0; i++) {
-            const fs = frascoStocks[i];
-            const isLast = i === frascoStocks.length - 1;
-            const avail = Number(fs.quantity);
-            // En la última fila se descuenta todo el remanente (puede quedar
-            // negativo); en las demás, solo lo positivo disponible.
-            const toDeduct = isLast
-              ? frascoRemaining
-              : Math.min(Math.max(avail, 0), frascoRemaining);
-            if (toDeduct <= 0) continue;
-            fs.quantity = avail - toDeduct;
-            frascoRemaining -= toDeduct;
-            await stockRepo.save(fs);
-            await movementRepo.save(
-              movementRepo.create({
-                variantId: frascoVariantId,
-                warehouseId: fs.warehouseId,
-                movementType: MovementType.OUT,
-                quantity: -toDeduct,
-                referenceType: 'SALE',
-                referenceId: savedSale.id,
-                notes: `Frasco por venta ${saleNumber}`,
-                createdById: userId,
-                tenantId,
-              }),
+          if (!dto.creditDueDate) {
+            throw new BadRequestException(
+              'Las ventas a crédito requieren fecha de vencimiento',
             );
           }
         }
 
-        // Separados (F6): al venderle al cliente que tenía el apartado, se
-        // consume su reserva (FULFILLED cuando se agota), liberando el control.
-        if (reservationsEnabled && clientId) {
-          let toConsume = data.quantity;
-          const clientResv = activeReservations
-            .filter(
-              (r) =>
-                r.variantId === data.variant.id &&
-                r.clientId === clientId &&
-                r.status === 'ACTIVE',
-            )
-            .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
-          for (const r of clientResv) {
-            if (toConsume <= 0) break;
-            const take = Math.min(Number(r.quantity), toConsume);
-            r.quantity = Number(r.quantity) - take;
-            toConsume -= take;
-            if (r.quantity <= 0) r.status = 'FULFILLED';
-            await reservationRepo.save(r);
+        // Generate numbers
+        const saleNumber =
+          await this.invoiceService.generateSaleNumber(tenantId);
+        const invoiceNumber =
+          await this.invoiceService.generateInvoiceNumber(tenantId);
+
+        // Create sale
+        const sale = saleRepo.create({
+          saleNumber,
+          invoiceNumber,
+          clientId,
+          userId,
+          warehouseId: dto.warehouseId,
+          subtotal: saleTotals.subtotal,
+          discountAmount: saleTotals.discountAmount,
+          taxAmount: saleTotals.taxAmount,
+          total: saleTotals.total,
+          status: SaleStatus.COMPLETED,
+          saleChannel: dto.saleChannel || SaleChannel.POS,
+          isPaid: !isPending,
+          notes: dto.notes,
+          tenantId,
+        });
+        const savedSale = await saleRepo.save(sale);
+
+        // Puntas + comisión (F2): si el tenant activó la comisión por punta, se
+        // marca el ítem y se calcula la comisión (fija por par o % del valor).
+        const leftoverCommissionEnabled =
+          !!storeSettings?.leftoverCommissionEnabled;
+
+        // Create sale items
+        for (const data of variantData) {
+          let isLeftover = false;
+          let commissionAmount = 0;
+          if (leftoverCommissionEnabled) {
+            isLeftover = await this.isProductLeftover(
+              manager,
+              data.variant.product,
+              storeSettings,
+              tenantId,
+            );
+            if (isLeftover) {
+              const mode = storeSettings.leftoverCommissionMode;
+              const value = Number(storeSettings.leftoverCommissionValue) || 0;
+              commissionAmount =
+                mode === 'percent'
+                  ? Math.round(data.lineCalc.lineTotal * value) / 100
+                  : value * data.quantity;
+            }
+          }
+
+          const saleItem = saleItemRepo.create({
+            saleId: savedSale.id,
+            variantId: data.variant.id,
+            productName: data.variant.product.name,
+            variantSku: data.variant.sku,
+            variantSize: data.variant.size,
+            variantColor: data.variant.color,
+            quantity: data.quantity,
+            unitPrice: data.lineCalc.unitPrice,
+            discountPercent: data.discountPercent,
+            taxRate: data.lineCalc.taxRate,
+            taxAmount: data.lineCalc.taxAmount,
+            lineTotal: data.lineCalc.lineTotal,
+            isLeftover,
+            commissionAmount,
+            tenantId,
+          });
+          await saleItemRepo.save(saleItem);
+
+          // Deduct inventory — cascade: primary warehouse first, then others by qty desc
+          let remaining = data.quantity;
+          for (const stock of data.stocks) {
+            if (remaining <= 0) break;
+            const available = Number(stock.quantity);
+            if (available <= 0) continue;
+
+            const toDeduct = Math.min(available, remaining);
+            stock.quantity = available - toDeduct;
+            remaining -= toDeduct;
+
+            await stockRepo.save(stock);
+
+            const movement = movementRepo.create({
+              variantId: data.variant.id,
+              warehouseId: stock.warehouseId,
+              movementType: MovementType.OUT,
+              quantity: -toDeduct,
+              referenceType: 'SALE',
+              referenceId: savedSale.id,
+              notes: `Venta ${saleNumber}`,
+              createdById: userId,
+              tenantId,
+            });
+            await movementRepo.save(movement);
+          }
+
+          // Perfumería: si el producto (loción) tiene un frasco vinculado,
+          // descontar 1 frasco por cada unidad vendida. NO bloquea la venta:
+          // descuenta lo disponible y el remanente deja el frasco en negativo
+          // (aviso de que hay que reponer).
+          const frascoVariantId = data.variant.product.frascoVariantId;
+          if (frascoVariantId) {
+            const frascoStocks = await stockRepo.find({
+              where: { variantId: frascoVariantId, tenantId },
+              order: { quantity: 'DESC' },
+            });
+            let frascoRemaining = data.quantity;
+            for (
+              let i = 0;
+              i < frascoStocks.length && frascoRemaining > 0;
+              i++
+            ) {
+              const fs = frascoStocks[i];
+              const isLast = i === frascoStocks.length - 1;
+              const avail = Number(fs.quantity);
+              // En la última fila se descuenta todo el remanente (puede quedar
+              // negativo); en las demás, solo lo positivo disponible.
+              const toDeduct = isLast
+                ? frascoRemaining
+                : Math.min(Math.max(avail, 0), frascoRemaining);
+              if (toDeduct <= 0) continue;
+              fs.quantity = avail - toDeduct;
+              frascoRemaining -= toDeduct;
+              await stockRepo.save(fs);
+              await movementRepo.save(
+                movementRepo.create({
+                  variantId: frascoVariantId,
+                  warehouseId: fs.warehouseId,
+                  movementType: MovementType.OUT,
+                  quantity: -toDeduct,
+                  referenceType: 'SALE',
+                  referenceId: savedSale.id,
+                  notes: `Frasco por venta ${saleNumber}`,
+                  createdById: userId,
+                  tenantId,
+                }),
+              );
+            }
+          }
+
+          // Separados (F6): al venderle al cliente que tenía el apartado, se
+          // consume su reserva (FULFILLED cuando se agota), liberando el control.
+          if (reservationsEnabled && clientId) {
+            let toConsume = data.quantity;
+            const clientResv = activeReservations
+              .filter(
+                (r) =>
+                  r.variantId === data.variant.id &&
+                  r.clientId === clientId &&
+                  r.status === 'ACTIVE',
+              )
+              .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+            for (const r of clientResv) {
+              if (toConsume <= 0) break;
+              const take = Math.min(Number(r.quantity), toConsume);
+              r.quantity = Number(r.quantity) - take;
+              toConsume -= take;
+              if (r.quantity <= 0) r.status = 'FULFILLED';
+              await reservationRepo.save(r);
+            }
           }
         }
-      }
 
-      // Create payments (only regular, not credit). Si la venta queda pendiente
-      // de pago, no se registra ningún pago (se hará al marcarla como pagada).
-      for (const p of isPending ? [] : regularPayments) {
-        const receivedAmount = p.receivedAmount ?? p.amount;
-        const changeAmount =
-          p.method === PaymentMethod.EFECTIVO
-            ? Math.max(0, receivedAmount - p.amount)
-            : 0;
+        // Create payments (only regular, not credit). Si la venta queda pendiente
+        // de pago, no se registra ningún pago (se hará al marcarla como pagada).
+        for (const p of isPending ? [] : regularPayments) {
+          const receivedAmount = p.receivedAmount ?? p.amount;
+          const changeAmount =
+            p.method === PaymentMethod.EFECTIVO
+              ? Math.max(0, receivedAmount - p.amount)
+              : 0;
 
-        const payment = paymentRepo.create({
-          saleId: savedSale.id,
-          method: p.method,
-          amount: p.amount,
-          reference: p.reference,
-          bankId: p.bankId ?? null,
-          receiptImageUrl: p.receiptImageUrl,
-          receivedAmount,
-          changeAmount,
-          tenantId,
+          const payment = paymentRepo.create({
+            saleId: savedSale.id,
+            method: p.method,
+            amount: p.amount,
+            reference: p.reference,
+            bankId: p.bankId ?? null,
+            receiptImageUrl: p.receiptImageUrl,
+            receivedAmount,
+            changeAmount,
+            tenantId,
+          });
+          await paymentRepo.save(payment);
+        }
+
+        // Create accounts receivable if credit
+        if (totalCredit > 0) {
+          const arRepo = manager.getRepository(AccountsReceivable);
+          const ar = arRepo.create({
+            saleId: savedSale.id,
+            clientId: clientId!,
+            totalAmount: totalCredit,
+            paidAmount: 0,
+            dueDate: new Date(dto.creditDueDate!),
+            notes: dto.creditNotes,
+            tenantId,
+          });
+          await arRepo.save(ar);
+        }
+
+        // Return full sale with relations using transaction manager
+        const fullSale = await saleRepo.findOne({
+          where: { id: savedSale.id, tenantId },
+          relations: [
+            'client',
+            'user',
+            'warehouse',
+            'items',
+            'items.variant',
+            'payments',
+          ],
         });
-        await paymentRepo.save(payment);
-      }
-
-      // Create accounts receivable if credit
-      if (totalCredit > 0) {
-        const arRepo = manager.getRepository(AccountsReceivable);
-        const ar = arRepo.create({
-          saleId: savedSale.id,
-          clientId: clientId!,
-          totalAmount: totalCredit,
-          paidAmount: 0,
-          dueDate: new Date(dto.creditDueDate!),
-          notes: dto.creditNotes,
-          tenantId,
-        });
-        await arRepo.save(ar);
-      }
-
-      // Return full sale with relations using transaction manager
-      const fullSale = await saleRepo.findOne({
-        where: { id: savedSale.id, tenantId },
-        relations: [
-          'client',
-          'user',
-          'warehouse',
-          'items',
-          'items.variant',
-          'payments',
-        ],
-      });
-      if (!fullSale) {
-        throw new NotFoundException('Venta no encontrada después de crear');
-      }
-      return fullSale;
-    });
+        if (!fullSale) {
+          throw new NotFoundException('Venta no encontrada después de crear');
+        }
+        return fullSale;
+      }),
+    );
 
     // Send invoice email asynchronously (fire-and-forget)
     if (fullSale.client?.email) {
