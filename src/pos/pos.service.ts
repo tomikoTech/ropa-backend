@@ -22,6 +22,7 @@ import { ProductStatus } from '../common/enums/product-status.enum.js';
 import { ReceiptService, ReceiptData } from './services/receipt.service.js';
 import { InvoiceEmailService } from '../common/services/invoice-email.service.js';
 import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
+import { Reservation } from '../reservations/entities/reservation.entity.js';
 import { SaleStatus } from '../common/enums/sale-status.enum.js';
 import { SaleChannel } from '../common/enums/sale-channel.enum.js';
 import { PaymentMethod } from '../common/enums/payment-method.enum.js';
@@ -128,6 +129,32 @@ export class PosService {
         else stocksByVariant.set(s.variantId, [s]);
       }
 
+      // Separados / apartados (F6): si el tenant lo tiene habilitado, el stock
+      // reservado para OTROS clientes no está disponible para esta venta. Los
+      // apartados del mismo cliente se consumen al vender (ver más abajo).
+      const reservationsEnabled = !!storeSettings?.reservationsEnabled;
+      const reservationRepo = manager.getRepository(Reservation);
+      let activeReservations: Reservation[] = [];
+      const reservedTotal = new Map<string, number>();
+      const reservedByClient = new Map<string, number>();
+      if (reservationsEnabled) {
+        activeReservations = await reservationRepo.find({
+          where: { tenantId, status: 'ACTIVE', variantId: In(allVariantIds) },
+        });
+        for (const r of activeReservations) {
+          reservedTotal.set(
+            r.variantId,
+            (reservedTotal.get(r.variantId) ?? 0) + Number(r.quantity),
+          );
+          if (clientId && r.clientId === clientId) {
+            reservedByClient.set(
+              r.variantId,
+              (reservedByClient.get(r.variantId) ?? 0) + Number(r.quantity),
+            );
+          }
+        }
+      }
+
       for (const item of dto.items) {
         const variant = await variantRepo.findOne({
           where: { id: item.variantId },
@@ -163,10 +190,16 @@ export class PosService {
           (sum, s) => sum + Number(s.quantity),
           0,
         );
-        if (totalAvailable < item.quantity) {
+        // Apartados de otros clientes reducen el disponible para esta venta.
+        const reservedOthers =
+          (reservedTotal.get(item.variantId) ?? 0) -
+          (reservedByClient.get(item.variantId) ?? 0);
+        const effectiveAvailable = totalAvailable - reservedOthers;
+        if (effectiveAvailable < item.quantity) {
+          const reservedMsg = reservedOthers > 0 ? ` (${reservedOthers} apartado(s))` : '';
           throw new BadRequestException(
             `Stock insuficiente para "${variant.product.name}" ${variant.size}/${variant.color}. ` +
-              `Disponible total: ${totalAvailable}, Solicitado: ${item.quantity}`,
+              `Disponible: ${effectiveAvailable}${reservedMsg}, Solicitado: ${item.quantity}`,
           );
         }
 
@@ -352,6 +385,28 @@ export class PosService {
                 tenantId,
               }),
             );
+          }
+        }
+
+        // Separados (F6): al venderle al cliente que tenía el apartado, se
+        // consume su reserva (FULFILLED cuando se agota), liberando el control.
+        if (reservationsEnabled && clientId) {
+          let toConsume = data.quantity;
+          const clientResv = activeReservations
+            .filter(
+              (r) =>
+                r.variantId === data.variant.id &&
+                r.clientId === clientId &&
+                r.status === 'ACTIVE',
+            )
+            .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+          for (const r of clientResv) {
+            if (toConsume <= 0) break;
+            const take = Math.min(Number(r.quantity), toConsume);
+            r.quantity = Number(r.quantity) - take;
+            toConsume -= take;
+            if (r.quantity <= 0) r.status = 'FULFILLED';
+            await reservationRepo.save(r);
           }
         }
       }

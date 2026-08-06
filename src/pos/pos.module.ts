@@ -9,6 +9,7 @@ import { StockMovement } from '../inventory/entities/stock-movement.entity.js';
 import { AccountsReceivable } from './entities/accounts-receivable.entity.js';
 import { AccountsReceivablePayment } from './entities/accounts-receivable-payment.entity.js';
 import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
+import { Reservation } from '../reservations/entities/reservation.entity.js';
 import { PosService } from './pos.service.js';
 import { PosController } from './pos.controller.js';
 import { TaxService } from './services/tax.service.js';
@@ -28,6 +29,7 @@ import { ClientsModule } from '../clients/clients.module.js';
       AccountsReceivable,
       AccountsReceivablePayment,
       StoreSettings,
+      Reservation,
     ]),
     ClientsModule,
   ],

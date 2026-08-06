@@ -173,6 +173,14 @@ export class UpdateStoreSettingsDto {
   @IsBoolean()
   quotationsEnabled?: boolean;
 
+  @ApiPropertyOptional({
+    example: true,
+    description: 'Habilita separados / apartados (reserva de stock)',
+  })
+  @IsOptional()
+  @IsBoolean()
+  reservationsEnabled?: boolean;
+
   @ApiPropertyOptional({ example: 'Bienvenidos a nuestra tienda' })
   @IsOptional()
   @IsString()

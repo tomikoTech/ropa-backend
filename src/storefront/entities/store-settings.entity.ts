@@ -329,6 +329,11 @@ export class StoreSettings extends TenantAwareEntity {
   @Column({ name: 'quotations_enabled', default: false })
   quotationsEnabled: boolean;
 
+  // Separados / apartados: reservar stock para un cliente (no se vende a otro).
+  // Genérico; off por defecto.
+  @Column({ name: 'reservations_enabled', default: false })
+  reservationsEnabled: boolean;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 

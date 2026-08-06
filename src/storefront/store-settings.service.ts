@@ -108,6 +108,8 @@ export class StoreSettingsService {
       settings.productionEnabled = dto.productionEnabled;
     if (dto.quotationsEnabled !== undefined)
       settings.quotationsEnabled = dto.quotationsEnabled;
+    if (dto.reservationsEnabled !== undefined)
+      settings.reservationsEnabled = dto.reservationsEnabled;
     if (dto.heroTitle !== undefined) settings.heroTitle = dto.heroTitle;
     if (dto.heroSubtitle !== undefined)
       settings.heroSubtitle = dto.heroSubtitle;
