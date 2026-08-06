@@ -27,6 +27,7 @@ import { ProductionModule } from './production/production.module.js';
 import { AdminModule } from './admin/admin.module.js';
 import { BanksModule } from './banks/banks.module.js';
 import { IncomesModule } from './incomes/incomes.module.js';
+import { QuotationsModule } from './quotations/quotations.module.js';
 import { CommonModule } from './common/common.module.js';
 import { UploadsModule } from './uploads/uploads.module.js';
 import { AuditInterceptor } from './audit/audit.interceptor.js';
@@ -65,6 +66,7 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard.js';
     AdminModule,
     BanksModule,
     IncomesModule,
+    QuotationsModule,
     CommonModule,
     UploadsModule,
   ],

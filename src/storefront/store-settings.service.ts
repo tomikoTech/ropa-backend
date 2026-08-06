@@ -106,6 +106,8 @@ export class StoreSettingsService {
       settings.essenceAutoManaged = dto.essenceAutoManaged;
     if (dto.productionEnabled !== undefined)
       settings.productionEnabled = dto.productionEnabled;
+    if (dto.quotationsEnabled !== undefined)
+      settings.quotationsEnabled = dto.quotationsEnabled;
     if (dto.heroTitle !== undefined) settings.heroTitle = dto.heroTitle;
     if (dto.heroSubtitle !== undefined)
       settings.heroSubtitle = dto.heroSubtitle;

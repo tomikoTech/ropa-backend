@@ -324,6 +324,11 @@ export class StoreSettings extends TenantAwareEntity {
   @Column({ name: 'production_enabled', default: false })
   productionEnabled: boolean;
 
+  // Cotizaciones: borrador de venta que no afecta inventario hasta convertirse.
+  // Genérico; off por defecto.
+  @Column({ name: 'quotations_enabled', default: false })
+  quotationsEnabled: boolean;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 

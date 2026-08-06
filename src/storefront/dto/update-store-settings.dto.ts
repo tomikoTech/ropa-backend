@@ -165,6 +165,14 @@ export class UpdateStoreSettingsDto {
   @IsBoolean()
   productionEnabled?: boolean;
 
+  @ApiPropertyOptional({
+    example: true,
+    description: 'Habilita el módulo de Cotizaciones (borrador de venta)',
+  })
+  @IsOptional()
+  @IsBoolean()
+  quotationsEnabled?: boolean;
+
   @ApiPropertyOptional({ example: 'Bienvenidos a nuestra tienda' })
   @IsOptional()
   @IsString()
