@@ -495,6 +495,24 @@ export class InventoryService {
     });
   }
 
+  // Stock total por producto (suma de todas sus variantes/bodegas). Para mostrar
+  // el stock en la lista de Productos sin traer todo el detalle.
+  async getStockSummaryByProduct(
+    tenantId: string,
+  ): Promise<Record<string, number>> {
+    const rows = await this.stockRepository
+      .createQueryBuilder('s')
+      .innerJoin('product_variants', 'pv', 'pv.id = s.variant_id')
+      .select('pv.product_id', 'productId')
+      .addSelect('SUM(s.quantity)', 'qty')
+      .where('s.tenant_id = :t', { t: tenantId })
+      .groupBy('pv.product_id')
+      .getRawMany<{ productId: string; qty: string }>();
+    const map: Record<string, number> = {};
+    for (const r of rows) map[r.productId] = Number(r.qty);
+    return map;
+  }
+
   // ─── Remisiones (traslados con confirmación) y préstamos ───
 
   // F3: crea una remisión en tránsito. Descuenta del origen y deja PENDING;
