@@ -10,6 +10,8 @@ import { UsersModule } from './users/users.module.js';
 import { CategoriesModule } from './categories/categories.module.js';
 import { BrandsModule } from './brands/brands.module.js';
 import { CatalogsModule } from './catalogs/catalogs.module.js';
+import { VouchersModule } from './vouchers/vouchers.module.js';
+import { ExpensesModule } from './expenses/expenses.module.js';
 import { ConsignmentsModule } from './consignments/consignments.module.js';
 import { ProductsModule } from './products/products.module.js';
 import { InventoryModule } from './inventory/inventory.module.js';
@@ -51,6 +53,8 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard.js';
     CategoriesModule,
     BrandsModule,
     CatalogsModule,
+    VouchersModule,
+    ExpensesModule,
     ConsignmentsModule,
     ProductsModule,
     InventoryModule,
