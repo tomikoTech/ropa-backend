@@ -10,6 +10,10 @@ import { StockUnitsService } from './stock-units.service.js';
 import { StockUnitsController } from './stock-units.controller.js';
 import { LabelsService } from './labels/labels.service.js';
 import { LabelsController } from './labels/labels.controller.js';
+import { InventoryCount } from './entities/inventory-count.entity.js';
+import { InventoryCountLine } from './entities/inventory-count-line.entity.js';
+import { InventoryCountsService } from './inventory-counts.service.js';
+import { InventoryCountsController } from './inventory-counts.controller.js';
 import { PurchaseBoxLine } from '../purchases/entities/purchase-box-line.entity.js';
 import { SizeCurveItem } from '../catalogs/entities/size-curve-item.entity.js';
 import { ProductVariant } from '../products/entities/product-variant.entity.js';
@@ -27,6 +31,8 @@ import { ProductsModule } from '../products/products.module.js';
       Shelf,
       Stand,
       StockUnit,
+      InventoryCount,
+      InventoryCountLine,
       PurchaseBoxLine,
       SizeCurveItem,
       ProductVariant,
@@ -43,12 +49,14 @@ import { ProductsModule } from '../products/products.module.js';
     LocationsController,
     StockUnitsController,
     LabelsController,
+    InventoryCountsController,
   ],
   providers: [
     InventoryService,
     LocationsService,
     StockUnitsService,
     LabelsService,
+    InventoryCountsService,
   ],
   exports: [InventoryService, LocationsService, StockUnitsService],
 })
