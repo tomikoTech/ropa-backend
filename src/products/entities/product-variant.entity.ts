@@ -67,6 +67,22 @@ export class ProductVariant extends TenantAwareEntity {
     return this.colorRef?.name ?? '';
   }
 
+  /**
+   * Expone `size` y `color` como texto en el JSON de la API.
+   *
+   * Hace falta porque los getters de clase viven en el prototipo y no son
+   * enumerables: `JSON.stringify` los ignoraría, y las respuestas se quedarían
+   * sin talla ni color. El contrato hacia los frontends (admin, e-commerce,
+   * bot) sigue siendo el mismo de siempre, aunque por dentro ya sea una FK.
+   */
+  toJSON() {
+    return {
+      ...this,
+      size: this.sizeName,
+      color: this.colorName,
+    };
+  }
+
   @Column({ nullable: true })
   barcode: string;
 
