@@ -5,6 +5,7 @@ import { DataSource } from 'typeorm';
 import { SizesService, deriveSortOrder } from './sizes.service.js';
 import { Size } from './entities/size.entity.js';
 import { ProductVariant } from '../products/entities/product-variant.entity.js';
+import { SizeCurveItem } from './entities/size-curve-item.entity.js';
 
 const TENANT = 'tenant-1';
 
@@ -51,6 +52,7 @@ describe('SizesService', () => {
   let service: SizesService;
   let sizeRepo: any;
   let variantRepo: any;
+  let curveItemRepo: any;
   let dataSource: any;
   let managerUpdate: jest.Mock;
 
@@ -74,6 +76,7 @@ describe('SizesService', () => {
         getRawMany: jest.fn().mockResolvedValue([]),
       })),
     };
+    curveItemRepo = { count: jest.fn().mockResolvedValue(0) };
     dataSource = {
       transaction: jest.fn(
         async (cb: (m: unknown) => Promise<unknown>) =>
@@ -89,6 +92,7 @@ describe('SizesService', () => {
         SizesService,
         { provide: getRepositoryToken(Size), useValue: sizeRepo },
         { provide: getRepositoryToken(ProductVariant), useValue: variantRepo },
+        { provide: getRepositoryToken(SizeCurveItem), useValue: curveItemRepo },
         { provide: DataSource, useValue: dataSource },
       ],
     }).compile();
@@ -229,6 +233,21 @@ describe('SizesService', () => {
 
     // La FK es ON DELETE RESTRICT: sin este chequeo el usuario vería un error
     // de integridad en vez de saber qué hacer.
+    // Una talla puede estar libre de variantes pero seguir usada por una curva:
+    // la FK es RESTRICT, así que hay que avisar en vez de fallar contra la base.
+    it('rechaza eliminar una talla usada por una curva de tallas', async () => {
+      sizeRepo.findOne.mockResolvedValue({
+        id: 'size-1',
+        name: '38',
+        tenantId: TENANT,
+      });
+      variantRepo.count.mockResolvedValue(0);
+      curveItemRepo.count.mockResolvedValue(3);
+
+      await expect(service.remove('size-1', TENANT)).rejects.toThrow(/3 curva/);
+      expect(sizeRepo.delete).not.toHaveBeenCalled();
+    });
+
     it('rechaza eliminar una talla en uso, diciendo cuántas variantes la usan', async () => {
       sizeRepo.findOne.mockResolvedValue({
         id: 'size-1',

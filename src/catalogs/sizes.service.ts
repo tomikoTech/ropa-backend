@@ -7,6 +7,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { Size } from './entities/size.entity.js';
 import { ProductVariant } from '../products/entities/product-variant.entity.js';
+import { SizeCurveItem } from './entities/size-curve-item.entity.js';
 import { CreateSizeDto } from './dto/create-size.dto.js';
 import { UpdateSizeDto } from './dto/update-size.dto.js';
 
@@ -39,6 +40,8 @@ export class SizesService {
     private readonly sizeRepo: Repository<Size>,
     @InjectRepository(ProductVariant)
     private readonly variantRepo: Repository<ProductVariant>,
+    @InjectRepository(SizeCurveItem)
+    private readonly curveItemRepo: Repository<SizeCurveItem>,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -146,6 +149,16 @@ export class SizesService {
       throw new ConflictException(
         `No se puede eliminar la talla "${size.name}": la usan ${inUse} variante(s). ` +
           'Cámbialas de talla o desactívala en lugar de eliminarla.',
+      );
+    }
+    // También la pueden estar usando las curvas de tallas.
+    const inCurves = await this.curveItemRepo.count({
+      where: { tenantId, sizeId: size.id },
+    });
+    if (inCurves > 0) {
+      throw new ConflictException(
+        `No se puede eliminar la talla "${size.name}": la usan ${inCurves} curva(s) de tallas. ` +
+          'Quítala de esas curvas o desactívala en lugar de eliminarla.',
       );
     }
     await this.sizeRepo.delete({ id: size.id, tenantId });
