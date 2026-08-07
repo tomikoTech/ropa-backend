@@ -1,6 +1,13 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { PurchaseOrder } from './entities/purchase-order.entity.js';
+import { PurchaseBoxLine } from './entities/purchase-box-line.entity.js';
+import { PurchaseBoxesService } from './purchase-boxes.service.js';
+import { PurchaseBoxesController } from './purchase-boxes.controller.js';
+import { Product } from '../products/entities/product.entity.js';
+import { Color } from '../catalogs/entities/color.entity.js';
+import { SizeCurve } from '../catalogs/entities/size-curve.entity.js';
+import { SizeCurveItem } from '../catalogs/entities/size-curve-item.entity.js';
 import { PurchaseOrderItem } from './entities/purchase-order-item.entity.js';
 import { AccountsPayable } from './entities/accounts-payable.entity.js';
 import { AccountsPayablePayment } from './entities/accounts-payable-payment.entity.js';
@@ -16,6 +23,11 @@ import { PurchasesController } from './purchases.controller.js';
   imports: [
     TypeOrmModule.forFeature([
       PurchaseOrder,
+      PurchaseBoxLine,
+      Product,
+      Color,
+      SizeCurve,
+      SizeCurveItem,
       PurchaseOrderItem,
       AccountsPayable,
       AccountsPayablePayment,
@@ -26,8 +38,8 @@ import { PurchasesController } from './purchases.controller.js';
       Supplier,
     ]),
   ],
-  controllers: [PurchasesController],
-  providers: [PurchasesService],
+  controllers: [PurchasesController, PurchaseBoxesController],
+  providers: [PurchasesService, PurchaseBoxesService],
   exports: [PurchasesService],
 })
 export class PurchasesModule {}

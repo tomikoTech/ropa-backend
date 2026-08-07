@@ -7,6 +7,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { PurchaseOrder } from './entities/purchase-order.entity.js';
 import { PurchaseOrderItem } from './entities/purchase-order-item.entity.js';
+import { PurchaseBoxLine } from './entities/purchase-box-line.entity.js';
 import { AccountsPayable } from './entities/accounts-payable.entity.js';
 import { AccountsPayablePayment } from './entities/accounts-payable-payment.entity.js';
 import { ProductVariant } from '../products/entities/product-variant.entity.js';
@@ -322,6 +323,17 @@ export class PurchasesService {
     if (po.status !== PurchaseOrderStatus.DRAFT) {
       throw new BadRequestException(
         'Solo se pueden enviar órdenes en estado borrador',
+      );
+    }
+    // Una orden puede crearse vacía (en importación se cargan los renglones
+    // después), pero no puede ENVIARSE sin nada: es aquí donde deja de ser un
+    // borrador y compromete al proveedor.
+    const boxLines = await this.dataSource
+      .getRepository(PurchaseBoxLine)
+      .count({ where: { purchaseOrderId: id, tenantId, isActive: true } });
+    if ((po.items?.length ?? 0) === 0 && boxLines === 0) {
+      throw new BadRequestException(
+        'La orden no tiene renglones. Agrega productos o cajas antes de enviarla.',
       );
     }
     po.status = PurchaseOrderStatus.SENT;

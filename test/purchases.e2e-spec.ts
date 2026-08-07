@@ -7,6 +7,7 @@ import { tryLogin } from './helpers/login';
 describe('Purchases & Accounts Payable (e2e)', () => {
   let app: INestApplication;
   let authToken: string;
+  let emptyOrderId: string;
 
   // Setup entities
   let supplierId: string;
@@ -271,8 +272,11 @@ describe('Purchases & Accounts Payable (e2e)', () => {
 
   // ─── Validation / Edge Cases ───
 
-  it('POST /api/purchases - should reject without items', async () => {
-    await request(app.getHttpServer())
+  // Una orden de importación se crea primero y se le cargan los renglones por
+  // caja despues, asi que crearla vacia es valido: lo que no se permite es
+  // ENVIARLA vacia, que es cuando deja de ser borrador.
+  it('POST /api/purchases - permite crear un borrador sin renglones', async () => {
+    const res = await request(app.getHttpServer())
       .post('/api/purchases')
       .set('Authorization', `Bearer ${authToken}`)
       .send({
@@ -280,7 +284,19 @@ describe('Purchases & Accounts Payable (e2e)', () => {
         warehouseId,
         items: [],
       })
-      .expect(400);
+      .expect(201);
+
+    expect(res.body.status).toBe('DRAFT');
+    emptyOrderId = res.body.id;
+  });
+
+  it('POST /api/purchases/:id/send - rechaza enviar una orden sin renglones', async () => {
+    const res = await request(app.getHttpServer())
+      .post(`/api/purchases/${emptyOrderId}/send`)
+      .set('Authorization', `Bearer ${authToken}`);
+
+    expect(res.status).toBe(400);
+    expect(String(res.body.message)).toMatch(/no tiene renglones/i);
   });
 
   it('POST /api/purchases/accounts-payable/:id/payment - should reject overpayment', async () => {

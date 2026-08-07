@@ -7,7 +7,6 @@ import {
   IsBoolean,
   IsOptional,
   Min,
-  ArrayMinSize,
   IsDateString,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -38,9 +37,13 @@ export class CreatePurchaseOrderDto {
   @IsUUID()
   warehouseId: string;
 
+  /**
+   * Renglones clásicos, uno por variante. Puede venir vacío: una compra de
+   * importación se crea primero y después se le cargan los renglones por caja,
+   * que viven en otra tabla porque una caja trae varias tallas a la vez.
+   */
   @ApiProperty({ type: [PurchaseOrderItemDto] })
   @IsArray()
-  @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => PurchaseOrderItemDto)
   items: PurchaseOrderItemDto[];

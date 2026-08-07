@@ -60,6 +60,36 @@ export class PurchaseOrder extends TenantAwareEntity {
 
   // IVA opcional por orden: subtotal (sin IVA), tasa aplicada y monto de IVA.
   // total = subtotal + tax_amount (IVA agregado al total, no incluido).
+  // ── Costeo de importación ────────────────────────────────────────────────
+  // Solo se usan cuando la compra es de importación; en una compra local
+  // quedan en sus valores neutros (tasa 1, sin fletes) y no cambian nada.
+
+  /** Tasa de cambio aplicada al costo del proveedor. 1 = moneda local. */
+  @Column({
+    name: 'exchange_rate',
+    type: 'decimal',
+    precision: 14,
+    scale: 4,
+    default: 1,
+  })
+  exchangeRate: number;
+
+  /**
+   * Conceptos de flete y nacionalización, con nombre.
+   * El sistema anterior tiene cinco columnas `flete1..flete5` sin etiqueta;
+   * aquí van con su nombre y sin límite de cuántos.
+   */
+  @Column({ name: 'freight_costs', type: 'jsonb', default: () => "'[]'" })
+  freightCosts: { label: string; amount: number }[];
+
+  /** Cómo se reparte el flete entre las líneas. */
+  @Column({ name: 'freight_allocation', default: 'BY_UNITS' })
+  freightAllocation: 'BY_UNITS' | 'BY_VALUE';
+
+  /** Fecha estimada de llegada del embarque. */
+  @Column({ name: 'arrival_date', type: 'date', nullable: true })
+  arrivalDate: Date | null;
+
   @Column({ type: 'decimal', precision: 14, scale: 2, default: 0 })
   subtotal: number;
 
