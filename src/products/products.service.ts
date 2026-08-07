@@ -323,9 +323,6 @@ export class ProductsService {
         sku,
         sizeId: sizeEntity?.id ?? null,
         colorId: colorEntity?.id ?? null,
-        // Texto heredado: se mantiene sincronizado hasta el paso CONTRACT.
-        size: sizeEntity?.name ?? '',
-        color: colorEntity?.name ?? '',
         barcode: await this.ensureUniqueBarcode(tenantId),
         priceOverride: v.priceOverride || null,
         tenantId,
@@ -700,12 +697,10 @@ export class ProductsService {
             if (v.size !== undefined) {
               const size = await this.sizesService.ensure(v.size, tenantId);
               existing.sizeId = size?.id ?? null;
-              existing.size = size?.name ?? '';
             }
             if (v.color !== undefined) {
               const color = await this.colorsService.ensure(v.color, tenantId);
               existing.colorId = color?.id ?? null;
-              existing.color = color?.name ?? '';
             }
             if (v.priceOverride !== undefined)
               existing.priceOverride = v.priceOverride;
@@ -713,8 +708,8 @@ export class ProductsService {
             if (v.size || v.color) {
               const baseSku = this.generateSku(
                 product.skuPrefix,
-                v.size || existing.size,
-                v.color || existing.color,
+                v.size || existing.sizeName,
+                v.color || existing.colorName,
               );
               if (baseSku !== existing.sku) {
                 existing.sku = await this.ensureUniqueSku(baseSku, tenantId);

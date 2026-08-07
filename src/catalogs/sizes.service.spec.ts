@@ -130,9 +130,10 @@ describe('SizesService', () => {
   });
 
   describe('update', () => {
-    // El catálogo aporta el id estable, pero la variante guarda TEXTO:
-    // si el rename no sincroniza, las variantes quedan huérfanas del catálogo.
-    it('sincroniza las variantes al renombrar', async () => {
+    // La razón de ser de la FK: renombrar es UNA escritura sobre el catálogo.
+    // Las variantes apuntan por id, así que no se tocan (antes había que
+    // reescribirlas todas, que no escala).
+    it('renombra sin tocar ninguna variante', async () => {
       sizeRepo.findOne
         .mockResolvedValueOnce({
           id: 'size-1',
@@ -142,14 +143,12 @@ describe('SizesService', () => {
         })
         .mockResolvedValueOnce(null); // no hay duplicado
 
-      await service.update('size-1', { name: '39' }, TENANT);
+      const updated = await service.update('size-1', { name: '39' }, TENANT);
 
-      expect(dataSource.transaction).toHaveBeenCalled();
-      // Con FK, el filtro es por id (una sola escritura), no por el texto viejo.
-      expect(managerUpdate).toHaveBeenCalledWith(
-        { tenantId: TENANT, sizeId: 'size-1' },
-        { size: '39' },
-      );
+      expect(updated.name).toBe('39');
+      expect(sizeRepo.save).toHaveBeenCalledTimes(1);
+      expect(managerUpdate).not.toHaveBeenCalled();
+      expect(dataSource.transaction).not.toHaveBeenCalled();
     });
 
     it('recalcula el orden si venía derivado del nombre anterior', async () => {
@@ -192,16 +191,22 @@ describe('SizesService', () => {
       ).rejects.toThrow(ConflictException);
     });
 
-    it('no abre transacción si el nombre no cambia', async () => {
+    it('actualiza otros campos sin renombrar', async () => {
       sizeRepo.findOne.mockResolvedValue({
         id: 'size-1',
         name: '38',
         tenantId: TENANT,
       });
 
-      await service.update('size-1', { isActive: false }, TENANT);
+      const updated = await service.update(
+        'size-1',
+        { isActive: false, sizeGroup: 'JUNIOR' },
+        TENANT,
+      );
 
-      expect(dataSource.transaction).not.toHaveBeenCalled();
+      expect(updated.isActive).toBe(false);
+      expect(updated.sizeGroup).toBe('JUNIOR');
+      expect(updated.name).toBe('38');
     });
   });
 

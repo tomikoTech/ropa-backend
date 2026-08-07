@@ -5,6 +5,9 @@ import { RefreshToken } from '../auth/entities/refresh-token.entity.js';
 import { Category } from '../categories/entities/category.entity.js';
 import { Product } from '../products/entities/product.entity.js';
 import { ProductVariant } from '../products/entities/product-variant.entity.js';
+import { Size } from '../catalogs/entities/size.entity.js';
+import { Color } from '../catalogs/entities/color.entity.js';
+import { CatalogCache } from './catalog-cache.js';
 import { Warehouse } from '../inventory/entities/warehouse.entity.js';
 import { Stock } from '../inventory/entities/stock.entity.js';
 import { StockMovement } from '../inventory/entities/stock-movement.entity.js';
@@ -96,6 +99,8 @@ async function seed() {
   const categoryRepo = dataSource.getRepository(Category);
   const productRepo = dataSource.getRepository(Product);
   const variantRepo = dataSource.getRepository(ProductVariant);
+  // Resuelve talla/color a su id de catálogo (creándolos si faltan).
+  const catalog = new CatalogCache(dataSource);
   const warehouseRepo = dataSource.getRepository(Warehouse);
   const stockRepo = dataSource.getRepository(Stock);
   const stockMovementRepo = dataSource.getRepository(StockMovement);
@@ -365,8 +370,8 @@ async function seed() {
           variantRepo.create({
             productId: product.id,
             sku,
-            size: v.size,
-            color: v.color,
+            sizeId: await catalog.sizeId(v.size, tenantId),
+            colorId: await catalog.colorId(v.color, tenantId),
             barcode,
             tenantId,
           }),

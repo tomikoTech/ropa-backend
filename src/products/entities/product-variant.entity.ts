@@ -31,16 +31,13 @@ export class ProductVariant extends TenantAwareEntity {
   sku: string;
 
   /**
-   * Talla y color: la **fuente de verdad es la FK** (`sizeId` / `colorId`).
+   * Talla y color viven en su catálogo; aquí solo la referencia.
    *
    * Las relaciones son `eager` a propósito: son tablas de consulta pequeñas
    * (decenas de filas por tenant) que casi siempre se necesitan al mostrar una
    * variante, así que cargarlas evita N+1 sin costo real.
    *
-   * Las columnas de texto `size`/`color` se conservan **solo durante la
-   * migración** (patrón expand-migrate-contract) para que el backend anterior
-   * siga funcionando mientras se despliega. Se eliminan en el paso final; no
-   * escribir lógica nueva contra ellas: usar `sizeName` / `colorName`.
+   * Para leer el nombre usar `sizeName` / `colorName`.
    *
    * Ojo: los **documentos** (SaleItem, EcommerceOrderItem) sí guardan el texto
    * como snapshot histórico, y eso es correcto: si mañana se renombra la talla,
@@ -60,22 +57,14 @@ export class ProductVariant extends TenantAwareEntity {
   @Column({ name: 'color_id', type: 'uuid', nullable: true })
   colorId: string | null;
 
-  /** @deprecated Se elimina al terminar la migración. Usar `sizeName`. */
-  @Column({ nullable: true, default: '' })
-  size: string;
-
-  /** @deprecated Se elimina al terminar la migración. Usar `colorName`. */
-  @Column({ nullable: true, default: '' })
-  color: string;
-
-  /** Nombre de la talla desde el catálogo, con respaldo en el texto heredado. */
+  /** Nombre de la talla ('' si la variante no tiene). */
   get sizeName(): string {
-    return this.sizeRef?.name ?? this.size ?? '';
+    return this.sizeRef?.name ?? '';
   }
 
-  /** Nombre del color desde el catálogo, con respaldo en el texto heredado. */
+  /** Nombre del color ('' si la variante no tiene). */
   get colorName(): string {
-    return this.colorRef?.name ?? this.color ?? '';
+    return this.colorRef?.name ?? '';
   }
 
   @Column({ nullable: true })

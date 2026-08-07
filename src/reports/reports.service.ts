@@ -257,8 +257,8 @@ export class ReportsService {
       return {
         sku: s.variant.sku,
         productName: s.variant.product.name,
-        size: s.variant.size,
-        color: s.variant.color,
+        size: s.variant.sizeName,
+        color: s.variant.colorName,
         warehouse: s.warehouse.name,
         quantity: s.quantity,
         costPrice,

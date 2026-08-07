@@ -87,17 +87,10 @@ export class ColorsService {
       });
       if (dup) throw new ConflictException('Ya existe un color con ese nombre');
 
-      // Con la FK, renombrar es UNA fila (ver SizesService). La copia de texto
-      // heredada se sincroniza solo hasta el paso CONTRACT.
-      await this.dataSource.transaction(async (m) => {
-        color.name = newName;
-        applyRest();
-        await m.getRepository(Color).save(color);
-        await m
-          .getRepository(ProductVariant)
-          .update({ tenantId, colorId: color.id }, { color: newName });
-      });
-      return color;
+      // Con la FK, renombrar es UNA escritura (ver SizesService).
+      color.name = newName;
+      applyRest();
+      return this.colorRepo.save(color);
     }
 
     applyRest();

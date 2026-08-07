@@ -111,26 +111,19 @@ export class SizesService {
       if (dup)
         throw new ConflictException('Ya existe una talla con ese nombre');
 
+      // Con la FK, renombrar es UNA escritura: las variantes apuntan por id y
+      // ven el nombre nuevo de inmediato, sin tocar sus filas.
       const oldName = size.name;
-      // Con la FK, renombrar es UNA fila: las variantes apuntan por id y ven el
-      // nombre nuevo de inmediato. La copia de texto heredada (`variant.size`)
-      // se sincroniza solo mientras exista; desaparece en el paso CONTRACT.
-      await this.dataSource.transaction(async (m) => {
-        size.name = newName;
-        // Si el orden venía derivado del nombre anterior, se recalcula.
-        if (
-          dto.sortOrder === undefined &&
-          size.sortOrder === deriveSortOrder(oldName)
-        ) {
-          size.sortOrder = deriveSortOrder(newName);
-        }
-        applyRest();
-        await m.getRepository(Size).save(size);
-        await m
-          .getRepository(ProductVariant)
-          .update({ tenantId, sizeId: size.id }, { size: newName });
-      });
-      return size;
+      size.name = newName;
+      // Si el orden venía derivado del nombre anterior, se recalcula.
+      if (
+        dto.sortOrder === undefined &&
+        size.sortOrder === deriveSortOrder(oldName)
+      ) {
+        size.sortOrder = deriveSortOrder(newName);
+      }
+      applyRest();
+      return this.sizeRepo.save(size);
     }
 
     applyRest();

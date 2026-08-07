@@ -27,6 +27,9 @@ import { User } from '../users/entities/user.entity.js';
 import { Category } from '../categories/entities/category.entity.js';
 import { Product } from '../products/entities/product.entity.js';
 import { ProductVariant } from '../products/entities/product-variant.entity.js';
+import { Size } from '../catalogs/entities/size.entity.js';
+import { Color } from '../catalogs/entities/color.entity.js';
+import { CatalogCache } from './catalog-cache.js';
 import { Warehouse } from '../inventory/entities/warehouse.entity.js';
 import { Stock } from '../inventory/entities/stock.entity.js';
 import { StockMovement } from '../inventory/entities/stock-movement.entity.js';
@@ -269,6 +272,7 @@ async function main() {
 
     try {
       await dataSource.transaction(async (m) => {
+        const catalog = new CatalogCache(m);
         const product = await m.getRepository(Product).save(
           m.getRepository(Product).create({
             name: p.name,
@@ -301,8 +305,8 @@ async function main() {
             m.getRepository(ProductVariant).create({
               productId: product.id,
               sku,
-              size: v.size || '',
-              color: v.color || '',
+              sizeId: await catalog.sizeId(v.size, tenantId),
+              colorId: await catalog.colorId(v.color, tenantId),
               barcode,
               isActive: true,
               tenantId,
