@@ -155,6 +155,9 @@ export class StorefrontService {
     const allProducts = await this.productRepo
       .createQueryBuilder('p')
       .leftJoinAndSelect('p.variants', 'v', 'v.is_active = true')
+      // eager no aplica con QueryBuilder: hay que unir el catalogo a mano.
+      .leftJoinAndSelect('v.sizeRef', 'vsize')
+      .leftJoinAndSelect('v.colorRef', 'vcolor')
       .leftJoinAndSelect('p.category', 'c')
       .where('p.tenant_id IN (:...tenantIds)', { tenantIds })
       .andWhere('p.is_published = true')
@@ -327,6 +330,9 @@ export class StorefrontService {
       const qb = this.productRepo
         .createQueryBuilder('p')
         .leftJoinAndSelect('p.variants', 'v', 'v.is_active = true')
+        // eager no aplica con QueryBuilder: hay que unir el catalogo a mano.
+        .leftJoinAndSelect('v.sizeRef', 'vsize')
+        .leftJoinAndSelect('v.colorRef', 'vcolor')
         .leftJoinAndSelect('p.category', 'c');
       applyFilters(qb);
       products = await qb.getMany();
@@ -353,6 +359,9 @@ export class StorefrontService {
         const hydrateQb = this.productRepo
           .createQueryBuilder('p')
           .leftJoinAndSelect('p.variants', 'v', 'v.is_active = true')
+          // eager no aplica con QueryBuilder: hay que unir el catalogo a mano.
+          .leftJoinAndSelect('v.sizeRef', 'vsize')
+          .leftJoinAndSelect('v.colorRef', 'vcolor')
           .leftJoinAndSelect('p.category', 'c')
           .where('p.id IN (:...pageIds)', { pageIds });
         const fetched = await hydrateQb.getMany();

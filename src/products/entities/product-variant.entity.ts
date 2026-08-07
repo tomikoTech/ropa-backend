@@ -7,6 +7,7 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   Unique,
+  AfterLoad,
 } from 'typeorm';
 import { Product } from './product.entity.js';
 import { Size } from '../../catalogs/entities/size.entity.js';
@@ -57,30 +58,32 @@ export class ProductVariant extends TenantAwareEntity {
   @Column({ name: 'color_id', type: 'uuid', nullable: true })
   colorId: string | null;
 
-  /** Nombre de la talla ('' si la variante no tiene). */
-  get sizeName(): string {
-    return this.sizeRef?.name ?? '';
-  }
-
-  /** Nombre del color ('' si la variante no tiene). */
-  get colorName(): string {
-    return this.colorRef?.name ?? '';
-  }
-
   /**
-   * Expone `size` y `color` como texto en el JSON de la API.
+   * Talla y color como texto. **No son columnas**: se rellenan desde el
+   * catálogo al cargar la entidad (`@AfterLoad`).
    *
-   * Hace falta porque los getters de clase viven en el prototipo y no son
-   * enumerables: `JSON.stringify` los ignoraría, y las respuestas se quedarían
-   * sin talla ni color. El contrato hacia los frontends (admin, e-commerce,
-   * bot) sigue siendo el mismo de siempre, aunque por dentro ya sea una FK.
+   * Son propiedades reales y no getters porque los getters viven en el
+   * prototipo y no son enumerables: `JSON.stringify` los omitiría y la API
+   * devolvería las variantes sin talla ni color. Así el contrato hacia los
+   * frontends (admin, e-commerce, bot) sigue igual que siempre, aunque por
+   * dentro el dato ya viva en su catálogo.
    */
-  toJSON() {
-    return {
-      ...this,
-      size: this.sizeName,
-      color: this.colorName,
-    };
+  size = '';
+  color = '';
+
+  /** Alias explícitos, para código que quiera dejar clara la procedencia. */
+  get sizeName(): string {
+    return this.size;
+  }
+
+  get colorName(): string {
+    return this.color;
+  }
+
+  @AfterLoad()
+  hydrateCatalogNames(): void {
+    this.size = this.sizeRef?.name ?? '';
+    this.color = this.colorRef?.name ?? '';
   }
 
   @Column({ nullable: true })

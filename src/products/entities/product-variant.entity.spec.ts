@@ -16,6 +16,8 @@ function makeVariant(sizeName?: string, colorName?: string): ProductVariant {
     c.name = colorName;
     v.colorRef = c;
   }
+  // TypeORM lo invoca al leer de la base; aquí se simula esa carga.
+  v.hydrateCatalogNames();
   return v;
 }
 
@@ -34,10 +36,11 @@ describe('ProductVariant', () => {
     });
   });
 
-  describe('serialización a JSON', () => {
-    // Regresión: al pasar talla y color a FK, los getters quedaron en el
-    // prototipo (no enumerables) y JSON.stringify los omitía: la API devolvía
-    // las variantes SIN talla ni color y los frontends se quedaban en blanco.
+  describe('serialización a JSON (contrato de la API)', () => {
+    // Regresión: al pasar talla y color a FK se expusieron como getters, que
+    // viven en el prototipo y no son enumerables: JSON.stringify los omitía y
+    // la API devolvía las variantes SIN talla ni color. Por eso son
+    // propiedades reales rellenadas en @AfterLoad.
     it('incluye size y color como texto en el JSON de la API', () => {
       const json = JSON.parse(JSON.stringify(makeVariant('38', 'Negro'))) as {
         size: string;

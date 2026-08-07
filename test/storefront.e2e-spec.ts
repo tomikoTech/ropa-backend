@@ -171,6 +171,11 @@ describe('Storefront & E-commerce (e2e)', () => {
     expect(found.isPublished).toBe(true);
     expect(found.variants).toBeDefined();
     expect(found.variants.length).toBeGreaterThanOrEqual(1);
+    // Regresión: al pasar talla/color a catálogo con FK, la API dejó de
+    // devolverlos y la tienda se quedó sin talla ni color. El contrato hacia
+    // los frontends debe seguir entregándolos como texto.
+    expect(found.variants[0].size).toBe('L');
+    expect(found.variants[0].color).toBe('Blanco');
   });
 
   it('GET /api/storefront/:tenantSlug/categories - PUBLIC should return categories', async () => {

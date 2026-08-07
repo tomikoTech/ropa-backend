@@ -39,9 +39,17 @@ export class ProductsController {
   @ApiQuery({ name: 'page', required: false })
   @ApiQuery({ name: 'limit', required: false })
   @ApiQuery({ name: 'search', required: false })
-  @ApiQuery({ name: 'categoryIds', required: false, description: 'IDs separados por coma' })
+  @ApiQuery({
+    name: 'categoryIds',
+    required: false,
+    description: 'IDs separados por coma',
+  })
   @ApiQuery({ name: 'gender', required: false })
-  @ApiQuery({ name: 'type', required: false, description: 'STANDARD | ESSENCE | FRASCO' })
+  @ApiQuery({
+    name: 'type',
+    required: false,
+    description: 'STANDARD | ESSENCE | FRASCO',
+  })
   findAll(
     @TenantId() tenantId: string,
     @Query('page') page?: string,
@@ -68,7 +76,10 @@ export class ProductsController {
       limit: limit ? Number(limit) : 30,
       search,
       categoryIds: categoryIds
-        ? categoryIds.split(',').map((s) => s.trim()).filter(Boolean)
+        ? categoryIds
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean)
         : undefined,
       gender,
       type,

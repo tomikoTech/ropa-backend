@@ -323,6 +323,9 @@ export class ProductsService {
         sku,
         sizeId: sizeEntity?.id ?? null,
         colorId: colorEntity?.id ?? null,
+        // Texto para la respuesta inmediata: @AfterLoad solo corre al leer.
+        size: sizeEntity?.name ?? '',
+        color: colorEntity?.name ?? '',
         barcode: await this.ensureUniqueBarcode(tenantId),
         priceOverride: v.priceOverride || null,
         tenantId,
@@ -697,10 +700,12 @@ export class ProductsService {
             if (v.size !== undefined) {
               const size = await this.sizesService.ensure(v.size, tenantId);
               existing.sizeId = size?.id ?? null;
+              existing.size = size?.name ?? '';
             }
             if (v.color !== undefined) {
               const color = await this.colorsService.ensure(v.color, tenantId);
               existing.colorId = color?.id ?? null;
+              existing.color = color?.name ?? '';
             }
             if (v.priceOverride !== undefined)
               existing.priceOverride = v.priceOverride;

@@ -225,6 +225,8 @@ export class ReportsService {
     const qb = this.stockRepository
       .createQueryBuilder('st')
       .leftJoinAndSelect('st.variant', 'v')
+      .leftJoinAndSelect('v.sizeRef', 'vsize')
+      .leftJoinAndSelect('v.colorRef', 'vcolor')
       .leftJoinAndSelect('v.product', 'p')
       .leftJoinAndSelect('st.warehouse', 'w')
       .where('st.quantity > 0')

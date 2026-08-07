@@ -90,7 +90,8 @@ export class CreateProductDto {
 
   @ApiPropertyOptional({
     example: true,
-    description: 'Crear y vincular automáticamente un "Frasco {nombre}" (perfumería)',
+    description:
+      'Crear y vincular automáticamente un "Frasco {nombre}" (perfumería)',
   })
   @IsOptional()
   @IsBoolean()

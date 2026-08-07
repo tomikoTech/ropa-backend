@@ -893,6 +893,8 @@ export class InventoryService {
     const qb = this.transferRepository
       .createQueryBuilder('t')
       .leftJoinAndSelect('t.variant', 'v')
+      .leftJoinAndSelect('v.sizeRef', 'vsize')
+      .leftJoinAndSelect('v.colorRef', 'vcolor')
       .leftJoinAndSelect('v.product', 'p')
       .leftJoinAndSelect('t.fromWarehouse', 'fw')
       .leftJoinAndSelect('t.toWarehouse', 'tw')
