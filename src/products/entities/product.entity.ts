@@ -98,6 +98,14 @@ export class Product extends TenantAwareEntity {
 
   // Referencia de procedencia para migraciones/re-sync idempotentes.
   // Formato: "<sistema>:<instancia>:<id>" (ej. "demachine:sportcali:534").
+  /**
+   * El producto se maneja por unidades etiquetadas (cajas con código propio)
+   * en vez de por cantidad agregada. Solo tiene efecto si la tienda tiene
+   * `unitTrackingEnabled`.
+   */
+  @Column({ name: 'unit_tracking', default: false })
+  unitTracking: boolean;
+
   @Column({ name: 'source_ref', nullable: true })
   sourceRef: string;
 

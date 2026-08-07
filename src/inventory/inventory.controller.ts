@@ -104,13 +104,17 @@ export class InventoryController {
   }
 
   @Get('lotes')
-  @ApiOperation({ summary: 'Resumen por lote/pedido (cuánto queda de cada uno)' })
+  @ApiOperation({
+    summary: 'Resumen por lote/pedido (cuánto queda de cada uno)',
+  })
   getLotes(@TenantId() tenantId: string) {
     return this.inventoryService.getLotes(tenantId);
   }
 
   @Get('stock/summary-by-product')
-  @ApiOperation({ summary: 'Stock total por producto (para la lista de Productos)' })
+  @ApiOperation({
+    summary: 'Stock total por producto (para la lista de Productos)',
+  })
   getStockSummaryByProduct(@TenantId() tenantId: string) {
     return this.inventoryService.getStockSummaryByProduct(tenantId);
   }

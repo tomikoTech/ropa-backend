@@ -271,6 +271,13 @@ export class UpdateStoreSettingsDto {
   @IsOptional()
   @IsString()
   wavaMerchantKey?: string;
+  @ApiPropertyOptional({
+    description: 'Habilita inventario por unidades etiquetadas (cajas/stands)',
+  })
+  @IsOptional()
+  @IsBoolean()
+  unitTrackingEnabled?: boolean;
+
 
   @ApiPropertyOptional()
   @IsOptional()

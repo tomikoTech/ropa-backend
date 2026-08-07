@@ -159,4 +159,13 @@ export class CreateProductDto {
   @ValidateNested({ each: true })
   @Type(() => UsedInItemDto)
   usedInProducts?: UsedInItemDto[];
+
+  @ApiPropertyOptional({
+    description:
+      'Maneja el producto por unidades etiquetadas (cajas). Requiere que la tienda lo tenga habilitado.',
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  unitTracking?: boolean;
 }

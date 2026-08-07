@@ -83,6 +83,15 @@ export class StoreSettings extends TenantAwareEntity {
   @Column({ name: 'wava_merchant_key', nullable: true })
   wavaMerchantKey: string;
 
+  /**
+   * Habilita el inventario por unidades etiquetadas (cajas, curvas, stands).
+   * Es un interruptor por tienda: una perfumería vende por unidad suelta y no
+   * lo necesita; una importadora de calzado sí. Cada producto decide luego si
+   * se acoge (ver `Product.unitTracking`).
+   */
+  @Column({ name: 'unit_tracking_enabled', default: false })
+  unitTrackingEnabled: boolean;
+
   @Column({ name: 'cod_enabled', default: false })
   codEnabled: boolean;
 
