@@ -102,8 +102,8 @@ export class PurchasesService {
         paymentStatus,
         items: (po.items || []).map((it) => ({
           name: it.variant?.product?.name ?? 'Producto',
-          size: it.variant?.size ?? '',
-          color: it.variant?.color ?? '',
+          size: it.variant?.sizeName ?? '',
+          color: it.variant?.colorName ?? '',
           quantity: it.quantityOrdered,
           unitCost: Number(it.unitCost),
           lineTotal: it.quantityOrdered * Number(it.unitCost),

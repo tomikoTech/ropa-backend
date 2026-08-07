@@ -201,7 +201,7 @@ export class InventoryService {
     for (const s of rows) {
       const p = s.variant?.product;
       if (!p) continue;
-      const size = s.variant.size || '(única)';
+      const size = s.variant.sizeName || '(única)';
       let agg = byProduct.get(p.id);
       if (!agg) {
         agg = {

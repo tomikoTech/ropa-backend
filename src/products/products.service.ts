@@ -7,6 +7,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository, In } from 'typeorm';
 import { RecipeService } from './services/recipe.service.js';
 import { BrandsService } from '../brands/brands.service.js';
+import { SizesService } from '../catalogs/sizes.service.js';
+import { ColorsService } from '../catalogs/colors.service.js';
 import { ProductEssence } from './entities/product-essence.entity.js';
 import { Product } from './entities/product.entity.js';
 import { ProductVariant } from './entities/product-variant.entity.js';
@@ -37,6 +39,8 @@ export class ProductsService {
     private readonly essenceRepository: Repository<ProductEssence>,
     private readonly recipeService: RecipeService,
     private readonly brandsService: BrandsService,
+    private readonly sizesService: SizesService,
+    private readonly colorsService: ColorsService,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -300,6 +304,15 @@ export class ProductsService {
     v: { size?: string; color?: string; priceOverride?: number | null },
     tenantId: string,
   ): Promise<ProductVariant> {
+    // La talla y el color se resuelven contra el catálogo (creándolos si aún no
+    // existen) para que la variante quede con su FK. Es el único punto por el
+    // que la aplicación crea variantes, así que aquí se garantiza que no vuelva
+    // a aparecer talla/color "sueltos" fuera del catálogo.
+    const [sizeEntity, colorEntity] = await Promise.all([
+      this.sizesService.ensure(v.size, tenantId),
+      this.colorsService.ensure(v.color, tenantId),
+    ]);
+
     return retryOnUniqueViolation(async () => {
       const sku = await this.ensureUniqueSku(
         this.generateSku(product.skuPrefix, v.size, v.color),
@@ -308,8 +321,11 @@ export class ProductsService {
       const variant = this.variantRepository.create({
         productId: product.id,
         sku,
-        size: v.size || '',
-        color: v.color || '',
+        sizeId: sizeEntity?.id ?? null,
+        colorId: colorEntity?.id ?? null,
+        // Texto heredado: se mantiene sincronizado hasta el paso CONTRACT.
+        size: sizeEntity?.name ?? '',
+        color: colorEntity?.name ?? '',
         barcode: await this.ensureUniqueBarcode(tenantId),
         priceOverride: v.priceOverride || null,
         tenantId,
@@ -679,8 +695,18 @@ export class ProductsService {
             where: { id: v.id, productId: id },
           });
           if (existing) {
-            if (v.size !== undefined) existing.size = v.size;
-            if (v.color !== undefined) existing.color = v.color;
+            // Al cambiar talla/color hay que reapuntar la FK, no solo el texto:
+            // si no, la variante quedaría vinculada al valor anterior.
+            if (v.size !== undefined) {
+              const size = await this.sizesService.ensure(v.size, tenantId);
+              existing.sizeId = size?.id ?? null;
+              existing.size = size?.name ?? '';
+            }
+            if (v.color !== undefined) {
+              const color = await this.colorsService.ensure(v.color, tenantId);
+              existing.colorId = color?.id ?? null;
+              existing.color = color?.name ?? '';
+            }
             if (v.priceOverride !== undefined)
               existing.priceOverride = v.priceOverride;
             if (v.isActive !== undefined) existing.isActive = v.isActive;

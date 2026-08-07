@@ -288,21 +288,28 @@ export class StorefrontService {
         const variantConds = ['pv.product_id = p.id', 'pv.is_active = true'];
         const subParams: Record<string, string> = {};
         if (sizes.length > 0) {
+          // El nombre de la talla vive en el catálogo (`sizes`), no en la
+          // variante: se compara contra el JOIN, no contra la columna heredada.
           const sizeOr = sizes.map((s, i) => {
             // Pad with spaces so we match whole space-separated tokens:
             // "Eur 42" matches size=42; "ML" does NOT match size=M.
             const escaped = s.replace(/([%_\\])/g, '\\$1');
             subParams[`vsize${i}`] = `% ${escaped} %`;
-            return `(' ' || LOWER(pv.size) || ' ') LIKE :vsize${i} ESCAPE '\\'`;
+            return `(' ' || LOWER(sz.name) || ' ') LIKE :vsize${i} ESCAPE '\\'`;
           });
           variantConds.push(`(${sizeOr.join(' OR ')})`);
         }
+        // El JOIN al catálogo solo hace falta si se filtra por talla.
+        const sizeJoin =
+          sizes.length > 0 ? 'JOIN sizes sz ON sz.id = pv.size_id ' : '';
         const exists = wantInStock
           ? `EXISTS (SELECT 1 FROM product_variants pv ` +
+            sizeJoin +
             `JOIN stock st ON st.variant_id = pv.id AND st.tenant_id = p.tenant_id ` +
             `WHERE ${variantConds.join(' AND ')} ` +
             `GROUP BY pv.id HAVING COALESCE(SUM(st.quantity), 0) > 0)`
           : `EXISTS (SELECT 1 FROM product_variants pv ` +
+            sizeJoin +
             `WHERE ${variantConds.join(' AND ')})`;
         qb.andWhere(exists, subParams);
       }
@@ -705,8 +712,8 @@ export class StorefrontService {
         productSlug: data.variant.product.slug,
         productImageUrl: data.variant.product.imageUrl,
         variantSku: data.variant.sku,
-        variantSize: data.variant.size,
-        variantColor: data.variant.color,
+        variantSize: data.variant.sizeName,
+        variantColor: data.variant.colorName,
         quantity: data.quantity,
         unitPrice: data.lineCalc.unitPrice,
         discountPercent: 0,
@@ -721,7 +728,7 @@ export class StorefrontService {
     const baseUrl = dto.ecommerceBaseUrl || '';
     const productLines = variantData.map(
       (d) =>
-        `${d.variant.product.displayName || d.variant.product.name} (${d.variant.size}, ${d.variant.color}) x${d.quantity}` +
+        `${d.variant.product.displayName || d.variant.product.name} (${d.variant.sizeName}, ${d.variant.colorName}) x${d.quantity}` +
         (baseUrl
           ? `\n  ${baseUrl}/${settings.storeSlug}/products/${d.variant.product.slug}`
           : ''),
@@ -762,7 +769,7 @@ export class StorefrontService {
           items: variantData.map((d) => ({
             productName:
               d.variant.product.displayName || d.variant.product.name,
-            variantInfo: `${d.variant.size} / ${d.variant.color}`,
+            variantInfo: `${d.variant.sizeName} / ${d.variant.colorName}`,
             quantity: d.quantity,
             unitPrice: d.lineCalc.unitPrice,
             lineTotal: d.lineCalc.lineTotal,

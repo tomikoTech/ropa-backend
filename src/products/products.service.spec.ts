@@ -12,6 +12,8 @@ import { Stock } from '../inventory/entities/stock.entity.js';
 import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
 import { RecipeService } from './services/recipe.service.js';
 import { BrandsService } from '../brands/brands.service.js';
+import { SizesService } from '../catalogs/sizes.service.js';
+import { ColorsService } from '../catalogs/colors.service.js';
 
 // Query builder encadenable: getRawMany() devuelve las filas configuradas.
 function mockQueryBuilder(rows: unknown[] = []) {
@@ -119,6 +121,16 @@ describe('ProductsService', () => {
           },
         },
         { provide: BrandsService, useValue: { ensure: jest.fn() } },
+        // El catálogo devuelve null: las variantes quedan sin FK, que es
+        // exactamente el caso "talla/color vacíos" que el servicio debe tolerar.
+        {
+          provide: SizesService,
+          useValue: { ensure: jest.fn().mockResolvedValue(null) },
+        },
+        {
+          provide: ColorsService,
+          useValue: { ensure: jest.fn().mockResolvedValue(null) },
+        },
         { provide: DataSource, useValue: { manager: {} } },
       ],
     }).compile();

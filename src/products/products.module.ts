@@ -12,6 +12,7 @@ import { Warehouse } from '../inventory/entities/warehouse.entity.js';
 import { Stock } from '../inventory/entities/stock.entity.js';
 import { StockMovement } from '../inventory/entities/stock-movement.entity.js';
 import { BrandsModule } from '../brands/brands.module.js';
+import { CatalogsModule } from '../catalogs/catalogs.module.js';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { BrandsModule } from '../brands/brands.module.js';
       StockMovement,
     ]),
     BrandsModule,
+    CatalogsModule,
   ],
   controllers: [ProductsController],
   providers: [ProductsService, RecipeService],

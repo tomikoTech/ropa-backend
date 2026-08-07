@@ -206,7 +206,7 @@ export class PosService {
             const reservedMsg =
               reservedOthers > 0 ? ` (${reservedOthers} apartado(s))` : '';
             throw new BadRequestException(
-              `Stock insuficiente para "${variant.product.name}" ${variant.size}/${variant.color}. ` +
+              `Stock insuficiente para "${variant.product.name}" ${variant.sizeName}/${variant.colorName}. ` +
                 `Disponible: ${effectiveAvailable}${reservedMsg}, Solicitado: ${item.quantity}`,
             );
           }
@@ -345,8 +345,8 @@ export class PosService {
             variantId: data.variant.id,
             productName: data.variant.product.name,
             variantSku: data.variant.sku,
-            variantSize: data.variant.size,
-            variantColor: data.variant.color,
+            variantSize: data.variant.sizeName,
+            variantColor: data.variant.colorName,
             quantity: data.quantity,
             unitPrice: data.lineCalc.unitPrice,
             discountPercent: data.discountPercent,
@@ -603,7 +603,7 @@ export class PosService {
       .where('pv.product_id = :pid', { pid: product.id })
       .andWhere('s.tenant_id = :t', { t: tenantId })
       .andWhere('s.quantity > 0')
-      .select('COUNT(DISTINCT pv.size)', 'cnt')
+      .select('COUNT(DISTINCT pv.sizeId)', 'cnt')
       .getRawOne<{ cnt: string }>();
     const remainingSizes = Number(raw?.cnt ?? 0);
     return remainingSizes <= Number(settings.leftoverMaxSizes ?? 2);
@@ -792,7 +792,7 @@ export class PosService {
           );
           if (totalAvailable < item.quantity) {
             throw new BadRequestException(
-              `Stock insuficiente para "${variant.product.name}" ${variant.size}/${variant.color}. ` +
+              `Stock insuficiente para "${variant.product.name}" ${variant.sizeName}/${variant.colorName}. ` +
                 `Disponible total: ${totalAvailable}, Solicitado: ${item.quantity}`,
             );
           }
@@ -809,8 +809,8 @@ export class PosService {
               variantId: variant.id,
               productName: variant.product.name,
               variantSku: variant.sku,
-              variantSize: variant.size,
-              variantColor: variant.color,
+              variantSize: variant.sizeName,
+              variantColor: variant.colorName,
               quantity: item.quantity,
               unitPrice,
               discountPercent: 0,
