@@ -11,6 +11,8 @@ import { AccountsReceivablePayment } from './entities/accounts-receivable-paymen
 import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
 import { Reservation } from '../reservations/entities/reservation.entity.js';
 import { PosService } from './pos.service.js';
+import { ScanService } from './services/scan.service.js';
+import { StockUnit } from '../inventory/entities/stock-unit.entity.js';
 import { PosController } from './pos.controller.js';
 import { TaxService } from './services/tax.service.js';
 import { InvoiceService } from './services/invoice.service.js';
@@ -20,6 +22,7 @@ import { ClientsModule } from '../clients/clients.module.js';
 @Module({
   imports: [
     TypeOrmModule.forFeature([
+      StockUnit,
       Sale,
       SaleItem,
       Payment,
@@ -34,7 +37,13 @@ import { ClientsModule } from '../clients/clients.module.js';
     ClientsModule,
   ],
   controllers: [PosController],
-  providers: [PosService, TaxService, InvoiceService, ReceiptService],
+  providers: [
+    PosService,
+    TaxService,
+    InvoiceService,
+    ReceiptService,
+    ScanService,
+  ],
   exports: [PosService],
 })
 export class PosModule {}

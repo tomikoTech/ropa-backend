@@ -12,6 +12,7 @@ import {
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { PosService } from './pos.service.js';
+import { ScanService } from './services/scan.service.js';
 import { buildStatementWorkbook } from '../common/utils/statement-excel.util.js';
 import { CreateSaleDto } from './dto/create-sale.dto.js';
 import { UpdateSaleDto } from './dto/update-sale.dto.js';
@@ -26,7 +27,19 @@ import { SaleStatus } from '../common/enums/sale-status.enum.js';
 @ApiBearerAuth()
 @Controller('pos')
 export class PosController {
-  constructor(private readonly posService: PosService) {}
+  constructor(
+    private readonly posService: PosService,
+    private readonly scanService: ScanService,
+  ) {}
+
+  @Get('scan/:barcode')
+  @ApiOperation({
+    summary:
+      'Resuelve un código escaneado: bulto etiquetado (caja/par) o variante',
+  })
+  scan(@Param('barcode') barcode: string, @TenantId() tenantId: string) {
+    return this.scanService.resolve(barcode, tenantId);
+  }
 
   @Post('sales')
   createSale(

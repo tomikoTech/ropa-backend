@@ -262,6 +262,54 @@ describe('Recepción por cajas y apertura de bultos (e2e)', () => {
     expect(res.body.slice(0, 4).toString()).toBe('%PDF');
   });
 
+  // ── Venta por caja (Fase 5) ──
+
+  it('al escanear una caja devuelve todo su contenido como una sola línea', async () => {
+    const list = await request(app.getHttpServer())
+      .get(`/api/stock-units?boxLineId=${boxLineId}`)
+      .set(auth());
+    const box = list.body.find(
+      (u: { kind: string; status: string }) =>
+        u.kind === 'BOX' && u.status === 'IN_STOCK',
+    );
+
+    const res = await request(app.getHttpServer())
+      .get(`/api/pos/scan/${box.barcode}`)
+      .set(auth())
+      .expect(200);
+
+    expect(res.body.source).toBe('STOCK_UNIT');
+    expect(res.body.kind).toBe('BOX');
+    // Un escaneo arrastra las 4 unidades: es lo que la hace vendible a granel.
+    expect(res.body.quantity).toBe(4);
+    expect(res.body.stockUnitId).toBe(box.id);
+  });
+
+  it('explica por qué una caja ya abierta no se puede vender', async () => {
+    const res = await request(app.getHttpServer())
+      .get(`/api/stock-units?boxLineId=${boxLineId}`)
+      .set(auth());
+    const abierta = res.body.find(
+      (u: { status: string }) => u.status === 'SPLIT',
+    );
+
+    const scan = await request(app.getHttpServer())
+      .get(`/api/pos/scan/${abierta.barcode}`)
+      .set(auth());
+
+    expect(scan.status).toBe(404);
+    expect(String(scan.body.message)).toMatch(/ya se abrió/i);
+  });
+
+  it('avisa cuando el código no corresponde a nada', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/api/pos/scan/00000000000000000')
+      .set(auth());
+
+    expect(res.status).toBe(404);
+    expect(String(res.body.message)).toMatch(/no se encontró/i);
+  });
+
   it('registra qué etiquetas se imprimieron', async () => {
     const res = await request(app.getHttpServer())
       .post('/api/stock-units/mark-printed')

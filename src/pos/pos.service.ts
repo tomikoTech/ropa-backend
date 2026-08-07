@@ -10,6 +10,10 @@ import { SaleItem } from './entities/sale-item.entity.js';
 import { Payment } from './entities/payment.entity.js';
 import { ProductVariant } from '../products/entities/product-variant.entity.js';
 import { Stock } from '../inventory/entities/stock.entity.js';
+import {
+  StockUnit,
+  StockUnitStatus,
+} from '../inventory/entities/stock-unit.entity.js';
 import { StockMovement } from '../inventory/entities/stock-movement.entity.js';
 import { Client } from '../clients/entities/client.entity.js';
 import { AccountsReceivable } from './entities/accounts-receivable.entity.js';
@@ -122,6 +126,8 @@ export class PosService {
           quantity: number;
           discountPercent: number;
           lineCalc: LineCalculation;
+          /** Bulto etiquetado del que salió la línea, si vino de escanearlo. */
+          stockUnitId?: string;
         }[] = [];
 
         // Batch load all stocks for requested variants (1 query instead of N)
@@ -238,6 +244,7 @@ export class PosService {
             quantity: item.quantity,
             discountPercent,
             lineCalc,
+            stockUnitId: item.stockUnitId,
           });
         }
 
@@ -358,6 +365,27 @@ export class PosService {
             tenantId,
           });
           await saleItemRepo.save(saleItem);
+
+          // Si la línea salió de escanear un bulto, se marca vendido dentro de
+          // la misma transacción: si la venta falla, el bulto sigue disponible.
+          if (data.stockUnitId) {
+            const unitRepo = manager.getRepository(StockUnit);
+            const unit = await unitRepo.findOne({
+              where: { id: data.stockUnitId, tenantId },
+            });
+            if (!unit) {
+              throw new NotFoundException('El bulto escaneado no existe');
+            }
+            if (unit.status !== StockUnitStatus.IN_STOCK) {
+              throw new BadRequestException(
+                `El bulto ${unit.barcode} ya no está disponible para la venta.`,
+              );
+            }
+            await unitRepo.update(
+              { id: unit.id, tenantId },
+              { status: StockUnitStatus.SOLD },
+            );
+          }
 
           // Deduct inventory — cascade: primary warehouse first, then others by qty desc
           let remaining = data.quantity;

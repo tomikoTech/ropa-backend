@@ -18,6 +18,15 @@ export class SaleItemDto {
   @IsUUID()
   variantId: string;
 
+  /**
+   * Bulto etiquetado que se está vendiendo (caja o par), si la venta viene de
+   * escanear su código. Al cerrar la venta se marca como vendido para que no
+   * pueda venderse dos veces.
+   */
+  @IsUUID()
+  @IsOptional()
+  stockUnitId?: string;
+
   @IsNumber()
   @Min(1)
   quantity: number;
