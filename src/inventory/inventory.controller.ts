@@ -24,12 +24,16 @@ import { CurrentUser } from '../common/decorators/current-user.decorator.js';
 import { TenantId } from '../common/decorators/tenant-id.decorator.js';
 import { User } from '../users/entities/user.entity.js';
 import { MovementType } from '../common/enums/movement-type.enum.js';
+import { AccessService } from '../access/access.service.js';
 
 @ApiTags('Inventario')
 @ApiBearerAuth()
 @Controller('inventory')
 export class InventoryController {
-  constructor(private readonly inventoryService: InventoryService) {}
+  constructor(
+    private readonly inventoryService: InventoryService,
+    private readonly access: AccessService,
+  ) {}
 
   // ─── Warehouses ───
 
@@ -44,8 +48,14 @@ export class InventoryController {
 
   @Get('warehouses')
   @ApiOperation({ summary: 'Listar bodegas' })
-  findAllWarehouses(@TenantId() tenantId: string) {
-    return this.inventoryService.findAllWarehouses(tenantId);
+  async findAllWarehouses(
+    @CurrentUser() user: User,
+    @TenantId() tenantId: string,
+  ) {
+    // Si el usuario tiene bodegas asignadas (F8), solo ve las suyas: con esto
+    // todos los desplegables de la aplicación quedan acotados de una vez.
+    const all = await this.inventoryService.findAllWarehouses(tenantId);
+    return this.access.filterWarehouses(user.id, all);
   }
 
   @Get('warehouses/:id')
@@ -141,11 +151,12 @@ export class InventoryController {
 
   @Post('adjust')
   @ApiOperation({ summary: 'Ajustar stock (entrada, salida, ajuste)' })
-  adjustStock(
+  async adjustStock(
     @Body() dto: AdjustStockDto,
     @CurrentUser() user: User,
     @TenantId() tenantId: string,
   ) {
+    await this.access.assertWarehouseAllowed(user.id, dto.warehouseId);
     return this.inventoryService.adjustStock(dto, user.id, tenantId);
   }
 
@@ -153,11 +164,15 @@ export class InventoryController {
 
   @Post('transfer')
   @ApiOperation({ summary: 'Trasladar stock entre bodegas' })
-  transferStock(
+  async transferStock(
     @Body() dto: TransferStockDto,
     @CurrentUser() user: User,
     @TenantId() tenantId: string,
   ) {
+    // Las dos puntas: sacar de una bodega ajena y meter en una ajena son la
+    // misma fuga por caminos distintos.
+    await this.access.assertWarehouseAllowed(user.id, dto.fromWarehouseId);
+    await this.access.assertWarehouseAllowed(user.id, dto.toWarehouseId);
     return this.inventoryService.transferStock(dto, user.id, tenantId);
   }
 

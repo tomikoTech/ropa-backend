@@ -37,6 +37,17 @@ export class User extends TenantAwareEntity {
   @Column({ type: 'enum', enum: Role, default: Role.COLABORADOR })
   role: Role;
 
+  /**
+   * Rol de acceso con matriz de permisos (F8). `null` = sin permisos granulares:
+   * el usuario se comporta exactamente como antes de que existieran, mandado
+   * solo por `role`.
+   *
+   * Es lo que permite activar los permisos de a un usuario a la vez sin
+   * cambiarle el día a nadie.
+   */
+  @Column({ name: 'access_role_id', type: 'uuid', nullable: true })
+  accessRoleId: string | null;
+
   @Column({ name: 'is_active', default: true })
   isActive: boolean;
 

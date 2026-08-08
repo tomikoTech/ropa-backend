@@ -36,6 +36,8 @@ import { CommonModule } from './common/common.module.js';
 import { UploadsModule } from './uploads/uploads.module.js';
 import { AuditInterceptor } from './audit/audit.interceptor.js';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard.js';
+import { AccessModule } from './access/access.module.js';
+import { PermissionsGuard } from './access/permissions.guard.js';
 
 @Module({
   imports: [
@@ -77,11 +79,18 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard.js';
     ReservationsModule,
     CommonModule,
     UploadsModule,
+    AccessModule,
   ],
   providers: [
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,
+    },
+    // Va DESPUÉS del de JWT a propósito: los guards globales corren en el orden
+    // en que se registran, así que este ya encuentra el usuario resuelto.
+    {
+      provide: APP_GUARD,
+      useClass: PermissionsGuard,
     },
     {
       provide: APP_INTERCEPTOR,

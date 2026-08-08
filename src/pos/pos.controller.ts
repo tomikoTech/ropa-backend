@@ -21,6 +21,7 @@ import { RecordArPaymentDto } from './dto/record-ar-payment.dto.js';
 import { SendInvoiceDto } from './dto/send-invoice.dto.js';
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
 import { TenantId } from '../common/decorators/tenant-id.decorator.js';
+import { AccessService } from '../access/access.service.js';
 import { SaleStatus } from '../common/enums/sale-status.enum.js';
 
 @ApiTags('pos')
@@ -30,6 +31,7 @@ export class PosController {
   constructor(
     private readonly posService: PosService,
     private readonly scanService: ScanService,
+    private readonly access: AccessService,
   ) {}
 
   @Get('scan/:barcode')
@@ -42,11 +44,14 @@ export class PosController {
   }
 
   @Post('sales')
-  createSale(
+  async createSale(
     @Body() dto: CreateSaleDto,
     @CurrentUser() user: { id: string },
     @TenantId() tenantId: string,
   ) {
+    // Un usuario restringido a un punto no puede vender contra el inventario
+    // de otro, ni por equivocación ni mandando otro id por la API (F8).
+    await this.access.assertWarehouseAllowed(user.id, dto.warehouseId);
     return this.posService.createSale(dto, user.id, tenantId);
   }
 
