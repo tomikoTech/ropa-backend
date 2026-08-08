@@ -52,6 +52,8 @@ const dataSource = new DataSource({
     User,
     RefreshToken,
     Category,
+    Size,
+    Color,
     Product,
     ProductVariant,
     Warehouse,
