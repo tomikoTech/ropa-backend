@@ -417,13 +417,22 @@ export class InventoryService {
       );
     }
 
-    // Remisiones (F3): si el tenant exige confirmación de recepción, el traslado
-    // NO es inmediato: se descuenta del origen y queda en tránsito (PENDING)
-    // hasta que el destino lo reciba. Off por defecto → flujo inmediato de abajo.
-    const settings = await this.settingsRepository.findOne({
-      where: { tenantId },
-    });
-    if (settings?.transferConfirmationEnabled) {
+    // Remisiones (F3): con confirmación de recepción el traslado NO es inmediato,
+    // se descuenta del origen y queda en tránsito (PENDING) hasta que el destino
+    // lo reciba.
+    //
+    // Lo decide la petición si lo dice (`requireConfirmation`) y, si no, el
+    // ajuste de la tienda — que es el comportamiento de siempre. Dejar que solo
+    // manda el ajuste global hacía que la misma petición hiciera dos cosas
+    // distintas según una configuración que quien llama no ve.
+    let requireConfirmation = dto.requireConfirmation;
+    if (requireConfirmation === undefined) {
+      const settings = await this.settingsRepository.findOne({
+        where: { tenantId },
+      });
+      requireConfirmation = !!settings?.transferConfirmationEnabled;
+    }
+    if (requireConfirmation) {
       return this.createInTransitTransfer(dto, userId, tenantId);
     }
 

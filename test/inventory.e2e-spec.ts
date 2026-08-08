@@ -162,6 +162,14 @@ describe('Inventory (e2e)', () => {
           toWarehouseId: warehouseId2,
           quantity: 5,
           notes: 'Transfer test',
+          // Explícito a propósito: este test comprueba el traslado INMEDIATO
+          // (20-5=15 y 10+5=15). Sin decirlo, el resultado dependía del ajuste
+          // `transferConfirmationEnabled` de la tienda, que la suite de
+          // traslados enciende para uno de sus casos: cuando las dos corrían a
+          // la vez, el traslado quedaba en tránsito, el stock no llegaba al
+          // destino y las bodegas no se podían borrar (la remisión pendiente las
+          // referencia). Era la causa de los tres fallos intermitentes.
+          requireConfirmation: false,
         })
         .expect(201);
 

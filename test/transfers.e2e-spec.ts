@@ -19,7 +19,10 @@ describe('Stock transfers / remisiones y préstamos (e2e)', () => {
       .get(`/api/inventory/stock/variant/${variantId}`)
       .set(auth())
       .expect(200);
-    const row = res.body.find((s: any) => s.warehouseId === warehouseId || s.warehouse?.id === warehouseId);
+    const row = res.body.find(
+      (s: any) =>
+        s.warehouseId === warehouseId || s.warehouse?.id === warehouseId,
+    );
     return row ? Number(row.quantity) : 0;
   };
 
@@ -50,20 +53,34 @@ describe('Stock transfers / remisiones y préstamos (e2e)', () => {
     const a = await request(app.getHttpServer())
       .post('/api/inventory/warehouses')
       .set(auth())
-      .send({ name: `E2E TR A ${suffix}`, code: `TRA-${suffix}`, isPosLocation: true })
+      .send({
+        name: `E2E TR A ${suffix}`,
+        code: `TRA-${suffix}`,
+        isPosLocation: true,
+      })
       .expect(201);
     whA = a.body.id;
     const b = await request(app.getHttpServer())
       .post('/api/inventory/warehouses')
       .set(auth())
-      .send({ name: `E2E TR B ${suffix}`, code: `TRB-${suffix}`, isPosLocation: true })
+      .send({
+        name: `E2E TR B ${suffix}`,
+        code: `TRB-${suffix}`,
+        isPosLocation: true,
+      })
       .expect(201);
     whB = b.body.id;
 
     await request(app.getHttpServer())
       .post('/api/inventory/adjust')
       .set(auth())
-      .send({ variantId, warehouseId: whA, quantity: 10, movementType: 'IN', notes: 'stock' })
+      .send({
+        variantId,
+        warehouseId: whA,
+        quantity: 10,
+        movementType: 'IN',
+        notes: 'stock',
+      })
       .expect(201);
   }, 60000);
 
@@ -79,11 +96,19 @@ describe('Stock transfers / remisiones y préstamos (e2e)', () => {
 
   // ── No-regresión: con los flags OFF, el traslado es inmediato ──
   it('flags OFF → POST /inventory/transfer mueve stock inmediato (from/to)', async () => {
-    await setFlags({ transferConfirmationEnabled: false, quickLoanEnabled: false });
+    await setFlags({
+      transferConfirmationEnabled: false,
+      quickLoanEnabled: false,
+    });
     const res = await request(app.getHttpServer())
       .post('/api/inventory/transfer')
       .set(auth())
-      .send({ variantId, fromWarehouseId: whA, toWarehouseId: whB, quantity: 2 })
+      .send({
+        variantId,
+        fromWarehouseId: whA,
+        toWarehouseId: whB,
+        quantity: 2,
+      })
       .expect(201);
     // Respuesta inmediata { from, to } (no una remisión).
     expect(res.body.from).toBeDefined();
@@ -99,7 +124,12 @@ describe('Stock transfers / remisiones y préstamos (e2e)', () => {
     const res = await request(app.getHttpServer())
       .post('/api/inventory/transfer')
       .set(auth())
-      .send({ variantId, fromWarehouseId: whA, toWarehouseId: whB, quantity: 3 })
+      .send({
+        variantId,
+        fromWarehouseId: whA,
+        toWarehouseId: whB,
+        quantity: 3,
+      })
       .expect(201);
     expect(res.body.status).toBe('PENDING');
     // Salió de A (en tránsito), NO llegó a B todavía.
@@ -118,7 +148,12 @@ describe('Stock transfers / remisiones y préstamos (e2e)', () => {
     const res = await request(app.getHttpServer())
       .post('/api/inventory/transfer')
       .set(auth())
-      .send({ variantId, fromWarehouseId: whA, toWarehouseId: whB, quantity: 2 })
+      .send({
+        variantId,
+        fromWarehouseId: whA,
+        toWarehouseId: whB,
+        quantity: 2,
+      })
       .expect(201);
     const beforeA = await stockAt(whA); // ya descontado
     await request(app.getHttpServer())
@@ -137,7 +172,12 @@ describe('Stock transfers / remisiones y préstamos (e2e)', () => {
     const loan = await request(app.getHttpServer())
       .post('/api/inventory/loans')
       .set(auth())
-      .send({ variantId, fromWarehouseId: whA, toWarehouseId: whB, quantity: 1 })
+      .send({
+        variantId,
+        fromWarehouseId: whA,
+        toWarehouseId: whB,
+        quantity: 1,
+      })
       .expect(201);
     expect(loan.body.type).toBe('LOAN');
     expect(loan.body.status).toBe('PENDING');
@@ -159,5 +199,44 @@ describe('Stock transfers / remisiones y préstamos (e2e)', () => {
       .expect(200);
     expect(Array.isArray(res.body)).toBe(true);
     expect(res.body.length).toBeGreaterThan(0);
+  });
+
+  it('la petición puede decidir la confirmación, sin depender del ajuste', async () => {
+    // El ajuste sigue mandando cuando no se dice nada, pero la operación puede
+    // pedir lo contrario: es lo que evita que dos suites (o dos pantallas) se
+    // pisen a través de una configuración global.
+    await setFlags({ transferConfirmationEnabled: false });
+
+    const pendiente = await request(app.getHttpServer())
+      .post('/api/inventory/transfer')
+      .set(auth())
+      .send({
+        variantId,
+        fromWarehouseId: whA,
+        toWarehouseId: whB,
+        quantity: 1,
+        requireConfirmation: true,
+      })
+      .expect(201);
+    expect(pendiente.body.status).toBe('PENDING');
+
+    await setFlags({ transferConfirmationEnabled: true });
+
+    const inmediato = await request(app.getHttpServer())
+      .post('/api/inventory/transfer')
+      .set(auth())
+      .send({
+        variantId,
+        fromWarehouseId: whA,
+        toWarehouseId: whB,
+        quantity: 1,
+        requireConfirmation: false,
+      })
+      .expect(201);
+    // El traslado inmediato devuelve los dos stocks, no una remisión.
+    expect(inmediato.body.from).toBeDefined();
+    expect(inmediato.body.to).toBeDefined();
+
+    await setFlags({ transferConfirmationEnabled: false });
   });
 });
