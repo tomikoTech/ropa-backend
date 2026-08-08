@@ -38,6 +38,8 @@ import { AuditInterceptor } from './audit/audit.interceptor.js';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard.js';
 import { AccessModule } from './access/access.module.js';
 import { PermissionsGuard } from './access/permissions.guard.js';
+import { CostVisibilityInterceptor } from './access/cost-visibility.interceptor.js';
+import { WarehouseScopeGuard } from './access/warehouse-scope.guard.js';
 
 @Module({
   imports: [
@@ -91,6 +93,19 @@ import { PermissionsGuard } from './access/permissions.guard.js';
     {
       provide: APP_GUARD,
       useClass: PermissionsGuard,
+    },
+    // Bodegas por usuario: después del de permisos, porque primero se decide si
+    // puede hacer la operación y luego dónde.
+    {
+      provide: APP_GUARD,
+      useClass: WarehouseScopeGuard,
+    },
+    // Va PRIMERO: los interceptores globales se componen de fuera hacia dentro,
+    // así que el primero registrado ve la respuesta ya serializada (objetos
+    // planos) y puede limpiarla.
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: CostVisibilityInterceptor,
     },
     {
       provide: APP_INTERCEPTOR,

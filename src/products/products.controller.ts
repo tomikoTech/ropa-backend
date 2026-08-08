@@ -19,18 +19,12 @@ import { ProductsService } from './products.service.js';
 import { CreateProductDto } from './dto/create-product.dto.js';
 import { UpdateProductDto } from './dto/update-product.dto.js';
 import { TenantId } from '../common/decorators/tenant-id.decorator.js';
-import { CurrentUser } from '../common/decorators/current-user.decorator.js';
-import { User } from '../users/entities/user.entity.js';
-import { AccessService } from '../access/access.service.js';
 
 @ApiTags('Productos')
 @ApiBearerAuth()
 @Controller('products')
 export class ProductsController {
-  constructor(
-    private readonly productsService: ProductsService,
-    private readonly access: AccessService,
-  ) {}
+  constructor(private readonly productsService: ProductsService) {}
 
   @Post()
   @ApiOperation({ summary: 'Crear producto con variantes' })
@@ -100,36 +94,23 @@ export class ProductsController {
   @ApiQuery({ name: 'limit', required: false })
   @ApiQuery({ name: 'offset', required: false })
   @ApiQuery({ name: 'type', required: false })
-  async searchVariants(
+  searchVariants(
     @Query('q') query: string,
     @TenantId() tenantId: string,
-    @CurrentUser() user: User,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
     @Query('type') type?: string,
   ) {
-    const variants = await this.productsService.searchVariants(
-      query,
-      tenantId,
-      {
-        limit: limit ? Number(limit) : undefined,
-        offset: offset ? Number(offset) : undefined,
-        type: type || undefined,
-      },
-    );
-
-    // Esta búsqueda es la que usa el POS para saber qué vender, así que la
-    // puede llamar quien tenga permiso de Ventas. Pero trae el producto
-    // completo, **con su costo**: si quien pregunta no tiene permiso de ver
-    // Productos, el costo no viaja. Un cajero necesita encontrar la mercancía;
-    // no necesita saber en cuánto se compró.
-    const seesCost = await this.access.userCan(user, 'products', 'list');
-    if (seesCost) return variants;
-
-    return variants.map((v) => ({
-      ...v,
-      product: v.product ? { ...v.product, costPrice: undefined } : v.product,
-    }));
+    // Esta búsqueda es la que usa el POS para saber qué vender, así que la puede
+    // llamar quien tenga permiso de Ventas (ver `module-registry.ts`). Trae el
+    // producto completo, **con su costo**, pero de eso se encarga
+    // `CostVisibilityInterceptor`: si quien pregunta no puede ver Productos, el
+    // costo no sale — aquí ni en ningún otro endpoint.
+    return this.productsService.searchVariants(query, tenantId, {
+      limit: limit ? Number(limit) : undefined,
+      offset: offset ? Number(offset) : undefined,
+      type: type || undefined,
+    });
   }
 
   @Get(':id')

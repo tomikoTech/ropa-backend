@@ -362,6 +362,151 @@ describe('Permisos granulares (e2e)', () => {
     expect(res.body.message).toContain('No tienes acceso a la bodega');
   });
 
+  it('tampoco puede tocar lo que PERTENECE a una bodega ajena', async () => {
+    // El hueco que cerró `WarehouseScopeGuard`: aquí la petición **no nombra la
+    // bodega**, nombra un traslado / conteo / compra que vive en ella.
+    //
+    // Se usa un Jefe de Bodega limitado a la bodega A, no el Cajero: el Cajero
+    // sería rechazado antes por permisos y el test no probaría nada del guard de
+    // bodegas. Este rol SÍ puede recibir traslados, cerrar conteos y recibir
+    // compras — pero solo en su bodega.
+    const rolJefe = await request(app.getHttpServer())
+      .post('/api/access/roles')
+      .set(auth(adminToken))
+      .send({ name: `Jefe A ${suffix}`, templateKey: 'jefe-bodega' })
+      .expect(201);
+
+    const jefeEmail = `e2e-jefe-${suffix}@test.co`;
+    const jefePass = 'jefe1234567';
+    const jefe = await request(app.getHttpServer())
+      .post('/api/users')
+      .set(auth(adminToken))
+      .send({
+        email: jefeEmail,
+        password: jefePass,
+        firstName: 'E2E',
+        lastName: 'Jefe',
+        role: 'COLABORADOR',
+      })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .patch(`/api/access/users/${jefe.body.id}`)
+      .set(auth(adminToken))
+      .send({ accessRoleId: rolJefe.body.id, warehouseIds: [warehouseAId] })
+      .expect(200);
+    const jefeToken = await login(jefeEmail, jefePass);
+
+    // Nota: el caso de "recibir un traslado" no se prueba aquí a propósito.
+    // Necesitaría activar `transferConfirmationEnabled`, que es un ajuste de la
+    // tienda **compartido** con la suite de traslados: las dos corriendo en
+    // paralelo se pisarían y una fallaría sin motivo aparente. Que la
+    // declaración de esa ruta mire la bodega destino (y la de anular, la de
+    // origen) lo cubre `warehouse-scope.spec.ts`.
+
+    // ── Conteo físico de la bodega ajena: no puede cerrarlo ─────────────────
+    const conteo = await request(app.getHttpServer())
+      .post('/api/inventory-counts')
+      .set(auth(adminToken))
+      .send({ warehouseId: warehouseBId })
+      .expect(201);
+
+    const cerrar = await request(app.getHttpServer())
+      .post(`/api/inventory-counts/${conteo.body.id}/close`)
+      .set(auth(jefeToken))
+      .send({ adjust: false })
+      .expect(403);
+    expect(cerrar.body.message).toContain('cerrar este conteo');
+
+    // ── Compra dirigida a la bodega ajena: no puede recibirla ───────────────
+    const proveedor = await request(app.getHttpServer())
+      .post('/api/suppliers')
+      .set(auth(adminToken))
+      .send({ name: `Prov Acc ${suffix}`, nit: `ACC-${suffix}` })
+      .expect(201);
+
+    const compra = await request(app.getHttpServer())
+      .post('/api/purchases')
+      .set(auth(adminToken))
+      .send({
+        supplierId: proveedor.body.id,
+        warehouseId: warehouseBId,
+        items: [{ variantId, quantityOrdered: 2, unitCost: 5000 }],
+        paymentDueDate: '2026-12-31',
+      })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post(`/api/purchases/${compra.body.id}/send`)
+      .set(auth(adminToken))
+      .expect(201);
+
+    const recibirCompra = await request(app.getHttpServer())
+      .post(`/api/purchases/${compra.body.id}/receive`)
+      .set(auth(jefeToken))
+      .expect(403);
+    expect(recibirCompra.body.message).toContain('recibir esta compra');
+
+    // Limpieza: el rol no se puede borrar mientras lo use alguien.
+    await request(app.getHttpServer())
+      .patch(`/api/access/users/${jefe.body.id}`)
+      .set(auth(adminToken))
+      .send({ accessRoleId: null })
+      .expect(200);
+    await request(app.getHttpServer())
+      .delete(`/api/access/roles/${rolJefe.body.id}`)
+      .set(auth(adminToken))
+      .expect(200);
+  });
+
+  it('ni consultar el detalle de una bodega ajena por su id', async () => {
+    // La ruta es `/inventory/warehouses/:id`: el parámetro no se llama
+    // `warehouseId`, así que hay que reconocerlo por la ruta.
+    const propia = await request(app.getHttpServer())
+      .get(`/api/inventory/warehouses/${warehouseAId}`)
+      .set(auth(cajeroToken))
+      .expect(200);
+    expect(propia.body.id).toBe(warehouseAId);
+
+    const ajena = await request(app.getHttpServer())
+      .get(`/api/inventory/warehouses/${warehouseBId}`)
+      .set(auth(cajeroToken))
+      .expect(403);
+    expect(ajena.body.message).toContain('No tienes acceso a la bodega');
+  });
+
+  it('el costo de la mercancía no viaja si no puede ver Productos', async () => {
+    // El Cajero necesita buscar qué vender, pero no tiene por qué saber en
+    // cuánto se compró. Y esto no depende del endpoint: lo aplica el
+    // interceptor para toda la aplicación.
+    const busqueda = await request(app.getHttpServer())
+      .get('/api/products/search?q=E2E Acc Producto')
+      .set(auth(cajeroToken))
+      .expect(200);
+
+    expect(busqueda.body.length).toBeGreaterThan(0);
+    for (const v of busqueda.body) {
+      expect(v.product).toBeDefined();
+      expect(v.product.name).toBeTruthy();
+      expect(v.product.basePrice).toBeDefined();
+      expect('costPrice' in v.product).toBe(false);
+    }
+
+    // El inventario que sí puede ver tampoco trae costo.
+    const stock = await request(app.getHttpServer())
+      .get(`/api/inventory/stock/variant/${variantId}`)
+      .set(auth(cajeroToken))
+      .expect(200);
+    expect(JSON.stringify(stock.body)).not.toContain('costPrice');
+
+    // Y el administrador sí lo ve: no se le rompió nada a quien sí puede.
+    const comoAdmin = await request(app.getHttpServer())
+      .get('/api/products/search?q=E2E Acc Producto')
+      .set(auth(adminToken))
+      .expect(200);
+    expect(comoAdmin.body[0].product.costPrice).toBeDefined();
+  });
+
   it('quitar las bodegas devuelve el acceso a todas', async () => {
     await request(app.getHttpServer())
       .patch(`/api/access/users/${cajeroId}`)
@@ -402,6 +547,40 @@ describe('Permisos granulares (e2e)', () => {
       .get('/api/products')
       .set(auth(cajeroToken))
       .expect(200);
+  });
+
+  it('quitar un permiso se aplica en la siguiente petición, sin esperar nada', async () => {
+    // Los permisos no se cachean: el momento en que se le quita un permiso a
+    // alguien es normalmente el momento en que hace falta que se aplique.
+    const rol = await request(app.getHttpServer())
+      .get(`/api/access/roles/${cajeroRoleId}`)
+      .set(auth(adminToken))
+      .expect(200);
+
+    // En el test anterior se le dio Ver en Productos; aquí se le quita.
+    const sinProductos = rol.body.permissions.map((p: { module: string }) =>
+      p.module === 'products'
+        ? {
+            module: 'products',
+            list: false,
+            create: false,
+            edit: false,
+            delete: false,
+          }
+        : p,
+    );
+
+    await request(app.getHttpServer())
+      .patch(`/api/access/roles/${cajeroRoleId}`)
+      .set(auth(adminToken))
+      .send({ permissions: sinProductos })
+      .expect(200);
+
+    // Mismo token, petición inmediata: ya no pasa.
+    await request(app.getHttpServer())
+      .get('/api/products')
+      .set(auth(cajeroToken))
+      .expect(403);
   });
 
   it('no se puede borrar un rol que alguien esté usando', async () => {

@@ -1,7 +1,6 @@
 import {
   BadRequestException,
   ConflictException,
-  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -37,22 +36,19 @@ interface RoleAccess {
 }
 
 /**
- * Cuánto puede tardar en notarse un cambio de permisos.
+ * Los permisos **no se cachean**, a propósito.
  *
- * Los permisos se resuelven en cada peticion, así que se cachean en memoria. La
- * escritura invalida el rol de una, así que el TTL solo importa si el backend
- * corre en más de una instancia: ahí el cambio tarda como máximo esto en verse
- * en las demás.
+ * Un caché en memoria haría que quitarle un permiso a alguien tardara en verse
+ * en las otras instancias del backend: justo lo que no se puede permitir en un
+ * control de acceso, porque el momento en que se quita un permiso es
+ * normalmente el momento en que hace falta que se aplique.
+ *
+ * El costo real es una consulta indexada por `role_id` (una fila por módulo
+ * concedido, ~30 como máximo), y la sesión ya consulta el usuario en cada
+ * petición: no cambia el orden de magnitud.
  */
-const CACHE_TTL_MS = 60_000;
-
 @Injectable()
 export class AccessService {
-  private readonly cache = new Map<
-    string,
-    { access: RoleAccess; expiresAt: number }
-  >();
-
   constructor(
     @InjectRepository(AccessRole)
     private readonly roleRepo: Repository<AccessRole>,
@@ -245,7 +241,6 @@ export class AccessService {
       }
     });
 
-    this.invalidate(id);
     return this.getRole(id, tenantId);
   }
 
@@ -291,7 +286,6 @@ export class AccessService {
     }
 
     await this.roleRepo.delete({ id, tenantId });
-    this.invalidate(id);
     return { deleted: true };
   }
 
@@ -471,43 +465,13 @@ export class AccessService {
     return warehouses.filter((w) => set.has(w.id));
   }
 
-  /**
-   * Corta la operación si el usuario no tiene acceso a esa bodega.
-   *
-   * Esto es lo que hace de verdad la restricción: si solo se filtrara el
-   * desplegable, bastaría con mandar otro `warehouseId` por la API. El mensaje
-   * nombra la bodega para que el usuario entienda qué pasó.
-   */
-  async assertWarehouseAllowed(
-    userId: string,
-    warehouseId: string | null | undefined,
-  ): Promise<void> {
-    if (!warehouseId) return;
-    const allowed = await this.allowedWarehouses(userId);
-    if (!allowed || allowed.includes(warehouseId)) return;
-
-    const warehouse = await this.warehouseRepo.findOne({
-      where: { id: warehouseId },
-    });
-    throw new ForbiddenException(
-      `No tienes acceso a la bodega "${warehouse?.name ?? warehouseId}". ` +
-        `Solo puedes operar en las bodegas que te asignaron; pídele a un ` +
-        `administrador que te agregue si necesitas esta.`,
-    );
-  }
-
   private async loadRole(roleId: string): Promise<RoleAccess | null> {
-    const cached = this.cache.get(roleId);
-    if (cached && cached.expiresAt > Date.now()) return cached.access;
-
     const role = await this.roleRepo.findOne({
       where: { id: roleId },
       relations: ['permissions'],
     });
-    if (!role || !role.isActive) {
-      this.cache.delete(roleId);
-      return null;
-    }
+    // Rol borrado o desactivado mientras la sesión seguía viva: no concede nada.
+    if (!role || !role.isActive) return null;
 
     const modules = new Map<string, Set<PermissionAction>>();
     for (const p of role.permissions ?? []) {
@@ -519,12 +483,6 @@ export class AccessService {
       if (granted.size) modules.set(p.module, granted);
     }
 
-    const access: RoleAccess = { name: role.name, modules };
-    this.cache.set(roleId, { access, expiresAt: Date.now() + CACHE_TTL_MS });
-    return access;
-  }
-
-  private invalidate(roleId: string): void {
-    this.cache.delete(roleId);
+    return { name: role.name, modules };
   }
 }

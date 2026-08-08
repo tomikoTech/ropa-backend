@@ -151,12 +151,12 @@ export class InventoryController {
 
   @Post('adjust')
   @ApiOperation({ summary: 'Ajustar stock (entrada, salida, ajuste)' })
-  async adjustStock(
+  adjustStock(
     @Body() dto: AdjustStockDto,
     @CurrentUser() user: User,
     @TenantId() tenantId: string,
   ) {
-    await this.access.assertWarehouseAllowed(user.id, dto.warehouseId);
+    // La bodega la valida `WarehouseScopeGuard` (F8).
     return this.inventoryService.adjustStock(dto, user.id, tenantId);
   }
 
@@ -164,15 +164,13 @@ export class InventoryController {
 
   @Post('transfer')
   @ApiOperation({ summary: 'Trasladar stock entre bodegas' })
-  async transferStock(
+  transferStock(
     @Body() dto: TransferStockDto,
     @CurrentUser() user: User,
     @TenantId() tenantId: string,
   ) {
-    // Las dos puntas: sacar de una bodega ajena y meter en una ajena son la
-    // misma fuga por caminos distintos.
-    await this.access.assertWarehouseAllowed(user.id, dto.fromWarehouseId);
-    await this.access.assertWarehouseAllowed(user.id, dto.toWarehouseId);
+    // Las dos puntas (origen y destino) las valida `WarehouseScopeGuard`, que
+    // recoge cualquier campo que nombre una bodega.
     return this.inventoryService.transferStock(dto, user.id, tenantId);
   }
 
