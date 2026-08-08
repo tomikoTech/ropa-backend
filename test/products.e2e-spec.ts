@@ -6,6 +6,7 @@ describe('Products (e2e)', () => {
   let app: INestApplication;
   let token: string;
   let createdProductId: string;
+  let createdVariantBarcode: string;
   const uniqueName = `Test Product ${Date.now()}`;
 
   beforeAll(async () => {
@@ -57,6 +58,7 @@ describe('Products (e2e)', () => {
       expect(res.body.variants).toHaveLength(2);
 
       createdProductId = res.body.id;
+      createdVariantBarcode = res.body.variants[0].barcode;
     });
 
     it('should reject product without required fields', async () => {
@@ -108,6 +110,36 @@ describe('Products (e2e)', () => {
         .expect(200);
 
       expect(res.body).toBeInstanceOf(Array);
+    });
+  });
+
+  describe('GET /api/products/search/pos-catalog', () => {
+    it('groups every variant of a reference in a single POS product', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/products/search/pos-catalog')
+        .query({ q: uniqueName, sort: 'stock-desc' })
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+
+      expect(res.body.data).toHaveLength(1);
+      expect(res.body.data[0].id).toBe(createdProductId);
+      expect(res.body.data[0].variants).toHaveLength(2);
+      expect(res.body.data[0]).toHaveProperty('totalStock');
+    });
+
+    it('finds the grouped reference by a scanned variant barcode', async () => {
+      expect(createdVariantBarcode).toBeTruthy();
+      const res = await request(app.getHttpServer())
+        .get('/api/products/search/pos-catalog')
+        .query({ q: createdVariantBarcode })
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+
+      expect(
+        res.body.data.some(
+          (product: { id: string }) => product.id === createdProductId,
+        ),
+      ).toBe(true);
     });
   });
 

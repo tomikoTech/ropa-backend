@@ -180,6 +180,22 @@ describe('Recepción por cajas y apertura de bultos (e2e)', () => {
     expect(res.body.barcode).toBe(code);
   });
 
+  it('la búsqueda agrupada del POS encuentra el producto por el código físico', async () => {
+    const list = await request(app.getHttpServer())
+      .get(`/api/stock-units?boxLineId=${boxLineId}`)
+      .set(auth());
+    const code = list.body[0].barcode;
+
+    const res = await request(app.getHttpServer())
+      .get('/api/products/search/pos-catalog')
+      .query({ q: `  ${code}  ` })
+      .set(auth())
+      .expect(200);
+
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0].variants.length).toBeGreaterThan(0);
+  });
+
   it('abre una caja y crea una unidad por par de la curva', async () => {
     const res = await request(app.getHttpServer())
       .post(`/api/stock-units/${boxIds[0]}/split`)

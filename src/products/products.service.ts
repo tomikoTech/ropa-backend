@@ -904,4 +904,211 @@ export class ProductsService {
     }
     return qb.addOrderBy('v.id', 'ASC').limit(limit).offset(offset).getMany();
   }
+
+  /**
+   * Catálogo del POS paginado por PRODUCTO, no por variante.
+   *
+   * La búsqueda histórica devolvía una fila por talla/color. Además de repetir
+   * tarjetas, el LIMIT podía cortar las variantes de una referencia entre dos
+   * páginas. Aquí primero se pagina la referencia y después se cargan todas sus
+   * variantes. También reconoce los códigos físicos de `stock_units` (cajas y
+   * unidades), que antes solo funcionaban en el botón de escáner.
+   */
+  async searchPosCatalog(
+    query: string,
+    tenantId: string,
+    opts?: {
+      limit?: number;
+      offset?: number;
+      type?: string;
+      sort?: string;
+      warehouseId?: string;
+    },
+  ): Promise<{
+    data: {
+      id: string;
+      name: string;
+      skuPrefix: string;
+      basePrice: number;
+      wholesalePrice: number | null;
+      minimumSalePrice: number | null;
+      taxRate: number;
+      imageUrl: string | null;
+      categoryId: string | null;
+      gender: string;
+      totalStock: number;
+      variants: {
+        id: string;
+        sku: string;
+        size: string;
+        color: string;
+        barcode: string | null;
+        priceOverride: number | null;
+        availableStock: number;
+        stocks: { warehouseId: string; quantity: number }[];
+      }[];
+    }[];
+    hasMore: boolean;
+  }> {
+    const limit = Math.min(Math.max(Number(opts?.limit) || 30, 1), 100);
+    const offset = Math.max(Number(opts?.offset) || 0, 0);
+    const cleanQuery = (query || '').trim();
+
+    // El total se calcula en una subconsulta para no multiplicarlo por el JOIN
+    // usado únicamente para buscar SKU/barcode de alguna variante.
+    const stockQuantitySql = `(
+      SELECT COALESCE(SUM(stock_sort.quantity), 0)
+      FROM stock stock_sort
+      INNER JOIN product_variants variant_sort
+        ON variant_sort.id = stock_sort.variant_id
+      WHERE variant_sort.product_id = p.id
+        AND stock_sort.tenant_id = :tenantId
+        ${opts?.warehouseId ? 'AND stock_sort.warehouse_id = :sortWarehouseId' : ''}
+    )`;
+
+    const qb = this.productRepository
+      .createQueryBuilder('p')
+      .innerJoin(
+        'p.variants',
+        'matched_variant',
+        'matched_variant.is_active = true',
+      )
+      .leftJoin('p.category', 'category')
+      .select('p.id', 'id')
+      .addSelect('p.name', 'product_name')
+      .addSelect(stockQuantitySql, 'inventory_quantity')
+      .where('p.tenant_id = :tenantId', { tenantId })
+      .andWhere('p.status = :status', { status: 'ACTIVE' })
+      .distinct(true);
+
+    if (opts?.warehouseId) {
+      qb.setParameter('sortWarehouseId', opts.warehouseId);
+    }
+    if (opts?.type === 'STANDARD') {
+      qb.andWhere("(category.type = 'STANDARD' OR category.type IS NULL)");
+    } else if (opts?.type) {
+      qb.andWhere('category.type = :type', { type: opts.type });
+    }
+    if (cleanQuery) {
+      qb.andWhere(
+        `(
+          p.name ILIKE :query OR p.brand ILIKE :query OR
+          p.sku_prefix ILIKE :query OR matched_variant.sku ILIKE :query OR
+          matched_variant.barcode ILIKE :query OR EXISTS (
+            SELECT 1 FROM stock_units physical_unit
+            WHERE physical_unit.tenant_id = :tenantId
+              AND physical_unit.product_id = p.id
+              AND physical_unit.barcode ILIKE :query
+          )
+        )`,
+        { query: `%${cleanQuery}%` },
+      );
+    }
+
+    switch (opts?.sort) {
+      case 'stock-asc':
+        qb.orderBy('inventory_quantity', 'ASC');
+        break;
+      case 'name-desc':
+        qb.orderBy('product_name', 'DESC');
+        break;
+      case 'name-asc':
+        qb.orderBy('product_name', 'ASC');
+        break;
+      case 'stock-desc':
+      default:
+        qb.orderBy('inventory_quantity', 'DESC');
+        break;
+    }
+    const raw = await qb
+      .addOrderBy('p.id', 'ASC')
+      .limit(limit + 1)
+      .offset(offset)
+      .getRawMany<{ id: string }>();
+    const pageIds = raw.slice(0, limit).map((row) => row.id);
+    if (pageIds.length === 0) return { data: [], hasMore: false };
+
+    const products = await this.productRepository.find({
+      where: { id: In(pageIds), tenantId },
+      relations: ['variants', 'variants.sizeRef', 'variants.colorRef'],
+    });
+    const productById = new Map(
+      products.map((product) => [product.id, product]),
+    );
+    const variants = products.flatMap((product) =>
+      (product.variants ?? []).filter((variant) => variant.isActive),
+    );
+    const variantIds = variants.map((variant) => variant.id);
+    const stocks = variantIds.length
+      ? await this.stockRepository.find({
+          where: {
+            tenantId,
+            variantId: In(variantIds),
+            ...(opts?.warehouseId ? { warehouseId: opts.warehouseId } : {}),
+          },
+        })
+      : [];
+    const stockByVariant = new Map<
+      string,
+      { warehouseId: string; quantity: number }[]
+    >();
+    for (const stock of stocks) {
+      const rows = stockByVariant.get(stock.variantId) ?? [];
+      rows.push({ warehouseId: stock.warehouseId, quantity: stock.quantity });
+      stockByVariant.set(stock.variantId, rows);
+    }
+
+    const data = pageIds.flatMap((productId) => {
+      const product = productById.get(productId);
+      if (!product) return [];
+      const productVariants = (product.variants ?? [])
+        .filter((variant) => variant.isActive)
+        .map((variant) => {
+          const variantStocks = stockByVariant.get(variant.id) ?? [];
+          return {
+            id: variant.id,
+            sku: variant.sku,
+            size: variant.sizeName,
+            color: variant.colorName,
+            barcode: variant.barcode ?? null,
+            priceOverride:
+              variant.priceOverride === null
+                ? null
+                : Number(variant.priceOverride),
+            availableStock: variantStocks.reduce(
+              (sum, stock) => sum + stock.quantity,
+              0,
+            ),
+            stocks: variantStocks,
+          };
+        });
+      return [
+        {
+          id: product.id,
+          name: product.name,
+          skuPrefix: product.skuPrefix,
+          basePrice: Number(product.basePrice),
+          wholesalePrice:
+            product.wholesalePrice === null
+              ? null
+              : Number(product.wholesalePrice),
+          minimumSalePrice:
+            product.minimumSalePrice === null
+              ? null
+              : Number(product.minimumSalePrice),
+          taxRate: Number(product.taxRate),
+          imageUrl: product.imageUrl ?? null,
+          categoryId: product.categoryId ?? null,
+          gender: product.gender,
+          totalStock: productVariants.reduce(
+            (sum, variant) => sum + variant.availableStock,
+            0,
+          ),
+          variants: productVariants,
+        },
+      ];
+    });
+
+    return { data, hasMore: raw.length > limit };
+  }
 }

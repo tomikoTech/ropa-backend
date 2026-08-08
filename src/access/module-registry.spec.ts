@@ -86,6 +86,7 @@ describe('ruta → módulo', () => {
     // Es la que usa el POS para saber qué vender: si dependiera de Productos, un
     // cajero no podría vender. El costo lo quita el controlador.
     expect(moduleForPath('/api/products/search')).toBe('sales');
+    expect(moduleForPath('/api/products/search/pos-catalog')).toBe('sales');
     expect(moduleForPath('/api/products')).toBe('products');
     expect(moduleForPath('/api/products/abc')).toBe('products');
   });

@@ -123,6 +123,35 @@ export class ProductsController {
     });
   }
 
+  @Get('search/pos-catalog')
+  @ApiOperation({
+    summary:
+      'Catálogo POS agrupado por producto, con todas sus variantes y existencias',
+  })
+  @ApiQuery({ name: 'q', required: false })
+  @ApiQuery({ name: 'limit', required: false })
+  @ApiQuery({ name: 'offset', required: false })
+  @ApiQuery({ name: 'type', required: false })
+  @ApiQuery({ name: 'sort', required: false })
+  @ApiQuery({ name: 'warehouseId', required: false })
+  searchPosCatalog(
+    @TenantId() tenantId: string,
+    @Query('q') query?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('type') type?: string,
+    @Query('sort') sort?: string,
+    @Query('warehouseId') warehouseId?: string,
+  ) {
+    return this.productsService.searchPosCatalog(query ?? '', tenantId, {
+      limit: limit ? Number(limit) : undefined,
+      offset: offset ? Number(offset) : undefined,
+      type: type || undefined,
+      sort,
+      warehouseId,
+    });
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Obtener producto por ID' })
   findOne(
