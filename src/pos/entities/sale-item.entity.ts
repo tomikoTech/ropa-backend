@@ -88,6 +88,29 @@ export class SaleItem extends TenantAwareEntity {
   })
   lineTotal: number;
 
+  /**
+   * Costo unitario **al momento de la venta** (F9).
+   *
+   * Es un snapshot, igual que el nombre o el precio: si mañana sube el costo
+   * del producto, la utilidad de la venta de ayer debe seguir siendo la que
+   * fue. Calcularla contra `products.cost_price` la reescribiría cada vez que
+   * cambia una compra.
+   *
+   * Cuando la línea sale de escanear un bulto etiquetado se guarda el costo
+   * **puesto en bodega** de ese bulto (ya con tasa de cambio y fletes).
+   *
+   * `0` significa "sin costo registrado", no "costo cero": los reportes lo
+   * cuentan aparte para no inflar la utilidad con margen del 100%.
+   */
+  @Column({
+    name: 'unit_cost',
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+    default: 0,
+  })
+  unitCost: number;
+
   // Snapshot de "punta" (F2): si este ítem era una punta al momento de la venta
   // y la comisión calculada para el vendedor. Inmutables (no se recalculan).
   @Column({ name: 'is_leftover', default: false })

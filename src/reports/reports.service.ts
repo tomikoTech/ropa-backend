@@ -5,6 +5,7 @@ import { Sale } from '../pos/entities/sale.entity.js';
 import { SaleItem } from '../pos/entities/sale-item.entity.js';
 import { Stock } from '../inventory/entities/stock.entity.js';
 import { SaleStatus } from '../common/enums/sale-status.enum.js';
+import { resolveRange, timestampRangeSql } from './engine/report-filters.js';
 
 export interface SalesReport {
   totalSales: number;
@@ -65,14 +66,18 @@ export class ReportsService {
     },
     tenantId: string,
   ): Promise<SalesReport> {
+    // El "hasta" incluye el día completo y el corte del día se hace en la zona
+    // del negocio: antes `created_at <= '2026-08-07'` dejaba fuera todas las
+    // ventas de ese día (comparaba contra las 00:00).
+    const { from, to } = resolveRange(filters.from, filters.to);
+    const range = { from, to };
     const qb = this.saleRepository
       .createQueryBuilder('s')
       .leftJoinAndSelect('s.items', 'items')
       .leftJoinAndSelect('s.payments', 'payments')
       .leftJoinAndSelect('s.accountsReceivable', 'ar')
       .where('s.status = :status', { status: SaleStatus.COMPLETED })
-      .andWhere('s.created_at >= :from', { from: filters.from })
-      .andWhere('s.created_at <= :to', { to: filters.to })
+      .andWhere(timestampRangeSql('s.created_at'), range)
       .andWhere('s.tenant_id = :tenantId', { tenantId });
 
     if (filters.warehouseId) {
@@ -145,6 +150,11 @@ export class ReportsService {
     },
     tenantId: string,
   ): Promise<TopProduct[]> {
+    // El "hasta" incluye el día completo y el corte del día se hace en la zona
+    // del negocio: antes `created_at <= '2026-08-07'` dejaba fuera todas las
+    // ventas de ese día (comparaba contra las 00:00).
+    const { from, to } = resolveRange(filters.from, filters.to);
+    const range = { from, to };
     const result = await this.saleItemRepository
       .createQueryBuilder('si')
       .innerJoin('si.sale', 's')
@@ -155,8 +165,7 @@ export class ReportsService {
       .addSelect('SUM(si.quantity)', 'totalQuantity')
       .addSelect('SUM(si.line_total)', 'totalRevenue')
       .where('s.status = :status', { status: SaleStatus.COMPLETED })
-      .andWhere('s.created_at >= :from', { from: filters.from })
-      .andWhere('s.created_at <= :to', { to: filters.to })
+      .andWhere(timestampRangeSql('s.created_at'), range)
       .andWhere('s.tenant_id = :tenantId', { tenantId })
       .groupBy('si.product_name')
       .addGroupBy('si.variant_sku')
@@ -188,6 +197,11 @@ export class ReportsService {
       comisionTotal: number;
     }[]
   > {
+    // El "hasta" incluye el día completo y el corte del día se hace en la zona
+    // del negocio: antes `created_at <= '2026-08-07'` dejaba fuera todas las
+    // ventas de ese día (comparaba contra las 00:00).
+    const { from, to } = resolveRange(filters.from, filters.to);
+    const range = { from, to };
     const qb = this.saleItemRepository
       .createQueryBuilder('si')
       .innerJoin('si.sale', 's')
@@ -199,8 +213,7 @@ export class ReportsService {
       .addSelect('SUM(si.commission_amount)', 'comisionTotal')
       .where('si.is_leftover = true')
       .andWhere('s.status = :status', { status: SaleStatus.COMPLETED })
-      .andWhere('s.created_at >= :from', { from: filters.from })
-      .andWhere('s.created_at <= :to', { to: filters.to })
+      .andWhere(timestampRangeSql('s.created_at'), range)
       .andWhere('s.tenant_id = :tenantId', { tenantId })
       .groupBy('s.user_id')
       .addGroupBy('u.first_name')

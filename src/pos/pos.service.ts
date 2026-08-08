@@ -347,27 +347,12 @@ export class PosService {
             }
           }
 
-          const saleItem = saleItemRepo.create({
-            saleId: savedSale.id,
-            variantId: data.variant.id,
-            productName: data.variant.product.name,
-            variantSku: data.variant.sku,
-            variantSize: data.variant.sizeName,
-            variantColor: data.variant.colorName,
-            quantity: data.quantity,
-            unitPrice: data.lineCalc.unitPrice,
-            discountPercent: data.discountPercent,
-            taxRate: data.lineCalc.taxRate,
-            taxAmount: data.lineCalc.taxAmount,
-            lineTotal: data.lineCalc.lineTotal,
-            isLeftover,
-            commissionAmount,
-            tenantId,
-          });
-          await saleItemRepo.save(saleItem);
-
-          // Si la línea salió de escanear un bulto, se marca vendido dentro de
-          // la misma transacción: si la venta falla, el bulto sigue disponible.
+          // Si la línea salió de escanear un bulto, se resuelve ANTES de crear
+          // la línea: de ese bulto sale el costo puesto en bodega (ya con tasa
+          // de cambio y fletes), que es el costo real de lo que se vende. El
+          // bulto se marca vendido más abajo, dentro de la misma transacción:
+          // si la venta falla, sigue disponible.
+          let soldUnit: StockUnit | null = null;
           if (data.stockUnitId) {
             const unitRepo = manager.getRepository(StockUnit);
             const unit = await unitRepo.findOne({
@@ -381,10 +366,43 @@ export class PosService {
                 `El bulto ${unit.barcode} ya no está disponible para la venta.`,
               );
             }
-            await unitRepo.update(
-              { id: unit.id, tenantId },
-              { status: StockUnitStatus.SOLD },
-            );
+            soldUnit = unit;
+          }
+
+          // Snapshot del costo (F9): del bulto si vino de uno, si no el costo
+          // actual del producto. Queda congelado en la línea para que la
+          // utilidad de esta venta no cambie cuando cambie el costo mañana.
+          const unitCost = soldUnit
+            ? Number(soldUnit.cost) || 0
+            : Number(data.variant.product.costPrice) || 0;
+
+          const saleItem = saleItemRepo.create({
+            saleId: savedSale.id,
+            variantId: data.variant.id,
+            productName: data.variant.product.name,
+            variantSku: data.variant.sku,
+            variantSize: data.variant.sizeName,
+            variantColor: data.variant.colorName,
+            quantity: data.quantity,
+            unitPrice: data.lineCalc.unitPrice,
+            unitCost,
+            discountPercent: data.discountPercent,
+            taxRate: data.lineCalc.taxRate,
+            taxAmount: data.lineCalc.taxAmount,
+            lineTotal: data.lineCalc.lineTotal,
+            isLeftover,
+            commissionAmount,
+            tenantId,
+          });
+          await saleItemRepo.save(saleItem);
+
+          if (soldUnit) {
+            await manager
+              .getRepository(StockUnit)
+              .update(
+                { id: soldUnit.id, tenantId },
+                { status: StockUnitStatus.SOLD },
+              );
           }
 
           // Deduct inventory — cascade: primary warehouse first, then others by qty desc
@@ -841,6 +859,8 @@ export class PosService {
               variantColor: variant.colorName,
               quantity: item.quantity,
               unitPrice,
+              // Snapshot del costo (F9), igual que al crear la venta.
+              unitCost: Number(variant.product.costPrice) || 0,
               discountPercent: 0,
               taxRate: 0,
               taxAmount: 0,

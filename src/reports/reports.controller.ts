@@ -3,6 +3,7 @@ import {
   Get,
   Query,
   Res,
+  UseGuards,
   BadRequestException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
@@ -10,6 +11,7 @@ import type { Response } from 'express';
 import { ReportsService } from './reports.service.js';
 import { TenantId } from '../common/decorators/tenant-id.decorator.js';
 import { Roles } from '../common/decorators/roles.decorator.js';
+import { RolesGuard } from '../common/guards/roles.guard.js';
 import { Role } from '../common/enums/role.enum.js';
 import ExcelJS from 'exceljs';
 
@@ -89,6 +91,7 @@ export class ReportsController {
 
   @Get('sales/export')
   @Roles(Role.ADMIN)
+  @UseGuards(RolesGuard)
   @ApiOperation({ summary: 'Exportar reporte ventas a Excel' })
   async exportSalesExcel(
     @TenantId() tenantId: string,
@@ -195,9 +198,21 @@ export class ReportsController {
       }
       csvSheet.addRow({});
       csvSheet.addRow({ date: 'RESUMEN', sales: '', amount: '' });
-      csvSheet.addRow({ date: 'Total Ventas', sales: report.totalSales, amount: '' });
-      csvSheet.addRow({ date: 'Monto Total', sales: '', amount: report.totalAmount });
-      csvSheet.addRow({ date: 'Ticket Promedio', sales: '', amount: report.averageTicket });
+      csvSheet.addRow({
+        date: 'Total Ventas',
+        sales: report.totalSales,
+        amount: '',
+      });
+      csvSheet.addRow({
+        date: 'Monto Total',
+        sales: '',
+        amount: report.totalAmount,
+      });
+      csvSheet.addRow({
+        date: 'Ticket Promedio',
+        sales: '',
+        amount: report.averageTicket,
+      });
       await csvWorkbook.csv.write(res);
       res.end();
       return;
@@ -218,6 +233,7 @@ export class ReportsController {
 
   @Get('inventory/export')
   @Roles(Role.ADMIN)
+  @UseGuards(RolesGuard)
   @ApiOperation({ summary: 'Exportar inventario a Excel/CSV' })
   async exportInventory(
     @TenantId() tenantId: string,
@@ -225,7 +241,10 @@ export class ReportsController {
     @Res() res: Response,
     @Query('format') format?: string,
   ) {
-    const inventory = await this.reportsService.getInventoryValuation(warehouseId, tenantId);
+    const inventory = await this.reportsService.getInventoryValuation(
+      warehouseId,
+      tenantId,
+    );
 
     const workbook = new ExcelJS.Workbook();
 
@@ -264,7 +283,10 @@ export class ReportsController {
 
     if (format === 'csv') {
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-      res.setHeader('Content-Disposition', 'attachment; filename=inventario.csv');
+      res.setHeader(
+        'Content-Disposition',
+        'attachment; filename=inventario.csv',
+      );
       res.write('\uFEFF');
       // For CSV, create a single-sheet workbook with items data
       const csvWorkbook = new ExcelJS.Workbook();
