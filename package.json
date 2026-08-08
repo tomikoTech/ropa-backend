@@ -24,7 +24,8 @@
     "migration:revert": "nest build && typeorm migration:revert -d dist/config/data-source.js",
     "migration:generate": "nest build && typeorm migration:generate -d dist/config/data-source.js",
     "migration:create": "typeorm migration:create",
-    "backfill:imperial-699-2": "nest build && node dist/seeds/add-imperial-invoice-699-2.js"
+    "backfill:imperial-699-2": "nest build && node dist/seeds/add-imperial-invoice-699-2.js",
+    "sync:imperial-abonos-2026-08-08": "nest build && node dist/seeds/sync-imperial-abonos-2026-08-08.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1103.0",
