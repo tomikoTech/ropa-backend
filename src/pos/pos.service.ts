@@ -734,7 +734,12 @@ export class PosService {
         'accountsReceivable',
       ],
       order: { createdAt: 'DESC' },
-      take: filters?.limit || 100,
+      // Ventas pagina y filtra en el navegador. Aplicar aquí un límite por
+      // defecto recorta silenciosamente el universo antes de paginar: una
+      // tienda con más de 100 ventas no puede ver ni buscar las anteriores.
+      // Solo limitar cuando el consumidor lo pide expresamente (p. ej. una
+      // búsqueda auxiliar que necesita las últimas N).
+      ...(filters?.limit && filters.limit > 0 ? { take: filters.limit } : {}),
     });
   }
 
