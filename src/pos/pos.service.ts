@@ -848,6 +848,7 @@ export class PosService {
               variantId: item.variantId,
               quantity: Number(item.quantity),
               unitPrice: Number(item.unitPrice),
+              discountPercent: Number(item.discountPercent),
             }))
           : undefined);
 
@@ -924,6 +925,11 @@ export class PosService {
               );
             }
             pair.previous.unitPrice = Number(pair.input.unitPrice);
+            if (pair.input.discountPercent !== undefined) {
+              pair.previous.discountPercent = Number(
+                pair.input.discountPercent,
+              );
+            }
             editedItems.push(pair.previous);
             minimumPriceByVariant.set(
               variant.id,
@@ -1015,7 +1021,9 @@ export class PosService {
                     : Number(variant.product.costPrice) || 0,
                 promoterId: previous?.promoterId ?? null,
                 promoterName: previous?.promoterName ?? null,
-                discountPercent: 0,
+                discountPercent:
+                  item.discountPercent ??
+                  (previous ? Number(previous.discountPercent) : 0),
                 taxRate,
                 taxAmount: 0,
                 lineTotal,
@@ -1114,7 +1122,7 @@ export class PosService {
             'El descuento no puede superar el subtotal de la venta',
           );
         }
-        const discountPercent =
+        const globalDiscountPercent =
           dto.total !== undefined
             ? naturalTotal > 0
               ? (1 - dto.total / naturalTotal) * 100
@@ -1124,7 +1132,15 @@ export class PosService {
               : 0;
 
         const lineCalcs: LineCalculation[] = [];
-        for (const item of editedItems) {
+        const preserveLineDiscounts =
+          dto.items !== undefined &&
+          dto.total === undefined &&
+          dto.discountAmount === undefined &&
+          requestedItems.every((item) => item.discountPercent !== undefined);
+        for (const [index, item] of editedItems.entries()) {
+          const discountPercent = preserveLineDiscounts
+            ? Number(requestedItems[index].discountPercent)
+            : globalDiscountPercent;
           const effectiveUnitPrice =
             Number(item.unitPrice) * (1 - discountPercent / 100);
           const minimumPrice = minimumPriceByVariant.get(item.variantId) || 0;

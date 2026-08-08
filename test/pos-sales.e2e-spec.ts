@@ -162,6 +162,30 @@ describe('POS Sales & Accounts Receivable (e2e)', () => {
     expect(Number(res.body.payments[0].changeAmount)).toBe(10000);
   });
 
+  it('PATCH /api/pos/sales/:id → preserves a discount supplied per line', async () => {
+    const res = await request(app.getHttpServer())
+      .patch(`/api/pos/sales/${cashSaleId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        items: [
+          {
+            variantId: variant1Id,
+            quantity: 2,
+            unitPrice: 60000,
+            discountPercent: 15,
+          },
+        ],
+      })
+      .expect(200);
+
+    expect(Number(res.body.subtotal)).toBe(120000);
+    expect(Number(res.body.discountAmount)).toBe(18000);
+    expect(Number(res.body.total)).toBe(102000);
+    expect(Number(res.body.items[0].discountPercent)).toBe(15);
+    expect(Number(res.body.items[0].lineTotal)).toBe(102000);
+    expect(Number(res.body.payments[0].amount)).toBe(102000);
+  });
+
   // ─── VERIFY STOCK DECREASED ───
 
   it('GET /api/inventory/stock/variant/:id → stock decreased after sale', async () => {

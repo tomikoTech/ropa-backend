@@ -5,6 +5,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Max,
   Min,
   ValidateNested,
 } from 'class-validator';
@@ -25,6 +26,15 @@ export class UpdateSaleItemDto {
   @IsNumber()
   @Min(0)
   unitPrice: number;
+
+  // Descuento histórico propio de esta línea. Es indispensable al editar una
+  // venta que mezcla descuentos por producto: omitirlo y reconstruir todo a
+  // partir del descuento global cambia silenciosamente los totales.
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  @IsOptional()
+  discountPercent?: number;
 }
 
 // Edición de una venta existente. Los importes se recalculan dentro de una sola
