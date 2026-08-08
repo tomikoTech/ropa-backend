@@ -45,6 +45,7 @@ export class ProductsController {
     description: 'IDs separados por coma',
   })
   @ApiQuery({ name: 'gender', required: false })
+  @ApiQuery({ name: 'sort', required: false })
   @ApiQuery({
     name: 'type',
     required: false,
@@ -58,6 +59,7 @@ export class ProductsController {
     @Query('categoryIds') categoryIds?: string,
     @Query('gender') gender?: string,
     @Query('type') type?: string,
+    @Query('sort') sort?: string,
   ) {
     // Backward-compatible: sin ningún param devuelve el array completo
     // (POS, gestión de storefront, etc. lo siguen consumiendo igual).
@@ -67,7 +69,8 @@ export class ProductsController {
       search === undefined &&
       categoryIds === undefined &&
       gender === undefined &&
-      type === undefined
+      type === undefined &&
+      sort === undefined
     ) {
       return this.productsService.findAll(tenantId);
     }
@@ -83,6 +86,7 @@ export class ProductsController {
         : undefined,
       gender,
       type,
+      sort,
     });
   }
 
@@ -94,12 +98,16 @@ export class ProductsController {
   @ApiQuery({ name: 'limit', required: false })
   @ApiQuery({ name: 'offset', required: false })
   @ApiQuery({ name: 'type', required: false })
+  @ApiQuery({ name: 'sort', required: false })
+  @ApiQuery({ name: 'warehouseId', required: false })
   searchVariants(
     @Query('q') query: string,
     @TenantId() tenantId: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
     @Query('type') type?: string,
+    @Query('sort') sort?: string,
+    @Query('warehouseId') warehouseId?: string,
   ) {
     // Esta búsqueda es la que usa el POS para saber qué vender, así que la puede
     // llamar quien tenga permiso de Ventas (ver `module-registry.ts`). Trae el
@@ -110,6 +118,8 @@ export class ProductsController {
       limit: limit ? Number(limit) : undefined,
       offset: offset ? Number(offset) : undefined,
       type: type || undefined,
+      sort,
+      warehouseId,
     });
   }
 

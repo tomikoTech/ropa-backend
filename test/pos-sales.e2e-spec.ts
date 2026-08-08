@@ -142,6 +142,26 @@ describe('POS Sales & Accounts Receivable (e2e)', () => {
     _cashSaleItemId = sale.items[0].id;
   });
 
+  it('PATCH /api/pos/sales/:id → updates line price, totals and payment', async () => {
+    const res = await request(app.getHttpServer())
+      .patch(`/api/pos/sales/${cashSaleId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        items: [{ variantId: variant1Id, quantity: 2, unitPrice: 60000 }],
+        total: 110000,
+      })
+      .expect(200);
+
+    expect(Number(res.body.subtotal)).toBe(120000);
+    expect(Number(res.body.discountAmount)).toBe(10000);
+    expect(Number(res.body.total)).toBe(110000);
+    expect(res.body.items[0].id).toBe(_cashSaleItemId);
+    expect(Number(res.body.items[0].unitPrice)).toBe(60000);
+    expect(Number(res.body.items[0].lineTotal)).toBe(110000);
+    expect(Number(res.body.payments[0].amount)).toBe(110000);
+    expect(Number(res.body.payments[0].changeAmount)).toBe(10000);
+  });
+
   // ─── VERIFY STOCK DECREASED ───
 
   it('GET /api/inventory/stock/variant/:id → stock decreased after sale', async () => {
@@ -234,6 +254,24 @@ describe('POS Sales & Accounts Receivable (e2e)', () => {
     expect(Number(sale.total)).toBeGreaterThan(0);
 
     creditSaleId = sale.id;
+  });
+
+  it('PATCH /api/pos/sales/:id → synchronizes the credit account total', async () => {
+    const res = await request(app.getHttpServer())
+      .patch(`/api/pos/sales/${creditSaleId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        items: [{ variantId: variant2Id, quantity: 1, unitPrice: 70000 }],
+        total: 65000,
+      })
+      .expect(200);
+
+    expect(Number(res.body.total)).toBe(65000);
+    expect(Number(res.body.items[0].unitPrice)).toBe(70000);
+    expect(Number(res.body.items[0].lineTotal)).toBe(65000);
+    expect(res.body.accountsReceivable).toHaveLength(1);
+    expect(Number(res.body.accountsReceivable[0].totalAmount)).toBe(65000);
+    expect(Number(res.body.accountsReceivable[0].paidAmount)).toBe(0);
   });
 
   // ─── LIST SALES ───

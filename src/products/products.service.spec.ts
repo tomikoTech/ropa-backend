@@ -19,10 +19,22 @@ import { ColorsService } from '../catalogs/colors.service.js';
 function mockQueryBuilder(rows: unknown[] = []) {
   const qb: Record<string, jest.Mock> = {
     select: jest.fn(() => qb),
+    addSelect: jest.fn(() => qb),
+    leftJoin: jest.fn(() => qb),
+    leftJoinAndSelect: jest.fn(() => qb),
     where: jest.fn(() => qb),
     andWhere: jest.fn(() => qb),
+    setParameter: jest.fn(() => qb),
+    orderBy: jest.fn(() => qb),
+    addOrderBy: jest.fn(() => qb),
+    skip: jest.fn(() => qb),
+    take: jest.fn(() => qb),
+    limit: jest.fn(() => qb),
+    offset: jest.fn(() => qb),
     getRawMany: jest.fn().mockResolvedValue(rows),
     getOne: jest.fn().mockResolvedValue(null),
+    getMany: jest.fn().mockResolvedValue(rows),
+    getManyAndCount: jest.fn().mockResolvedValue([rows, rows.length]),
   };
   return qb;
 }
@@ -278,6 +290,49 @@ describe('ProductsService', () => {
         relations: ['category', 'variants'],
         order: { createdAt: 'DESC' },
       });
+    });
+  });
+
+  describe('inventory ordering', () => {
+    it('orders paginated products by highest stock by default', async () => {
+      const qb = mockQueryBuilder([]);
+      productRepository.createQueryBuilder.mockReturnValue(qb);
+
+      await service.findPaginated(tenantId, {});
+
+      expect(qb.addSelect).toHaveBeenCalledWith(
+        expect.stringContaining('FROM stock stock_sort'),
+        'inventory_quantity',
+      );
+      expect(qb.orderBy).toHaveBeenCalledWith('inventory_quantity', 'DESC');
+    });
+
+    it('allows changing variant ordering to product name', async () => {
+      const qb = mockQueryBuilder([]);
+      variantRepository.createQueryBuilder.mockReturnValue(qb);
+
+      await service.searchVariants('', tenantId, { sort: 'name-asc' });
+
+      expect(qb.orderBy).toHaveBeenCalledWith('p.name', 'ASC');
+    });
+
+    it('can order POS variants by stock in the selected warehouse', async () => {
+      const qb = mockQueryBuilder([]);
+      variantRepository.createQueryBuilder.mockReturnValue(qb);
+
+      await service.searchVariants('', tenantId, {
+        sort: 'stock-desc',
+        warehouseId: 'warehouse-1',
+      });
+
+      expect(qb.addSelect).toHaveBeenCalledWith(
+        expect.stringContaining('stock_sort.warehouse_id = :sortWarehouseId'),
+        'inventory_quantity',
+      );
+      expect(qb.setParameter).toHaveBeenCalledWith(
+        'sortWarehouseId',
+        'warehouse-1',
+      );
     });
   });
 

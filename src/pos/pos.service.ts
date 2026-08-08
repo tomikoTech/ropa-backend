@@ -19,6 +19,7 @@ import { Client } from '../clients/entities/client.entity.js';
 import { AccountsReceivable } from './entities/accounts-receivable.entity.js';
 import { AccountsReceivablePayment } from './entities/accounts-receivable-payment.entity.js';
 import { CreateSaleDto } from './dto/create-sale.dto.js';
+import { UpdateSaleDto } from './dto/update-sale.dto.js';
 import { RecordArPaymentDto } from './dto/record-ar-payment.dto.js';
 import { TaxService, LineCalculation } from './services/tax.service.js';
 import { InvoiceService } from './services/invoice.service.js';
@@ -753,6 +754,8 @@ export class PosService {
         'items',
         'items.variant',
         'payments',
+        'accountsReceivable',
+        'accountsReceivable.payments',
       ],
     });
     if (!sale) {
@@ -761,19 +764,11 @@ export class PosService {
     return sale;
   }
 
-  // Edita propiedades de una venta (sin tocar ítems/inventario). Recalcula el
-  // total si cambia el descuento y sincroniza la cuenta por cobrar si aplica.
+  // Edita una venta y mantiene alineados sus snapshots monetarios, pagos y
+  // cartera. El precio de una línea es histórico: nunca modifica el catálogo.
   async updateSale(
     id: string,
-    dto: {
-      clientId?: string | null;
-      invoiceNumber?: string;
-      notes?: string;
-      saleChannel?: SaleChannel;
-      saleDate?: string;
-      discountAmount?: number;
-      items?: { variantId: string; quantity: number }[];
-    },
+    dto: UpdateSaleDto,
     userId: string,
     tenantId: string,
   ): Promise<Sale> {
@@ -781,14 +776,37 @@ export class PosService {
       const saleRepo = manager.getRepository(Sale);
       const sale = await saleRepo.findOne({
         where: { id, tenantId },
-        relations: ['accountsReceivable'],
+        relations: [
+          'items',
+          'payments',
+          'accountsReceivable',
+          'accountsReceivable.payments',
+        ],
       });
       if (!sale) throw new NotFoundException('Venta no encontrada');
       if (sale.status === SaleStatus.CANCELLED) {
         throw new BadRequestException('No se puede editar una venta cancelada');
       }
 
+      const originalTotal = Number(sale.total);
+      const roundMoney = (value: number) => Math.round(value * 100) / 100;
+
       if (dto.clientId !== undefined) {
+        if (dto.clientId) {
+          const client = await manager.getRepository(Client).findOne({
+            where: { id: dto.clientId, tenantId },
+          });
+          if (!client) throw new NotFoundException('Cliente no encontrado');
+          if (sale.accountsReceivable.length > 0 && client.isGeneric) {
+            throw new BadRequestException(
+              'Una venta a crédito requiere un cliente registrado',
+            );
+          }
+        } else if (sale.accountsReceivable.length > 0) {
+          throw new BadRequestException(
+            'No se puede quitar el cliente de una venta a crédito',
+          );
+        }
         sale.clientId = (dto.clientId ?? null) as unknown as string;
       }
       if (dto.notes !== undefined) sale.notes = dto.notes;
@@ -799,7 +817,11 @@ export class PosService {
         const iso = /^\d{4}-\d{2}-\d{2}$/.test(dto.saleDate)
           ? `${dto.saleDate}T12:00:00`
           : dto.saleDate;
-        sale.createdAt = new Date(iso);
+        const parsed = new Date(iso);
+        if (Number.isNaN(parsed.getTime())) {
+          throw new BadRequestException('Fecha de venta inválida');
+        }
+        sale.createdAt = parsed;
       }
 
       if (dto.invoiceNumber !== undefined) {
@@ -818,187 +840,424 @@ export class PosService {
         dto.discountAmount !== undefined
           ? dto.discountAmount
           : Number(sale.discountAmount);
+      const requestedItems =
+        dto.items ??
+        ((dto.total !== undefined || dto.discountAmount !== undefined) &&
+        sale.items.length > 0
+          ? sale.items.map((item) => ({
+              variantId: item.variantId,
+              quantity: Number(item.quantity),
+              unitPrice: Number(item.unitPrice),
+            }))
+          : undefined);
 
-      if (dto.items) {
-        if (dto.items.length === 0) {
+      if (
+        requestedItems &&
+        (requestedItems.length > 0 || sale.items.length > 0)
+      ) {
+        if (requestedItems.length === 0) {
           throw new BadRequestException('La venta debe tener al menos un ítem');
         }
         const stockRepo = manager.getRepository(Stock);
         const movementRepo = manager.getRepository(StockMovement);
         const saleItemRepo = manager.getRepository(SaleItem);
         const variantRepo = manager.getRepository(ProductVariant);
+        const previousByVariant = new Map(
+          sale.items.map((item) => [item.variantId, item]),
+        );
+        const settings = await manager
+          .getRepository(StoreSettings)
+          .findOne({ where: { tenantId } });
 
-        // Proporción de IVA de la venta original (para conservar su régimen).
+        // Régimen de IVA histórico: se infiere de la igualdad que cumplía la
+        // venta, porque la configuración de la tienda pudo cambiar después.
         const origSubtotal = Number(sale.subtotal) || 0;
-        const taxRatio =
-          origSubtotal > 0 ? Number(sale.taxAmount) / origSubtotal : 0;
+        const origDiscount = Number(sale.discountAmount) || 0;
+        const origTax = Number(sale.taxAmount) || 0;
+        const origNet = origSubtotal - origDiscount;
+        const ivaMode: 'included' | 'added' =
+          origTax > 0 &&
+          Math.abs(originalTotal - (origNet + origTax)) + 0.01 <
+            Math.abs(originalTotal - origNet)
+            ? 'added'
+            : 'included';
+        const fallbackTaxRate =
+          sale.items
+            .map((item) => Number(item.taxRate))
+            .find((rate) => rate > 0) ??
+          (origTax > 0 ? Number(settings?.ivaRate ?? 19) : 0);
 
-        // 1) Revertir inventario de los ítems previos (soporta frasco/cascada).
-        const prevMovs = await movementRepo.find({
-          where: { referenceType: 'SALE', referenceId: sale.id, tenantId },
-        });
-        for (const m of prevMovs) {
-          const st = await stockRepo.findOne({
-            where: {
-              variantId: m.variantId,
-              warehouseId: m.warehouseId,
-              tenantId,
-            },
-          });
-          if (st) {
-            st.quantity += Math.abs(Number(m.quantity));
-            await stockRepo.save(st);
-          }
-        }
-        await movementRepo.delete({
-          referenceType: 'SALE',
-          referenceId: sale.id,
-          tenantId,
-        });
-        await saleItemRepo.delete({ saleId: sale.id, tenantId });
+        const editedItems: SaleItem[] = [];
+        const minimumPriceByVariant = new Map<string, number>();
+        const newSubtotal = requestedItems.reduce(
+          (sum, item) => sum + Number(item.unitPrice) * item.quantity,
+          0,
+        );
 
-        // 2) Aplicar los ítems nuevos (mismo patrón que createSale).
-        let newSubtotal = 0;
-        for (const item of dto.items) {
-          const variant = await variantRepo.findOne({
-            where: { id: item.variantId },
-            relations: ['product'],
-          });
-          if (!variant || variant.tenantId !== tenantId) {
-            throw new NotFoundException(
-              `Variante ${item.variantId} no encontrada`,
+        // Si solo cambió el precio, conservar las mismas entidades SaleItem y
+        // todos los movimientos de inventario. Se empareja por variante y
+        // cantidad porque el DTO representa la lista completa de líneas.
+        const unmatchedPrevious = [...sale.items];
+        const reusablePairs = requestedItems.map((input) => {
+          const index = unmatchedPrevious.findIndex(
+            (previous) =>
+              previous.variantId === input.variantId &&
+              Number(previous.quantity) === Number(input.quantity),
+          );
+          if (index < 0) return null;
+          return { input, previous: unmatchedPrevious.splice(index, 1)[0] };
+        });
+        const canReuseSaleItems =
+          unmatchedPrevious.length === 0 &&
+          reusablePairs.every((pair) => pair !== null);
+
+        if (canReuseSaleItems) {
+          for (const pair of reusablePairs) {
+            if (!pair) continue;
+            const variant = await variantRepo.findOne({
+              where: { id: pair.input.variantId },
+              relations: ['product'],
+            });
+            if (!variant || variant.tenantId !== tenantId) {
+              throw new NotFoundException(
+                `Variante ${pair.input.variantId} no encontrada`,
+              );
+            }
+            pair.previous.unitPrice = Number(pair.input.unitPrice);
+            editedItems.push(pair.previous);
+            minimumPriceByVariant.set(
+              variant.id,
+              Number(variant.product.minimumSalePrice) || 0,
             );
           }
-          const itemStocks = await stockRepo.find({
-            where: { variantId: item.variantId, tenantId },
+        } else {
+          // 1) Revertir inventario solo si cambiaron productos/cantidades.
+          const prevMovs = await movementRepo.find({
+            where: { referenceType: 'SALE', referenceId: sale.id, tenantId },
           });
-          itemStocks.sort((a, b) => {
-            if (a.warehouseId === sale.warehouseId) return -1;
-            if (b.warehouseId === sale.warehouseId) return 1;
-            return Number(b.quantity) - Number(a.quantity);
-          });
-          const totalAvailable = itemStocks.reduce(
-            (s, st) => s + Number(st.quantity),
-            0,
-          );
-          if (totalAvailable < item.quantity) {
-            throw new BadRequestException(
-              `Stock insuficiente para "${variant.product.name}" ${variant.sizeName}/${variant.colorName}. ` +
-                `Disponible total: ${totalAvailable}, Solicitado: ${item.quantity}`,
-            );
+          for (const m of prevMovs) {
+            const st = await stockRepo.findOne({
+              where: {
+                variantId: m.variantId,
+                warehouseId: m.warehouseId,
+                tenantId,
+              },
+            });
+            if (st) {
+              st.quantity += Math.abs(Number(m.quantity));
+              await stockRepo.save(st);
+            }
           }
+          await movementRepo.delete({
+            referenceType: 'SALE',
+            referenceId: sale.id,
+            tenantId,
+          });
+          await saleItemRepo.delete({ saleId: sale.id, tenantId });
 
-          const unitPrice = variant.priceOverride
-            ? Number(variant.priceOverride)
-            : Number(variant.product.basePrice);
-          const lineTotal = unitPrice * item.quantity;
-          newSubtotal += lineTotal;
+          // 2) Aplicar los ítems nuevos (mismo patrón que createSale).
+          for (const item of requestedItems) {
+            const variant = await variantRepo.findOne({
+              where: { id: item.variantId },
+              relations: ['product'],
+            });
+            if (!variant || variant.tenantId !== tenantId) {
+              throw new NotFoundException(
+                `Variante ${item.variantId} no encontrada`,
+              );
+            }
+            const itemStocks = await stockRepo.find({
+              where: { variantId: item.variantId, tenantId },
+            });
+            itemStocks.sort((a, b) => {
+              if (a.warehouseId === sale.warehouseId) return -1;
+              if (b.warehouseId === sale.warehouseId) return 1;
+              return Number(b.quantity) - Number(a.quantity);
+            });
+            const totalAvailable = itemStocks.reduce(
+              (s, st) => s + Number(st.quantity),
+              0,
+            );
+            if (totalAvailable < item.quantity) {
+              throw new BadRequestException(
+                `Stock insuficiente para "${variant.product.name}" ${variant.sizeName}/${variant.colorName}. ` +
+                  `Disponible total: ${totalAvailable}, Solicitado: ${item.quantity}`,
+              );
+            }
 
-          await saleItemRepo.save(
-            saleItemRepo.create({
-              saleId: sale.id,
-              variantId: variant.id,
-              productName: variant.product.name,
-              variantSku: variant.sku,
-              variantSize: variant.sizeName,
-              variantColor: variant.colorName,
-              quantity: item.quantity,
-              unitPrice,
-              // Snapshot del costo (F9), igual que al crear la venta.
-              unitCost: Number(variant.product.costPrice) || 0,
-              discountPercent: 0,
-              taxRate: 0,
-              taxAmount: 0,
-              lineTotal,
-              tenantId,
-            }),
-          );
+            const unitPrice = Number(item.unitPrice);
+            const lineTotal = unitPrice * item.quantity;
+            minimumPriceByVariant.set(
+              variant.id,
+              Number(variant.product.minimumSalePrice) || 0,
+            );
 
-          // Descontar inventario en cascada (bodega de la venta primero).
-          let remaining = item.quantity;
-          for (const stock of itemStocks) {
-            if (remaining <= 0) break;
-            const available = Number(stock.quantity);
-            if (available <= 0) continue;
-            const toDeduct = Math.min(available, remaining);
-            stock.quantity = available - toDeduct;
-            remaining -= toDeduct;
-            await stockRepo.save(stock);
-            await movementRepo.save(
-              movementRepo.create({
+            const previous = previousByVariant.get(variant.id);
+            const taxRate = previous
+              ? Number(previous.taxRate)
+              : fallbackTaxRate;
+
+            const editedItem = await saleItemRepo.save(
+              saleItemRepo.create({
+                saleId: sale.id,
                 variantId: variant.id,
-                warehouseId: stock.warehouseId,
-                movementType: MovementType.OUT,
-                quantity: -toDeduct,
-                referenceType: 'SALE',
-                referenceId: sale.id,
-                notes: `Edición venta ${sale.saleNumber}`,
-                createdById: userId,
+                productName: previous?.productName ?? variant.product.name,
+                variantSku: previous?.variantSku ?? variant.sku,
+                variantSize: previous?.variantSize ?? variant.sizeName,
+                variantColor: previous?.variantColor ?? variant.colorName,
+                quantity: item.quantity,
+                unitPrice,
+                // Si la línea ya existía, conservar todos sus snapshots
+                // históricos (costo, impulsador, punta y comisión).
+                unitCost:
+                  previous !== undefined
+                    ? Number(previous.unitCost)
+                    : Number(variant.product.costPrice) || 0,
+                promoterId: previous?.promoterId ?? null,
+                promoterName: previous?.promoterName ?? null,
+                discountPercent: 0,
+                taxRate,
+                taxAmount: 0,
+                lineTotal,
+                isLeftover: previous?.isLeftover ?? false,
+                commissionAmount: Number(previous?.commissionAmount) || 0,
                 tenantId,
               }),
             );
-          }
+            editedItems.push(editedItem);
 
-          // Perfumería: descontar 1 frasco por unidad si el producto lo tiene.
-          const frascoVariantId = variant.product.frascoVariantId;
-          if (frascoVariantId) {
-            const frascoStocks = await stockRepo.find({
-              where: { variantId: frascoVariantId, tenantId },
-              order: { quantity: 'DESC' },
-            });
-            let frascoRemaining = item.quantity;
-            for (
-              let i = 0;
-              i < frascoStocks.length && frascoRemaining > 0;
-              i++
-            ) {
-              const fs = frascoStocks[i];
-              const isLast = i === frascoStocks.length - 1;
-              const avail = Number(fs.quantity);
-              const toDeduct = isLast
-                ? frascoRemaining
-                : Math.min(Math.max(avail, 0), frascoRemaining);
-              if (toDeduct <= 0) continue;
-              fs.quantity = avail - toDeduct;
-              frascoRemaining -= toDeduct;
-              await stockRepo.save(fs);
+            // Descontar inventario en cascada (bodega de la venta primero).
+            let remaining = item.quantity;
+            for (const stock of itemStocks) {
+              if (remaining <= 0) break;
+              const available = Number(stock.quantity);
+              if (available <= 0) continue;
+              const toDeduct = Math.min(available, remaining);
+              stock.quantity = available - toDeduct;
+              remaining -= toDeduct;
+              await stockRepo.save(stock);
               await movementRepo.save(
                 movementRepo.create({
-                  variantId: frascoVariantId,
-                  warehouseId: fs.warehouseId,
+                  variantId: variant.id,
+                  warehouseId: stock.warehouseId,
                   movementType: MovementType.OUT,
                   quantity: -toDeduct,
                   referenceType: 'SALE',
                   referenceId: sale.id,
-                  notes: `Frasco por edición venta ${sale.saleNumber}`,
+                  notes: `Edición venta ${sale.saleNumber}`,
                   createdById: userId,
                   tenantId,
                 }),
               );
             }
+
+            // Perfumería: descontar 1 frasco por unidad si el producto lo tiene.
+            const frascoVariantId = variant.product.frascoVariantId;
+            if (frascoVariantId) {
+              const frascoStocks = await stockRepo.find({
+                where: { variantId: frascoVariantId, tenantId },
+                order: { quantity: 'DESC' },
+              });
+              let frascoRemaining = item.quantity;
+              for (
+                let i = 0;
+                i < frascoStocks.length && frascoRemaining > 0;
+                i++
+              ) {
+                const fs = frascoStocks[i];
+                const isLast = i === frascoStocks.length - 1;
+                const avail = Number(fs.quantity);
+                const toDeduct = isLast
+                  ? frascoRemaining
+                  : Math.min(Math.max(avail, 0), frascoRemaining);
+                if (toDeduct <= 0) continue;
+                fs.quantity = avail - toDeduct;
+                frascoRemaining -= toDeduct;
+                await stockRepo.save(fs);
+                await movementRepo.save(
+                  movementRepo.create({
+                    variantId: frascoVariantId,
+                    warehouseId: fs.warehouseId,
+                    movementType: MovementType.OUT,
+                    quantity: -toDeduct,
+                    referenceType: 'SALE',
+                    referenceId: sale.id,
+                    notes: `Frasco por edición venta ${sale.saleNumber}`,
+                    createdById: userId,
+                    tenantId,
+                  }),
+                );
+              }
+            }
           }
         }
 
-        const newTax = Math.round(newSubtotal * taxRatio);
-        sale.subtotal = newSubtotal;
-        sale.taxAmount = newTax;
-        sale.discountAmount = discount;
-        sale.total = Math.max(0, newSubtotal - discount + newTax);
+        const naturalTotal = editedItems.reduce(
+          (sum, item) =>
+            sum +
+            this.taxService.calculateLine(
+              Number(item.unitPrice),
+              item.quantity,
+              0,
+              Number(item.taxRate),
+              ivaMode,
+            ).lineTotal,
+          0,
+        );
+        if (dto.total !== undefined && dto.total > naturalTotal + 0.01) {
+          throw new BadRequestException(
+            'El total no puede superar la suma de los productos. Ajusta sus precios unitarios.',
+          );
+        }
+        if (dto.total === undefined && discount > newSubtotal + 0.01) {
+          throw new BadRequestException(
+            'El descuento no puede superar el subtotal de la venta',
+          );
+        }
+        const discountPercent =
+          dto.total !== undefined
+            ? naturalTotal > 0
+              ? (1 - dto.total / naturalTotal) * 100
+              : 0
+            : newSubtotal > 0
+              ? (discount / newSubtotal) * 100
+              : 0;
+
+        const lineCalcs: LineCalculation[] = [];
+        for (const item of editedItems) {
+          const effectiveUnitPrice =
+            Number(item.unitPrice) * (1 - discountPercent / 100);
+          const minimumPrice = minimumPriceByVariant.get(item.variantId) || 0;
+          if (minimumPrice > 0 && effectiveUnitPrice + 0.0001 < minimumPrice) {
+            throw new BadRequestException(
+              `"${item.productName}" no puede venderse por debajo de $${minimumPrice.toLocaleString('es-CO')}`,
+            );
+          }
+          const calculation = this.taxService.calculateLine(
+            Number(item.unitPrice),
+            item.quantity,
+            discountPercent,
+            Number(item.taxRate),
+            ivaMode,
+          );
+          item.discountPercent = calculation.discountPercent;
+          item.taxAmount = calculation.taxAmount;
+          item.lineTotal = calculation.lineTotal;
+          if (item.isLeftover && settings?.leftoverCommissionEnabled) {
+            const value = Number(settings.leftoverCommissionValue) || 0;
+            item.commissionAmount =
+              settings.leftoverCommissionMode === 'percent'
+                ? roundMoney((calculation.lineTotal * value) / 100)
+                : value * item.quantity;
+          }
+          await saleItemRepo.save(item);
+          lineCalcs.push(calculation);
+        }
+        const totals = this.taxService.calculateSaleTotals(lineCalcs);
+        sale.subtotal = totals.subtotal;
+        sale.taxAmount = totals.taxAmount;
+        sale.discountAmount = totals.discountAmount;
+        sale.total = totals.total;
+      } else if (dto.total !== undefined) {
+        // Las facturas históricas importadas no tienen líneas. Se escala su
+        // composición para conservar subtotal/descuento/IVA como snapshots.
+        if (originalTotal > 0) {
+          const factor = dto.total / originalTotal;
+          sale.subtotal = roundMoney(Number(sale.subtotal) * factor);
+          sale.discountAmount = roundMoney(
+            Number(sale.discountAmount) * factor,
+          );
+          sale.taxAmount = roundMoney(Number(sale.taxAmount) * factor);
+        } else {
+          sale.subtotal = dto.total;
+          sale.discountAmount = 0;
+          sale.taxAmount = 0;
+        }
+        sale.total = dto.total;
       } else if (dto.discountAmount !== undefined) {
         const subtotal = Number(sale.subtotal);
         const tax = Number(sale.taxAmount);
+        if (dto.discountAmount > subtotal + 0.01) {
+          throw new BadRequestException(
+            'El descuento no puede superar el subtotal de la venta',
+          );
+        }
         sale.discountAmount = dto.discountAmount;
         sale.total = Math.max(0, subtotal - dto.discountAmount + tax);
       }
 
-      await saleRepo.save(sale);
-
-      // Sincronizar CxC (crédito) no pagada por completo con el nuevo total.
-      const ar = (sale.accountsReceivable || []).find((a) => !a.isFullyPaid);
-      if (ar) {
-        ar.totalAmount = sale.total;
-        await manager.getRepository(AccountsReceivable).save(ar);
+      // Reconciliar las relaciones monetarias. En crédito, los pagos normales
+      // se conservan y la diferencia pertenece a cartera. Sin crédito, los
+      // pagos se escalan proporcionalmente al total corregido.
+      const accounts = sale.accountsReceivable || [];
+      if (accounts.length > 1) {
+        throw new BadRequestException(
+          'La venta tiene más de una cuenta por cobrar y requiere revisión manual',
+        );
       }
+      const payments = sale.payments || [];
+      const paymentTotal = payments.reduce(
+        (sum, payment) => sum + Number(payment.amount),
+        0,
+      );
+      if (accounts.length === 1) {
+        const account = accounts[0];
+        const creditTotal = roundMoney(Number(sale.total) - paymentTotal);
+        const paidAmount = Number(account.paidAmount);
+        if (creditTotal < -0.01) {
+          throw new BadRequestException(
+            'El nuevo total no puede ser menor que los pagos ya registrados',
+          );
+        }
+        if (creditTotal + 0.01 < paidAmount) {
+          throw new BadRequestException(
+            `El nuevo saldo a crédito no puede ser menor que lo ya abonado ($${paidAmount.toLocaleString('es-CO')})`,
+          );
+        }
+        account.totalAmount = Math.max(0, creditTotal);
+        if (dto.clientId) account.clientId = dto.clientId;
+        const fullyPaid = paidAmount + 0.01 >= Number(account.totalAmount);
+        account.isFullyPaid = fullyPaid;
+        account.fullyPaidAt = fullyPaid
+          ? account.fullyPaidAt || new Date()
+          : (null as unknown as Date);
+        await manager.getRepository(AccountsReceivable).save(account);
+      } else if (
+        payments.length > 0 &&
+        Math.abs(originalTotal - Number(sale.total)) > 0.01
+      ) {
+        const paymentRepo = manager.getRepository(Payment);
+        let allocated = 0;
+        for (let index = 0; index < payments.length; index++) {
+          const payment = payments[index];
+          const amount =
+            index === payments.length - 1
+              ? roundMoney(Number(sale.total) - allocated)
+              : roundMoney(
+                  paymentTotal > 0
+                    ? (Number(sale.total) * Number(payment.amount)) /
+                        paymentTotal
+                    : 0,
+                );
+          allocated += amount;
+          payment.amount = amount;
+          if (payment.method === PaymentMethod.EFECTIVO) {
+            payment.receivedAmount = Math.max(
+              amount,
+              Number(payment.receivedAmount),
+            );
+            payment.changeAmount = roundMoney(
+              Number(payment.receivedAmount) - amount,
+            );
+          } else {
+            payment.receivedAmount = amount;
+            payment.changeAmount = 0;
+          }
+          await paymentRepo.save(payment);
+        }
+      }
+
+      await saleRepo.save(sale);
     });
     return this.findOne(id, tenantId);
   }

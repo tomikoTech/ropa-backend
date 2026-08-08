@@ -19,11 +19,17 @@ export class UpdateSaleItemDto {
   @IsNumber()
   @Min(1)
   quantity: number;
+
+  // Precio histórico corregido para esta línea. No cambia el precio del
+  // catálogo: actualiza únicamente el snapshot de la venta.
+  @IsNumber()
+  @Min(0)
+  unitPrice: number;
 }
 
-// Edición de una venta existente. Solo propiedades que NO afectan inventario
-// (los ítems/cantidades no se editan aquí). Al cambiar el descuento se recalcula
-// el total y se sincroniza la cuenta por cobrar si la venta es a crédito.
+// Edición de una venta existente. Los importes se recalculan dentro de una sola
+// transacción y se sincronizan con pagos/cartera para que ningún total quede
+// contradiciendo sus relaciones.
 export class UpdateSaleDto {
   @IsUUID()
   @IsOptional()
@@ -51,6 +57,14 @@ export class UpdateSaleDto {
   @Min(0)
   @IsOptional()
   discountAmount?: number;
+
+  // Total final corregido. En ventas con líneas se convierte en descuento
+  // proporcional para conservar la igualdad líneas = venta; en facturas
+  // históricas sin líneas actualiza directamente el snapshot monetario.
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  total?: number;
 
   // Lista COMPLETA de ítems (reemplaza la anterior). Revierte el inventario de
   // los ítems previos y aplica el de los nuevos. Recalcula subtotal/IVA/total.

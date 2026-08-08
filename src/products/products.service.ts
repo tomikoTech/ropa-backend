@@ -504,6 +504,7 @@ export class ProductsService {
       categoryIds?: string[];
       gender?: string;
       type?: string;
+      sort?: string;
     },
   ): Promise<{
     data: Product[];
@@ -542,7 +543,31 @@ export class ProductsService {
       );
     }
 
-    qb.orderBy('p.createdAt', 'DESC')
+    const stockQuantitySql = `(
+      SELECT COALESCE(SUM(stock_sort.quantity), 0)
+      FROM stock stock_sort
+      INNER JOIN product_variants variant_sort
+        ON variant_sort.id = stock_sort.variant_id
+      WHERE variant_sort.product_id = p.id
+        AND stock_sort.tenant_id = :tenantId
+    )`;
+    qb.addSelect(stockQuantitySql, 'inventory_quantity');
+    switch (opts.sort) {
+      case 'stock-asc':
+        qb.orderBy('inventory_quantity', 'ASC');
+        break;
+      case 'name-asc':
+        qb.orderBy('p.name', 'ASC');
+        break;
+      case 'name-desc':
+        qb.orderBy('p.name', 'DESC');
+        break;
+      case 'stock-desc':
+      default:
+        qb.orderBy('inventory_quantity', 'DESC');
+        break;
+    }
+    qb.addOrderBy('p.createdAt', 'DESC')
       .skip((page - 1) * limit)
       .take(limit);
 
@@ -819,7 +844,13 @@ export class ProductsService {
   async searchVariants(
     query: string,
     tenantId: string,
-    opts?: { limit?: number; offset?: number; type?: string },
+    opts?: {
+      limit?: number;
+      offset?: number;
+      type?: string;
+      sort?: string;
+      warehouseId?: string;
+    },
   ): Promise<ProductVariant[]> {
     // Límite configurable (para el catálogo del POS con "ver más"), con tope.
     const limit = Math.min(Math.max(Number(opts?.limit) || 20, 1), 200);
@@ -845,11 +876,32 @@ export class ProductsService {
       qb.andWhere('c.type = :type', { type: opts.type });
     }
 
-    return qb
-      .orderBy('p.name', 'ASC')
-      .addOrderBy('v.id', 'ASC')
-      .limit(limit)
-      .offset(offset)
-      .getMany();
+    const stockQuantitySql = `(
+      SELECT COALESCE(SUM(stock_sort.quantity), 0)
+      FROM stock stock_sort
+      WHERE stock_sort.variant_id = v.id
+        AND stock_sort.tenant_id = :tenantId
+        ${opts?.warehouseId ? 'AND stock_sort.warehouse_id = :sortWarehouseId' : ''}
+    )`;
+    if (opts?.warehouseId) {
+      qb.setParameter('sortWarehouseId', opts.warehouseId);
+    }
+    qb.addSelect(stockQuantitySql, 'inventory_quantity');
+    switch (opts?.sort) {
+      case 'stock-asc':
+        qb.orderBy('inventory_quantity', 'ASC');
+        break;
+      case 'name-desc':
+        qb.orderBy('p.name', 'DESC');
+        break;
+      case 'name-asc':
+        qb.orderBy('p.name', 'ASC');
+        break;
+      case 'stock-desc':
+      default:
+        qb.orderBy('inventory_quantity', 'DESC');
+        break;
+    }
+    return qb.addOrderBy('v.id', 'ASC').limit(limit).offset(offset).getMany();
   }
 }
