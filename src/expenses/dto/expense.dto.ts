@@ -5,9 +5,11 @@ import {
   IsString,
   IsNotEmpty,
   IsUUID,
+  IsIn,
   Min,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { PaymentMethod } from '../../common/enums/payment-method.enum.js';
 
 export class CreateExpenseCategoryDto {
   @ApiProperty({ example: 'Servicios públicos' })
@@ -42,10 +44,21 @@ export class CreateExpenseDto {
   @IsUUID()
   warehouseId?: string;
 
-  @ApiPropertyOptional({ example: 'EFECTIVO' })
+  @ApiPropertyOptional({
+    enum: [
+      PaymentMethod.EFECTIVO,
+      PaymentMethod.TARJETA,
+      PaymentMethod.TRANSFERENCIA,
+    ],
+    default: PaymentMethod.EFECTIVO,
+  })
   @IsOptional()
-  @IsString()
-  paymentMethod?: string;
+  @IsIn([
+    PaymentMethod.EFECTIVO,
+    PaymentMethod.TARJETA,
+    PaymentMethod.TRANSFERENCIA,
+  ])
+  paymentMethod?: PaymentMethod;
 
   @ApiPropertyOptional()
   @IsOptional()

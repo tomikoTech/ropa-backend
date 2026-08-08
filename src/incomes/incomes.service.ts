@@ -16,9 +16,15 @@ const NONE = '__none__';
 interface Bucket {
   ventas: number;
   otros: number;
+  egresos: number;
   balance: number;
 }
-const emptyBucket = (): Bucket => ({ ventas: 0, otros: 0, balance: 0 });
+const emptyBucket = (): Bucket => ({
+  ventas: 0,
+  otros: 0,
+  egresos: 0,
+  balance: 0,
+});
 
 @Injectable()
 export class IncomesService {
@@ -117,37 +123,45 @@ export class IncomesService {
     let saleDate = '';
     let arDate = '';
     let entryDate = '';
+    let expenseDate = '';
     if (from && to) {
       params.push(from, to);
       saleDate = ' AND s.created_at BETWEEN $2 AND $3';
       arDate = ' AND arp.created_at BETWEEN $2 AND $3';
       entryDate = ' AND e.created_at BETWEEN $2 AND $3';
+      expenseDate = ' AND ex.expense_date BETWEEN $2::date AND $3::date';
     }
 
     // VENTAS: pagos de ventas no anuladas, excluyendo CREDITO (aún no es dinero
     // recibido; entra cuando se abona).
-    const salesRows: { method: string; bankId: string | null; total: string }[] =
-      await this.dataSource.query(
-        `SELECT p.method, p.bank_id AS "bankId", SUM(p.amount)::numeric AS total
+    const salesRows: {
+      method: string;
+      bankId: string | null;
+      total: string;
+    }[] = await this.dataSource.query(
+      `SELECT p.method, p.bank_id AS "bankId", SUM(p.amount)::numeric AS total
          FROM payments p JOIN sales s ON s.id = p.sale_id
          WHERE p.tenant_id = $1 AND s.status <> 'CANCELLED' AND p.method <> 'CREDITO'${saleDate}
          GROUP BY p.method, p.bank_id`,
-        params,
-      );
+      params,
+    );
 
     // VENTAS: abonos a cuentas por cobrar (dinero recibido de ventas a crédito).
-    const abonoRows: { method: string; bankId: string | null; total: string }[] =
-      await this.dataSource.query(
-        `SELECT arp.method, arp.bank_id AS "bankId", SUM(arp.amount)::numeric AS total
+    const abonoRows: {
+      method: string;
+      bankId: string | null;
+      total: string;
+    }[] = await this.dataSource.query(
+      `SELECT arp.method, arp.bank_id AS "bankId", SUM(arp.amount)::numeric AS total
          FROM accounts_receivable_payments arp
          WHERE arp.tenant_id = $1${arDate}
          GROUP BY arp.method, arp.bank_id`,
-        params,
-      );
+      params,
+    );
 
     // Movimientos manuales.
     const entryRows: {
-      type: string;
+      type: IncomeType;
       method: string | null;
       bankId: string | null;
       targetMethod: string | null;
@@ -159,6 +173,22 @@ export class IncomesService {
               e.amount
        FROM income_entries e
        WHERE e.tenant_id = $1${entryDate}`,
+      params,
+    );
+
+    // EGRESOS: reducen el saldo del mismo método/banco del que salió el
+    // dinero. Los registros históricos sin método se consideran efectivo,
+    // que era el comportamiento implícito antes de exponer el campo en UI.
+    const expenseRows: {
+      method: string;
+      bankId: string | null;
+      total: string;
+    }[] = await this.dataSource.query(
+      `SELECT COALESCE(ex.payment_method, 'EFECTIVO') AS method,
+              ex.bank_id AS "bankId", SUM(ex.amount)::numeric AS total
+       FROM expenses ex
+       WHERE ex.tenant_id = $1${expenseDate}
+       GROUP BY COALESCE(ex.payment_method, 'EFECTIVO'), ex.bank_id`,
       params,
     );
 
@@ -178,6 +208,7 @@ export class IncomesService {
     let ventas = 0;
     let otros = 0;
     let ajustes = 0;
+    let egresos = 0;
 
     const addVentas = (bankId: string | null, method: string, n: number) => {
       ventas += n;
@@ -191,6 +222,17 @@ export class IncomesService {
 
     for (const r of salesRows) addVentas(r.bankId, r.method, Number(r.total));
     for (const r of abonoRows) addVentas(r.bankId, r.method, Number(r.total));
+
+    for (const expense of expenseRows) {
+      const amount = Number(expense.total);
+      egresos += amount;
+      const b = bank(expense.bankId);
+      b.egresos += amount;
+      b.balance -= amount;
+      const m = meth(expense.method);
+      m.egresos += amount;
+      m.balance -= amount;
+    }
 
     for (const e of entryRows) {
       const amt = Number(e.amount);
@@ -223,7 +265,8 @@ export class IncomesService {
         ventas,
         otros,
         ingresos: ventas + otros,
-        balance: ventas + otros + ajustes,
+        egresos,
+        balance: ventas + otros + ajustes - egresos,
       },
       byBank: Array.from(byBank.entries()).map(([key, v]) => ({
         bankId: key === NONE ? null : key,
@@ -231,6 +274,7 @@ export class IncomesService {
         ventas: v.ventas,
         otros: v.otros,
         ingresos: v.ventas + v.otros,
+        egresos: v.egresos,
         balance: v.balance,
       })),
       byMethod: Array.from(byMethod.entries()).map(([key, v]) => ({
@@ -239,6 +283,7 @@ export class IncomesService {
         ventas: v.ventas,
         otros: v.otros,
         ingresos: v.ventas + v.otros,
+        egresos: v.egresos,
         balance: v.balance,
       })),
     };

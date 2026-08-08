@@ -10,6 +10,8 @@ import { Expense } from './entities/expense.entity.js';
 import { ExpenseCategory } from './entities/expense-category.entity.js';
 import { PettyCash } from './entities/petty-cash.entity.js';
 import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
+import { Bank } from '../banks/entities/bank.entity.js';
+import { PaymentMethod } from '../common/enums/payment-method.enum.js';
 import {
   CreateExpenseDto,
   CreateExpenseCategoryDto,
@@ -32,6 +34,8 @@ export class ExpensesService {
     private readonly categoryRepo: Repository<ExpenseCategory>,
     @InjectRepository(PettyCash)
     private readonly pettyRepo: Repository<PettyCash>,
+    @InjectRepository(Bank)
+    private readonly bankRepo: Repository<Bank>,
   ) {}
 
   // ── Tipos de gasto ──
@@ -102,6 +106,7 @@ export class ExpensesService {
     userId: string,
     tenantId: string,
   ): Promise<Expense> {
+    const paymentMethod = dto.paymentMethod ?? PaymentMethod.EFECTIVO;
     if (dto.categoryId) {
       const category = await this.categoryRepo.findOne({
         where: { id: dto.categoryId, tenantId },
@@ -115,6 +120,29 @@ export class ExpensesService {
           `La caja menor "${petty.name}" solo tiene ${petty.balance} disponible.`,
         );
       }
+      if (paymentMethod !== PaymentMethod.EFECTIVO || dto.bankId) {
+        throw new BadRequestException(
+          'Un gasto de caja menor debe registrarse en efectivo y sin banco.',
+        );
+      }
+    }
+    if (paymentMethod === PaymentMethod.EFECTIVO && dto.bankId) {
+      throw new BadRequestException(
+        'Un gasto en efectivo no debe tener banco. Quita el banco o cambia la forma de pago.',
+      );
+    }
+    if (paymentMethod !== PaymentMethod.EFECTIVO && !dto.bankId) {
+      throw new BadRequestException(
+        'Selecciona el banco del que salió el dinero.',
+      );
+    }
+    if (dto.bankId) {
+      const bank = await this.bankRepo.findOne({
+        where: { id: dto.bankId, tenantId, isActive: true },
+      });
+      if (!bank) {
+        throw new NotFoundException('Banco no encontrado o inactivo');
+      }
     }
 
     return retryOnUniqueViolation(async () =>
@@ -125,11 +153,11 @@ export class ExpensesService {
           warehouseId: dto.warehouseId ?? null,
           description: dto.description.trim(),
           amount: dto.amount,
-          paymentMethod: dto.paymentMethod ?? null,
+          paymentMethod,
           bankId: dto.bankId ?? null,
           pettyCashId: dto.pettyCashId ?? null,
           expenseDate: dto.expenseDate ? new Date(dto.expenseDate) : new Date(),
-          notes: dto.notes ?? null,
+          notes: dto.notes?.trim() || null,
           createdById: userId,
           tenantId,
         }),

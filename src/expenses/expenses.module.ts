@@ -5,9 +5,12 @@ import { ExpenseCategory } from './entities/expense-category.entity.js';
 import { PettyCash } from './entities/petty-cash.entity.js';
 import { ExpensesService } from './expenses.service.js';
 import { ExpensesController } from './expenses.controller.js';
+import { Bank } from '../banks/entities/bank.entity.js';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Expense, ExpenseCategory, PettyCash])],
+  imports: [
+    TypeOrmModule.forFeature([Expense, ExpenseCategory, PettyCash, Bank]),
+  ],
   controllers: [ExpensesController],
   providers: [ExpensesService],
   exports: [ExpensesService],
