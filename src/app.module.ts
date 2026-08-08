@@ -34,6 +34,7 @@ import { QuotationsModule } from './quotations/quotations.module.js';
 import { ReservationsModule } from './reservations/reservations.module.js';
 import { CommonModule } from './common/common.module.js';
 import { UploadsModule } from './uploads/uploads.module.js';
+import { StreetModule } from './street/street.module.js';
 import { AuditInterceptor } from './audit/audit.interceptor.js';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard.js';
 import { AccessModule } from './access/access.module.js';
@@ -82,6 +83,7 @@ import { WarehouseScopeGuard } from './access/warehouse-scope.guard.js';
     CommonModule,
     UploadsModule,
     AccessModule,
+    StreetModule,
   ],
   providers: [
     {

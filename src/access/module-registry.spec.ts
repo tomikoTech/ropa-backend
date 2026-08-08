@@ -41,6 +41,7 @@ describe('catálogo de módulos', () => {
       'inventory/warehouses',
       'inventory/transfers',
       'inventory-counts',
+      'street',
       'reservations',
       'production',
       'suppliers',

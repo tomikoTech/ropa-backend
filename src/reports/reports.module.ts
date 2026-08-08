@@ -17,6 +17,7 @@ import { Warehouse } from '../inventory/entities/warehouse.entity.js';
 import { ReturnItem } from '../returns/entities/return-item.entity.js';
 import { Consignment } from '../consignments/entities/consignment.entity.js';
 import { Voucher } from '../vouchers/entities/voucher.entity.js';
+import { StreetDispatch } from '../street/entities/street-dispatch.entity.js';
 import { Expense } from '../expenses/entities/expense.entity.js';
 import { Bank } from '../banks/entities/bank.entity.js';
 import { User } from '../users/entities/user.entity.js';
@@ -56,6 +57,7 @@ import { MovementsReportService } from './data/movements-report.service.js';
       ReturnItem,
       Consignment,
       Voucher,
+      StreetDispatch,
       Expense,
       Bank,
       User,

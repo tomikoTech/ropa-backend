@@ -93,6 +93,14 @@ export const MODULES: ModuleDef[] = [
     hint: 'Bodegas, estanterías y stands',
   },
   { key: 'transfers', label: 'Traslados y préstamos', group: 'Inventario' },
+  {
+    key: 'street',
+    label: 'Patinadores y remisión rápida',
+    group: 'Inventario',
+    hint:
+      'Entregar mercancía para vender en la calle. "Editar" es cuadrar lo que ' +
+      'volvió (y genera la venta)',
+  },
   { key: 'inventory-counts', label: 'Conteos físicos', group: 'Inventario' },
   { key: 'reservations', label: 'Apartados', group: 'Inventario' },
   { key: 'production', label: 'Producción', group: 'Inventario' },
@@ -181,6 +189,7 @@ const ROUTE_MODULES: Record<string, string> = {
   'inventory/loans': 'transfers',
   inventory: 'inventory',
   'inventory-counts': 'inventory-counts',
+  street: 'street',
   'stock-units': 'inventory',
   labels: 'inventory',
 

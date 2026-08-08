@@ -8,6 +8,7 @@ import { InventoryCountLine } from '../../inventory/entities/inventory-count-lin
 import { ReturnItem } from '../../returns/entities/return-item.entity.js';
 import { Consignment } from '../../consignments/entities/consignment.entity.js';
 import { Voucher } from '../../vouchers/entities/voucher.entity.js';
+import { StreetDispatch } from '../../street/entities/street-dispatch.entity.js';
 import {
   int,
   localDaySql,
@@ -28,6 +29,7 @@ const MODES = [
   'devoluciones',
   'conteos',
   'consignaciones',
+  'patinadores',
   'bonos',
 ] as const;
 
@@ -61,6 +63,8 @@ export class MovementsReportService {
     private readonly consignmentRepo: Repository<Consignment>,
     @InjectRepository(Voucher)
     private readonly voucherRepo: Repository<Voucher>,
+    @InjectRepository(StreetDispatch)
+    private readonly dispatchRepo: Repository<StreetDispatch>,
   ) {}
 
   run(query: ReportQuery, tenantId: string): Promise<ReportResult> {
@@ -73,6 +77,8 @@ export class MovementsReportService {
         return this.counts(query, tenantId);
       case 'consignaciones':
         return this.consignments(query, tenantId);
+      case 'patinadores':
+        return this.streetDispatches(query, tenantId);
       case 'bonos':
         return this.vouchers(query, tenantId);
       default:
@@ -704,6 +710,175 @@ export class MovementsReportService {
       ],
       title: `Ventas de terceros ${query.from} a ${query.to}`,
       warnings: this.cap(raw.length, 'ventas'),
+    };
+  }
+
+  /**
+   * Despachos a patinadores: qué salió a la calle, qué volvió como plata, qué
+   * volvió como mercancía y **qué no volvió**.
+   *
+   * Es el "Despacho por patinador" del sistema anterior más su "Facturas
+   * externos app", en una sola tabla: allá son dos reportes y hay que cruzarlos
+   * a mano para saber si un patinador está quedando en deuda.
+   */
+  private async streetDispatches(
+    query: ReportQuery,
+    tenantId: string,
+  ): Promise<ReportResult> {
+    const qb = this.dispatchRepo
+      .createQueryBuilder('d')
+      .innerJoin('d.seller', 'ps')
+      .innerJoin('d.warehouse', 'w')
+      .innerJoin('street_dispatch_items', 'di', 'di.dispatch_id = d.id')
+      .leftJoin('sales', 's', 's.id = d.sale_id')
+      .where('d.tenant_id = :tenantId', { tenantId })
+      .andWhere(timestampRangeSql('d.created_at'), {
+        from: query.from,
+        to: query.to,
+      });
+
+    const warehouseId = query.uuid('warehouseId');
+    if (warehouseId)
+      qb.andWhere('d.warehouse_id = :warehouseId', { warehouseId });
+    const status = query.text('status');
+    if (status) qb.andWhere('d.status = :status', { status });
+    const search = query.text('search');
+    if (search) {
+      qb.andWhere(
+        '(ps.name ILIKE :q OR ps.code ILIKE :q OR d.dispatch_number ILIKE :q' +
+          ' OR di.product_name ILIKE :q)',
+        { q: `%${search}%` },
+      );
+    }
+
+    const raw = await qb
+      .select(localDaySql('d.created_at'), 'fecha')
+      .addSelect('d.dispatch_number', 'remision')
+      .addSelect('ps.name', 'patinador')
+      .addSelect('w.name', 'bodega')
+      .addSelect('d.status', 'estado')
+      .addSelect("COALESCE(s.sale_number, '—')", 'venta')
+      .addSelect('SUM(di.quantity)', 'despachado')
+      .addSelect('SUM(di.quantity_sold)', 'vendido')
+      .addSelect('SUM(di.quantity_returned)', 'devuelto')
+      .addSelect('SUM(di.quantity_sold * di.unit_price)', 'valorVendido')
+      .addSelect('SUM(di.quantity_sold * di.unit_cost)', 'costoVendido')
+      .addSelect(
+        'SUM((di.quantity - di.quantity_sold - di.quantity_returned) * di.unit_price)',
+        'valorFaltante',
+      )
+      .groupBy('d.id')
+      .addGroupBy('d.dispatch_number')
+      .addGroupBy('ps.name')
+      .addGroupBy('w.name')
+      .addGroupBy('d.status')
+      .addGroupBy('s.sale_number')
+      .addGroupBy('d.created_at')
+      .orderBy('d.created_at', 'DESC')
+      .limit(MAX_ROWS)
+      .getRawMany<RawRow>();
+
+    const label: Record<string, string> = {
+      OPEN: 'En la calle',
+      SETTLED: 'Cuadrada',
+      CANCELLED: 'Anulada',
+    };
+
+    const rows = raw.map((r) => {
+      const despachado = int(r.despachado);
+      const vendido = int(r.vendido);
+      const devuelto = int(r.devuelto);
+      const valorVendido = money(r.valorVendido);
+      const costoVendido = money(r.costoVendido);
+      return {
+        fecha: String(r.fecha ?? ''),
+        remision: String(r.remision ?? ''),
+        patinador: String(r.patinador ?? ''),
+        bodega: String(r.bodega ?? ''),
+        estado: label[String(r.estado)] ?? String(r.estado),
+        venta: String(r.venta ?? '—'),
+        despachado,
+        vendido,
+        devuelto,
+        faltante: despachado - vendido - devuelto,
+        valorVendido,
+        costoVendido,
+        utilidad: money(valorVendido - costoVendido),
+        valorFaltante: money(r.valorFaltante),
+      };
+    });
+
+    const enCalle = rows.filter((r) => r.estado === 'En la calle');
+    const warnings = this.cap(raw.length, 'remisiones');
+    const conFaltante = rows.filter(
+      (r) => r.estado === 'Cuadrada' && r.faltante > 0,
+    );
+    if (conFaltante.length) {
+      warnings.push(
+        `${conFaltante.length} remisión(es) cuadradas quedaron con faltante ` +
+          `(mercancía que no volvió ni como plata ni como devolución).`,
+      );
+    }
+
+    return {
+      columns: [
+        { key: 'fecha', label: 'Fecha', type: 'date' },
+        { key: 'remision', label: 'Remisión', type: 'text' },
+        { key: 'patinador', label: 'Patinador', type: 'text' },
+        { key: 'bodega', label: 'Bodega', type: 'text' },
+        { key: 'estado', label: 'Estado', type: 'text' },
+        { key: 'venta', label: 'Venta generada', type: 'text' },
+        { key: 'despachado', label: 'Despachado', type: 'number' },
+        { key: 'vendido', label: 'Vendido', type: 'number' },
+        { key: 'devuelto', label: 'Devuelto', type: 'number' },
+        {
+          key: 'faltante',
+          label: 'Faltante',
+          type: 'number',
+          hint: 'No volvió ni como plata ni como mercancía',
+        },
+        { key: 'valorVendido', label: 'Valor vendido', type: 'money' },
+        { key: 'costoVendido', label: 'Costo', type: 'money' },
+        { key: 'utilidad', label: 'Utilidad', type: 'money' },
+        { key: 'valorFaltante', label: 'Valor del faltante', type: 'money' },
+      ],
+      rows,
+      totals: [
+        {
+          key: 'remisiones',
+          label: 'Remisiones',
+          type: 'number',
+          value: rows.length,
+        },
+        {
+          key: 'enCalle',
+          label: 'En la calle',
+          type: 'number',
+          value: enCalle.length,
+          hint: 'Sin cuadrar todavía',
+        },
+        {
+          key: 'valorVendido',
+          label: 'Vendido en calle',
+          type: 'money',
+          value: money(rows.reduce((s, r) => s + r.valorVendido, 0)),
+        },
+        {
+          key: 'utilidad',
+          label: 'Utilidad',
+          type: 'money',
+          value: money(rows.reduce((s, r) => s + r.utilidad, 0)),
+        },
+        {
+          key: 'valorFaltante',
+          label: 'Faltante',
+          type: 'money',
+          value: money(rows.reduce((s, r) => s + r.valorFaltante, 0)),
+          hint: 'Valorado al precio de calle',
+        },
+      ],
+      title: `Despachos a patinadores ${query.from} a ${query.to}`,
+      warnings,
     };
   }
 

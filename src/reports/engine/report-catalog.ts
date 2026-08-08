@@ -16,12 +16,6 @@ import type { ReportDefinition, ReportFilterDef } from './report-types.js';
 /** Reportes del sistema anterior que hoy no se pueden replicar, y por qué. */
 export const UNCOVERED_LEGACY_REPORTS: { name: string; reason: string }[] = [
   {
-    name: 'Despacho por patinador · Facturas externos app',
-    reason:
-      'Los patinadores (vendedores de calle con carnet) son de la Fase 6, que ' +
-      'está pendiente. Lo más cercano hoy es Movimientos → Consignaciones.',
-  },
-  {
     name: 'Despacho por impulsador',
     reason:
       'No existe la figura de impulsador ni la atribución de venta por línea ' +
@@ -374,11 +368,15 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       'Remisiones sin recibir',
       'Ventas internas',
       'Verificación de inventario',
+      'Despacho por patinador',
+      'Facturas externos app',
       'Descuentos (bonos)',
     ],
     notes: [
       'Un ajuste negativo es una baja o una merma; el motivo es lo que se ' +
         'escribió al hacerlo.',
+      'En Despachos a patinadores, el "faltante" es lo que no volvió ni como ' +
+        'plata ni como mercancía: está valorado al precio de calle.',
     ],
     filters: [
       {
@@ -392,6 +390,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
           { value: 'devoluciones', label: 'Devoluciones de venta' },
           { value: 'conteos', label: 'Conteos físicos' },
           { value: 'consignaciones', label: 'Ventas de terceros' },
+          { value: 'patinadores', label: 'Despachos a patinadores' },
           { value: 'bonos', label: 'Bonos y cupones' },
         ],
       },

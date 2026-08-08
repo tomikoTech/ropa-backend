@@ -388,11 +388,16 @@ describe('Reportes parametrizables (e2e)', () => {
   it('los totales no dependen de las filas que se muestran', async () => {
     // El total de "Vendido" agrupando por día tiene que coincidir con el de
     // agrupar por producto: son la misma plata contada de otra forma.
+    // Acotado a la bodega de esta suite a propósito: son dos consultas en dos
+    // momentos, y sin el filtro cualquier otra suite que cree una venta en medio
+    // hace fallar la comparación por el valor de esa venta. Lo que se comprueba
+    // es la coherencia del reporte, no que la base esté quieta.
     const [porDia, porProducto] = await Promise.all(
       ['dia', 'producto'].map((g) =>
         request(app.getHttpServer())
           .get(
-            `/api/reports/run/utilidad?groupBy=${g}&from=2020-01-01&to=${today()}`,
+            `/api/reports/run/utilidad?groupBy=${g}&from=2020-01-01` +
+              `&to=${today()}&warehouseId=${warehouseId}`,
           )
           .set(auth())
           .expect(200),

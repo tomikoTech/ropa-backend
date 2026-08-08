@@ -126,6 +126,8 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       inventory: R,
       // Necesita la lista de bodegas: el POS pide en cuál se está vendiendo.
       warehouses: R,
+      // Ve lo que hay en la calle, pero despachar no es cosa del cajero.
+      street: R,
     }),
   },
   {
@@ -139,6 +141,9 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       warehouses: RCE,
       transfers: RCE,
       'inventory-counts': RCE,
+      // Es quien entrega la mercancía a los patinadores y quien la recibe de
+      // vuelta.
+      street: RCE,
       purchases: RE,
       suppliers: R,
       production: RCE,
