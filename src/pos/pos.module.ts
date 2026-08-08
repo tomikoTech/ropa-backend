@@ -18,6 +18,8 @@ import { TaxService } from './services/tax.service.js';
 import { InvoiceService } from './services/invoice.service.js';
 import { ReceiptService } from './services/receipt.service.js';
 import { ClientsModule } from '../clients/clients.module.js';
+import { Promoter } from '../promoters/promoter.entity.js';
+import { PurchaseBoxLine } from '../purchases/entities/purchase-box-line.entity.js';
 
 @Module({
   imports: [
@@ -33,6 +35,8 @@ import { ClientsModule } from '../clients/clients.module.js';
       AccountsReceivablePayment,
       StoreSettings,
       Reservation,
+      Promoter,
+      PurchaseBoxLine,
     ]),
     ClientsModule,
   ],

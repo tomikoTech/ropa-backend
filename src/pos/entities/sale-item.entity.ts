@@ -9,6 +9,7 @@ import {
 import { Sale } from './sale.entity.js';
 import { ProductVariant } from '../../products/entities/product-variant.entity.js';
 import { TenantAwareEntity } from '../../common/entities/tenant-aware.entity.js';
+import { Promoter } from '../../promoters/promoter.entity.js';
 
 @Entity('sale_items')
 export class SaleItem extends TenantAwareEntity {
@@ -28,6 +29,17 @@ export class SaleItem extends TenantAwareEntity {
 
   @Column({ name: 'variant_id' })
   variantId: string;
+
+  @ManyToOne(() => Promoter, { nullable: true, onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'promoter_id' })
+  promoter: Promoter | null;
+
+  @Column({ name: 'promoter_id', type: 'uuid', nullable: true })
+  promoterId: string | null;
+
+  /** Snapshot: renombrar al impulsador no reescribe ventas históricas. */
+  @Column({ name: 'promoter_name', type: 'varchar', nullable: true })
+  promoterName: string | null;
 
   // Snapshot fields — preserve data at time of sale
   @Column({ name: 'product_name' })

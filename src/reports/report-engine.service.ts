@@ -172,12 +172,15 @@ export class ReportEngineService {
       })),
       saleChannels: Object.values(SaleChannel).map((c) => ({
         value: c,
-        label:
-          c === SaleChannel.POS
-            ? 'Punto de venta'
-            : c === SaleChannel.WEB
-              ? 'Tienda online'
-              : 'WhatsApp',
+        label: (
+          {
+            [SaleChannel.POS]: 'En local',
+            [SaleChannel.WEB]: 'Tienda online',
+            [SaleChannel.WHATSAPP]: 'Difusión WhatsApp',
+            [SaleChannel.INSTAGRAM]: 'Instagram',
+            [SaleChannel.CALLE]: 'Calle',
+          } as Record<SaleChannel, string>
+        )[c],
       })),
     };
   }

@@ -8,11 +8,17 @@ import {
   StockUnitStatus,
 } from '../../inventory/entities/stock-unit.entity.js';
 import { Stock } from '../../inventory/entities/stock.entity.js';
+import { PurchaseBoxLine } from '../../purchases/entities/purchase-box-line.entity.js';
 
 export interface ScanResult {
   /** `UNIT` = bulto etiquetado; `VARIANT` = producto suelto de siempre. */
   source: 'STOCK_UNIT' | 'VARIANT';
   variantId: string | null;
+  productId: string;
+  sku: string;
+  categoryId: string | null;
+  taxRate: number;
+  imageUrl: string | null;
   productName: string;
   size: string;
   color: string;
@@ -29,6 +35,8 @@ export interface ScanResult {
   /** Existencias disponibles (para productos sueltos). */
   available: number | null;
   warehouseId: string | null;
+  /** Precio mínimo por unidad; null = sin restricción. */
+  minimumSalePrice: number | null;
 }
 
 /**
@@ -48,6 +56,8 @@ export class ScanService {
     private readonly unitRepo: Repository<StockUnit>,
     @InjectRepository(Stock)
     private readonly stockRepo: Repository<Stock>,
+    @InjectRepository(PurchaseBoxLine)
+    private readonly boxLineRepo: Repository<PurchaseBoxLine>,
   ) {}
 
   async resolve(barcode: string, tenantId: string): Promise<ScanResult> {
@@ -66,10 +76,22 @@ export class ScanService {
           this.explainUnavailable(unit.status, unit.kind),
         );
       }
-      const basePrice = Number(unit.product?.basePrice ?? 0);
+      const purchaseLine = unit.purchaseBoxLineId
+        ? await this.boxLineRepo.findOne({
+            where: { id: unit.purchaseBoxLineId, tenantId },
+          })
+        : null;
+      const basePrice = Number(
+        purchaseLine?.salePrice ?? unit.product?.basePrice ?? 0,
+      );
       return {
         source: 'STOCK_UNIT',
         variantId: unit.variantId ?? unit.variant?.id ?? null,
+        productId: unit.productId,
+        sku: unit.variant?.sku ?? unit.barcode,
+        categoryId: unit.product?.categoryId ?? null,
+        taxRate: Number(unit.product?.taxRate ?? 19),
+        imageUrl: unit.product?.imageUrl ?? null,
         productName: unit.product?.name ?? 'Producto',
         size: unit.size?.name ?? '',
         color: unit.color?.name ?? '',
@@ -80,6 +102,9 @@ export class ScanService {
         kind: unit.kind,
         available: null,
         warehouseId: unit.warehouseId,
+        minimumSalePrice: unit.product?.minimumSalePrice
+          ? Number(unit.product.minimumSalePrice)
+          : null,
       };
     }
 
@@ -101,6 +126,11 @@ export class ScanService {
     return {
       source: 'VARIANT',
       variantId: variant.id,
+      productId: variant.productId,
+      sku: variant.sku,
+      categoryId: variant.product?.categoryId ?? null,
+      taxRate: Number(variant.product?.taxRate ?? 19),
+      imageUrl: variant.product?.imageUrl ?? null,
       productName: variant.product?.name ?? 'Producto',
       size: variant.sizeName,
       color: variant.colorName,
@@ -112,6 +142,9 @@ export class ScanService {
       kind: null,
       available,
       warehouseId: stocks[0]?.warehouseId ?? null,
+      minimumSalePrice: variant.product?.minimumSalePrice
+        ? Number(variant.product.minimumSalePrice)
+        : null,
     };
   }
 

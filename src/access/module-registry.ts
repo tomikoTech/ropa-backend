@@ -167,6 +167,7 @@ const ROUTE_MODULES: Record<string, string> = {
   'pos/accounts-receivable': 'accounts-receivable',
   'pos/clients': 'clients',
   pos: 'sales',
+  promoters: 'sales',
 
   // La búsqueda del catálogo es la que usa el POS para saber qué vender, así
   // que pertenece a Ventas y no a Productos: un cajero tiene que poder

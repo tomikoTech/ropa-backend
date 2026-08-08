@@ -27,6 +27,10 @@ export class SaleItemDto {
   @IsOptional()
   stockUnitId?: string;
 
+  @IsUUID()
+  @IsOptional()
+  promoterId?: string;
+
   @IsNumber()
   @Min(1)
   quantity: number;

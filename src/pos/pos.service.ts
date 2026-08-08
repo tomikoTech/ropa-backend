@@ -32,6 +32,7 @@ import { SaleChannel } from '../common/enums/sale-channel.enum.js';
 import { PaymentMethod } from '../common/enums/payment-method.enum.js';
 import { MovementType } from '../common/enums/movement-type.enum.js';
 import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
+import { Promoter } from '../promoters/promoter.entity.js';
 
 @Injectable()
 export class PosService {
@@ -128,10 +129,24 @@ export class PosService {
           lineCalc: LineCalculation;
           /** Bulto etiquetado del que salió la línea, si vino de escanearlo. */
           stockUnitId?: string;
+          promoter: Promoter | null;
         }[] = [];
 
         // Batch load all stocks for requested variants (1 query instead of N)
         const allVariantIds = dto.items.map((i) => i.variantId);
+        const promoterIds = [
+          ...new Set(
+            dto.items
+              .map((i) => i.promoterId)
+              .filter((id): id is string => !!id),
+          ),
+        ];
+        const promoters = promoterIds.length
+          ? await manager.getRepository(Promoter).find({
+              where: { id: In(promoterIds), tenantId, isActive: true },
+            })
+          : [];
+        const promotersById = new Map(promoters.map((p) => [p.id, p]));
         const allStocks = await stockRepo.find({
           where: { variantId: In(allVariantIds), tenantId },
         });
@@ -169,6 +184,14 @@ export class PosService {
         }
 
         for (const item of dto.items) {
+          const promoter = item.promoterId
+            ? promotersById.get(item.promoterId)
+            : undefined;
+          if (item.promoterId && !promoter) {
+            throw new BadRequestException(
+              'El impulsador elegido no existe o está inactivo. Actualiza la lista e intenta de nuevo.',
+            );
+          }
           const variant = await variantRepo.findOne({
             where: { id: item.variantId },
             relations: ['product'],
@@ -228,6 +251,14 @@ export class PosService {
               : defaultPrice;
           const taxRate = effectiveTaxRate;
           const discountPercent = item.discountPercent || 0;
+          const minimumPrice = Number(variant.product.minimumSalePrice) || 0;
+          const effectiveUnitPrice = unitPrice * (1 - discountPercent / 100);
+          if (minimumPrice > 0 && effectiveUnitPrice + 0.0001 < minimumPrice) {
+            throw new BadRequestException(
+              `"${variant.product.name}" no puede venderse por debajo de $${minimumPrice.toLocaleString('es-CO')} ` +
+                `(precio efectivo enviado: $${Math.round(effectiveUnitPrice).toLocaleString('es-CO')}).`,
+            );
+          }
 
           const lineCalc = this.taxService.calculateLine(
             unitPrice,
@@ -245,6 +276,7 @@ export class PosService {
             discountPercent,
             lineCalc,
             stockUnitId: item.stockUnitId,
+            promoter: promoter ?? null,
           });
         }
 
@@ -357,6 +389,7 @@ export class PosService {
             const unitRepo = manager.getRepository(StockUnit);
             const unit = await unitRepo.findOne({
               where: { id: data.stockUnitId, tenantId },
+              lock: { mode: 'pessimistic_write' },
             });
             if (!unit) {
               throw new NotFoundException('El bulto escaneado no existe');
@@ -364,6 +397,11 @@ export class PosService {
             if (unit.status !== StockUnitStatus.IN_STOCK) {
               throw new BadRequestException(
                 `El bulto ${unit.barcode} ya no está disponible para la venta.`,
+              );
+            }
+            if (Number(unit.quantity) !== data.quantity) {
+              throw new BadRequestException(
+                `El bulto ${unit.barcode} se vende completo: contiene ${unit.quantity} unidades.`,
               );
             }
             soldUnit = unit;
@@ -386,6 +424,8 @@ export class PosService {
             quantity: data.quantity,
             unitPrice: data.lineCalc.unitPrice,
             unitCost,
+            promoterId: data.promoter?.id ?? null,
+            promoterName: data.promoter?.name ?? null,
             discountPercent: data.discountPercent,
             taxRate: data.lineCalc.taxRate,
             taxAmount: data.lineCalc.taxAmount,

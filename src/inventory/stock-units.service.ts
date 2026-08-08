@@ -4,7 +4,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import {
   StockUnit,
   StockUnitKind,
@@ -94,6 +94,23 @@ export class StockUnitsService {
       this.dataSource.transaction(async (m) => {
         const units: StockUnit[] = [];
         const today = new Date();
+        // Una caja contiene varias tallas, pero la venta necesita una variante
+        // para convivir con el stock agregado. Usa la primera variante activa
+        // del mismo producto/color (el detalle real sigue en la caja/curva).
+        const variant = await m.getRepository(ProductVariant).findOne({
+          where: {
+            productId: line.productId,
+            ...(line.colorId ? { colorId: line.colorId } : {}),
+            tenantId,
+            isActive: true,
+          },
+          order: { createdAt: 'ASC' },
+        });
+        if (!variant) {
+          throw new BadRequestException(
+            'El producto no tiene una variante activa compatible con el color de la caja.',
+          );
+        }
 
         for (let i = 0; i < toReceive; i++) {
           const sequence = line.boxesReceived + i + 1;
@@ -109,6 +126,7 @@ export class StockUnitsService {
               kind: StockUnitKind.BOX,
               status: StockUnitStatus.IN_STOCK,
               productId: line.productId,
+              variantId: variant.id,
               colorId: line.colorId,
               sizeId: null,
               warehouseId,
@@ -134,7 +152,7 @@ export class StockUnitsService {
         await this.applyStockDelta(
           m,
           {
-            variantId: line.productId,
+            variantId: variant.id,
             warehouseId,
             quantity: toReceive * line.unitsPerBox,
             userId,
@@ -160,40 +178,85 @@ export class StockUnitsService {
     unitId: string,
     tenantId: string,
   ): Promise<{ parent: StockUnit; units: StockUnit[] }> {
-    const box = await this.unitRepo.findOne({
-      where: { id: unitId, tenantId },
-    });
-    if (!box) throw new NotFoundException('Bulto no encontrado');
-    if (box.kind !== StockUnitKind.BOX) {
-      throw new BadRequestException('Solo se pueden abrir cajas.');
-    }
-    if (box.status !== StockUnitStatus.IN_STOCK) {
-      throw new BadRequestException(
-        'Solo se puede abrir una caja que esté en inventario.',
-      );
-    }
-
-    // Las tallas salen de la curva del renglón de compra del que vino la caja.
-    const line = box.purchaseBoxLineId
-      ? await this.boxLineRepo.findOne({
-          where: { id: box.purchaseBoxLineId, tenantId },
-        })
-      : null;
-    const curveItems = line?.sizeCurveId
-      ? await this.curveItemRepo.find({
-          where: { curveId: line.sizeCurveId, tenantId },
-        })
-      : [];
-
-    if (curveItems.length === 0) {
-      throw new BadRequestException(
-        'La caja no tiene curva de tallas asociada, así que no se sabe qué tallas contiene. ' +
-          'Asigna una curva al renglón de compra antes de abrirla.',
-      );
-    }
-
     return retryOnUniqueViolation(async () =>
       this.dataSource.transaction(async (m) => {
+        const unitRepo = m.getRepository(StockUnit);
+        const box = await unitRepo.findOne({
+          where: { id: unitId, tenantId },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!box) throw new NotFoundException('Bulto no encontrado');
+        if (box.kind !== StockUnitKind.BOX) {
+          throw new BadRequestException('Solo se pueden abrir cajas.');
+        }
+        if (box.status !== StockUnitStatus.IN_STOCK) {
+          throw new BadRequestException(
+            'Solo se puede abrir una caja que esté en inventario.',
+          );
+        }
+        if (!box.variantId) {
+          throw new BadRequestException(
+            'La caja no tiene una variante asociada. Vuelve a recibirla o ejecuta la migración de F5.',
+          );
+        }
+
+        // Las tallas salen de la curva del renglón de compra del que vino la caja.
+        const line = box.purchaseBoxLineId
+          ? await m.getRepository(PurchaseBoxLine).findOne({
+              where: { id: box.purchaseBoxLineId, tenantId },
+            })
+          : null;
+        const curveItems = line?.sizeCurveId
+          ? await m.getRepository(SizeCurveItem).find({
+              where: { curveId: line.sizeCurveId, tenantId },
+            })
+          : [];
+        if (curveItems.length === 0) {
+          throw new BadRequestException(
+            'La caja no tiene curva de tallas asociada, así que no se sabe qué tallas contiene. ' +
+              'Asigna una curva al renglón de compra antes de abrirla.',
+          );
+        }
+        const curveQuantity = curveItems.reduce(
+          (sum, item) => sum + item.quantity,
+          0,
+        );
+        if (curveQuantity !== box.quantity) {
+          throw new BadRequestException(
+            `La curva reparte ${curveQuantity} unidades pero la caja contiene ${box.quantity}. Corrige el renglón antes de abrirla.`,
+          );
+        }
+
+        const variantRepo = m.getRepository(ProductVariant);
+        const boxVariant = await variantRepo.findOne({
+          where: { id: box.variantId, tenantId },
+        });
+        const targetColorId = box.colorId ?? boxVariant?.colorId ?? null;
+        const variants = await variantRepo.find({
+          where: {
+            productId: box.productId,
+            tenantId,
+            isActive: true,
+            sizeId: In(curveItems.map((item) => item.sizeId)),
+            ...(targetColorId ? { colorId: targetColorId } : {}),
+          },
+          order: { createdAt: 'ASC' },
+        });
+        const variantBySize = new Map<string, ProductVariant>();
+        for (const variant of variants) {
+          if (variant.sizeId && !variantBySize.has(variant.sizeId)) {
+            variantBySize.set(variant.sizeId, variant);
+          }
+        }
+        const missingSize = curveItems.find(
+          (item) => !variantBySize.has(item.sizeId),
+        );
+        if (missingSize) {
+          throw new BadRequestException(
+            'Falta una variante activa para una de las tallas de la curva y el color de la caja. Créala antes de abrir el bulto.',
+          );
+        }
+
         const units: StockUnit[] = [];
         const base = box.barcode.slice(0, 16);
 
@@ -207,16 +270,18 @@ export class StockUnitsService {
         );
 
         for (const item of curveItems) {
+          const variant = variantBySize.get(item.sizeId)!;
           for (let i = 0; i < item.quantity; i++) {
             const body = base.slice(0, 13) + String(sequence).padStart(3, '0');
             sequence++;
             units.push(
-              m.getRepository(StockUnit).create({
+              unitRepo.create({
                 barcode: withCheckDigit(body),
                 kind: StockUnitKind.UNIT,
                 status: StockUnitStatus.IN_STOCK,
                 productId: box.productId,
-                colorId: box.colorId,
+                variantId: variant.id,
+                colorId: targetColorId,
                 sizeId: item.sizeId,
                 warehouseId: box.warehouseId,
                 standId: box.standId,
@@ -230,12 +295,65 @@ export class StockUnitsService {
           }
         }
 
-        const saved = await m.getRepository(StockUnit).save(units);
-        await m
-          .getRepository(StockUnit)
-          .update({ id: box.id, tenantId }, { status: StockUnitStatus.SPLIT });
+        // La caja cerrada vive en el agregado de una variante equivalente. Al
+        // abrirla, redistribuye esas mismas unidades entre sus tallas reales.
+        const targetQuantities = new Map<string, number>();
+        for (const item of curveItems) {
+          const variantId = variantBySize.get(item.sizeId)!.id;
+          targetQuantities.set(
+            variantId,
+            (targetQuantities.get(variantId) ?? 0) + item.quantity,
+          );
+        }
+        const stockRepo = m.getRepository(Stock);
+        const affectedVariantIds = [
+          ...new Set([box.variantId, ...targetQuantities.keys()]),
+        ];
+        const stocks = await stockRepo.find({
+          where: {
+            variantId: In(affectedVariantIds),
+            warehouseId: box.warehouseId,
+            tenantId,
+          },
+          lock: { mode: 'pessimistic_write' },
+        });
+        const stockByVariant = new Map(
+          stocks.map((stock) => [stock.variantId, stock]),
+        );
+        const sourceStock = stockByVariant.get(box.variantId);
+        if (!sourceStock || Number(sourceStock.quantity) < box.quantity) {
+          throw new BadRequestException(
+            'El stock agregado de la caja no alcanza para abrirla. Corrige el inventario antes de continuar.',
+          );
+        }
+        const deltas = new Map<string, number>([
+          [box.variantId, -box.quantity],
+        ]);
+        for (const [variantId, quantity] of targetQuantities) {
+          deltas.set(variantId, (deltas.get(variantId) ?? 0) + quantity);
+        }
+        for (const [variantId, delta] of deltas) {
+          let stock = stockByVariant.get(variantId);
+          if (!stock) {
+            stock = stockRepo.create({
+              variantId,
+              warehouseId: box.warehouseId,
+              quantity: 0,
+              tenantId,
+            });
+          }
+          stock.quantity = Number(stock.quantity) + delta;
+          await stockRepo.save(stock);
+        }
 
-        // El inventario agregado no cambia: las mismas unidades, ahora sueltas.
+        const saved = await unitRepo.save(units);
+        await unitRepo.update(
+          { id: box.id, tenantId },
+          { status: StockUnitStatus.SPLIT },
+        );
+
+        // El total agregado no cambia; solo deja de estar concentrado en la
+        // variante equivalente de la caja y pasa a las tallas de la curva.
         return {
           parent: { ...box, status: StockUnitStatus.SPLIT },
           units: saved,
@@ -321,10 +439,10 @@ export class StockUnitsService {
     },
     type: MovementType,
   ): Promise<void> {
-    const variant = await m
-      .getRepository(ProductVariant)
-      .findOne({ where: { productId: params.variantId } });
-    if (!variant) return; // producto sin variantes: no hay agregado que tocar
+    const variant = await m.getRepository(ProductVariant).findOne({
+      where: { id: params.variantId, tenantId: params.tenantId },
+    });
+    if (!variant) return;
 
     const stockRepo = m.getRepository(Stock);
     let stock = await stockRepo.findOne({

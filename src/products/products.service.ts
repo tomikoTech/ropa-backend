@@ -410,6 +410,7 @@ export class ProductsService {
         basePrice: dto.basePrice,
         costPrice: dto.costPrice ?? 0,
         wholesalePrice: dto.wholesalePrice ?? null,
+        minimumSalePrice: dto.minimumSalePrice ?? null,
         gender: dto.gender,
         categoryId: dto.categoryId,
         brand: dto.brand?.trim() || undefined,
@@ -595,6 +596,8 @@ export class ProductsService {
     if (dto.costPrice !== undefined) product.costPrice = dto.costPrice;
     if (dto.wholesalePrice !== undefined)
       product.wholesalePrice = dto.wholesalePrice ?? null;
+    if (dto.minimumSalePrice !== undefined)
+      product.minimumSalePrice = dto.minimumSalePrice ?? null;
     if (dto.gender !== undefined) product.gender = dto.gender;
     if (dto.categoryId !== undefined)
       product.categoryId = dto.categoryId as string;

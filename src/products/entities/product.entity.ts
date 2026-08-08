@@ -57,6 +57,16 @@ export class Product extends TenantAwareEntity {
   })
   wholesalePrice: number | null;
 
+  /** Precio efectivo mínimo permitido en POS. null = sin restricción. */
+  @Column({
+    name: 'minimum_sale_price',
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+    nullable: true,
+  })
+  minimumSalePrice: number | null;
+
   @Column({ type: 'enum', enum: Gender, default: Gender.UNISEX })
   gender: Gender;
 

@@ -60,6 +60,15 @@ export class CreateProductDto {
   @Min(0)
   wholesalePrice?: number;
 
+  @ApiPropertyOptional({
+    example: 35000,
+    description: 'Precio efectivo mínimo permitido al vender',
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  minimumSalePrice?: number;
+
   @ApiPropertyOptional({ enum: Gender, default: Gender.UNISEX })
   @IsOptional()
   @IsEnum(Gender)

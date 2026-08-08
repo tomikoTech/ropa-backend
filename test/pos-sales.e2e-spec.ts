@@ -33,6 +33,7 @@ describe('POS Sales & Accounts Receivable (e2e)', () => {
         name: `E2E Sale Product ${uniqueSuffix}`,
         basePrice: 50000,
         costPrice: 25000,
+        minimumSalePrice: 40000,
         taxRate: 19,
         variants: [
           { size: 'M', color: 'Negro' },
@@ -158,6 +159,48 @@ describe('POS Sales & Accounts Receivable (e2e)', () => {
     expect(warehouseStock).toBeDefined();
     // Started with 10, sold 2 → should be 8
     expect(warehouseStock.quantity).toBe(8);
+  });
+
+  it('rechaza en servidor un precio efectivo inferior al mínimo', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/pos/sales')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        warehouseId,
+        items: [{ variantId: variant1Id, quantity: 1, unitPrice: 39999 }],
+        payments: [{ method: 'EFECTIVO', amount: 50000 }],
+      });
+    expect(res.status).toBe(400);
+    expect(String(res.body.message)).toMatch(/no puede venderse por debajo/i);
+  });
+
+  it('guarda canal Instagram e impulsador como snapshot por línea', async () => {
+    const promoter = await request(app.getHttpServer())
+      .post('/api/promoters')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: `Impulsador E2E ${uniqueSuffix}` })
+      .expect(201);
+
+    const sale = await request(app.getHttpServer())
+      .post('/api/pos/sales')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        warehouseId,
+        saleChannel: 'INSTAGRAM',
+        items: [
+          {
+            variantId: variant2Id,
+            quantity: 1,
+            promoterId: promoter.body.id,
+          },
+        ],
+        payments: [{ method: 'EFECTIVO', amount: 50000 }],
+      })
+      .expect(201);
+
+    expect(sale.body.saleChannel).toBe('INSTAGRAM');
+    expect(sale.body.items[0].promoterId).toBe(promoter.body.id);
+    expect(sale.body.items[0].promoterName).toBe(promoter.body.name);
   });
 
   // ─── CREDIT SALE ───

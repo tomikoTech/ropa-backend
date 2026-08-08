@@ -13,6 +13,10 @@ describe('Compra por cajas y costeo de importación (e2e)', () => {
   let colorId: string;
   let curveId: string;
   let lineId: string;
+  let productCode: string;
+  let colorName: string;
+  let curveName: string;
+  let importOrderId: string;
 
   const ts = Date.now();
   const auth = () => ({ Authorization: `Bearer ${token}` });
@@ -58,11 +62,13 @@ describe('Compra por cajas y costeo de importación (e2e)', () => {
         variants: [{ size: 'U', color: 'Negro' }],
       });
     productId = prod.body.id;
+    productCode = prod.body.skuPrefix;
 
+    colorName = `CajaColor ${ts}`;
     const color = await request(app.getHttpServer())
       .post('/api/colors')
       .set(auth())
-      .send({ name: `CajaColor ${ts}` });
+      .send({ name: colorName });
     colorId = color.body.id;
 
     // Curva 6+6 = 12 unidades por caja.
@@ -74,11 +80,12 @@ describe('Compra por cajas y costeo de importación (e2e)', () => {
         .send({ name });
       sizeIds.push(s.body.id);
     }
+    curveName = `Curva caja ${ts}`;
     const curve = await request(app.getHttpServer())
       .post('/api/size-curves')
       .set(auth())
       .send({
-        name: `Curva caja ${ts}`,
+        name: curveName,
         items: sizeIds.map((sizeId) => ({ sizeId, quantity: 6 })),
       });
     curveId = curve.body.id;
@@ -92,6 +99,11 @@ describe('Compra por cajas y costeo de importación (e2e)', () => {
         items: [],
       });
     orderId = order.body.id;
+    const importOrder = await request(app.getHttpServer())
+      .post('/api/purchases')
+      .set(auth())
+      .send({ supplierId: sup.body.id, warehouseId: wh.body.id, items: [] });
+    importOrderId = importOrder.body.id;
   }, 90000);
 
   afterAll(async () => {
@@ -146,6 +158,46 @@ describe('Compra por cajas y costeo de importación (e2e)', () => {
       .expect(201);
 
     expect(res.body.consecutive).toBe(2);
+  });
+
+  it('descarga la plantilla e importa CSV de forma atómica', async () => {
+    const template = await request(app.getHttpServer())
+      .get('/api/purchases/box-lines/import-template')
+      .set(auth())
+      .expect(200);
+    expect(template.headers['content-type']).toContain('spreadsheetml');
+
+    const csv = Buffer.from(
+      'producto_codigo,color,curva,cajas,unidades_por_caja,costo_unitario,precio_venta,comentario\n' +
+        `${productCode},${colorName},${curveName},3,12,11.5,91000,Carga masiva\n`,
+    );
+    const imported = await request(app.getHttpServer())
+      .post(`/api/purchases/${importOrderId}/box-lines/import`)
+      .set(auth())
+      .attach('file', csv, { filename: 'cajas.csv', contentType: 'text/csv' })
+      .expect(201);
+    expect(imported.body.imported).toBe(1);
+    expect(imported.body.firstConsecutive).toBe(1);
+
+    const before = await request(app.getHttpServer())
+      .get(`/api/purchases/${importOrderId}/box-lines`)
+      .set(auth());
+    const invalid = Buffer.from(
+      'producto_codigo,cajas,unidades_por_caja,costo_unitario\n' +
+        `${productCode},1,12,10\nNO-EXISTE,1,12,10\n`,
+    );
+    const rejected = await request(app.getHttpServer())
+      .post(`/api/purchases/${importOrderId}/box-lines/import`)
+      .set(auth())
+      .attach('file', invalid, {
+        filename: 'mal.csv',
+        contentType: 'text/csv',
+      });
+    expect(rejected.status).toBe(400);
+    const after = await request(app.getHttpServer())
+      .get(`/api/purchases/${importOrderId}/box-lines`)
+      .set(auth());
+    expect(after.body).toHaveLength(before.body.length);
   });
 
   it('guarda tasa de cambio y fletes con su concepto', async () => {

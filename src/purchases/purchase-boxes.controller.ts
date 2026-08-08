@@ -7,7 +7,12 @@ import {
   Param,
   Delete,
   ParseUUIDPipe,
+  Res,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import type { Response } from 'express';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { PurchaseBoxesService } from './purchase-boxes.service.js';
 import {
@@ -28,6 +33,21 @@ import { TenantId } from '../common/decorators/tenant-id.decorator.js';
 export class PurchaseBoxesController {
   constructor(private readonly boxes: PurchaseBoxesService) {}
 
+  @Get('box-lines/import-template')
+  @ApiOperation({ summary: 'Plantilla XLSX para importar cajas' })
+  async importTemplate(@Res() res: Response) {
+    const file = await this.boxes.buildImportTemplate();
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename="plantilla-cajas.xlsx"',
+    );
+    res.send(file);
+  }
+
   @Get(':id/box-lines')
   @ApiOperation({ summary: 'Renglones por caja de la orden' })
   findLines(
@@ -45,6 +65,21 @@ export class PurchaseBoxesController {
     @TenantId() tenantId: string,
   ) {
     return this.boxes.addLine(id, dto, tenantId);
+  }
+
+  @Post(':id/box-lines/import')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: 5 * 1024 * 1024 },
+    }),
+  )
+  @ApiOperation({ summary: 'Importar renglones por caja desde XLSX o CSV' })
+  importLines(
+    @Param('id', ParseUUIDPipe) id: string,
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @TenantId() tenantId: string,
+  ) {
+    return this.boxes.importLines(id, file, tenantId);
   }
 
   @Patch('box-lines/:lineId')

@@ -12,6 +12,7 @@ describe('Recepción por cajas y apertura de bultos (e2e)', () => {
   let orderId: string;
   let boxLineId: string;
   let boxIds: string[] = [];
+  let warehouseId: string;
 
   const ts = Date.now();
   const auth = () => ({ Authorization: `Bearer ${token}` });
@@ -38,6 +39,7 @@ describe('Recepción por cajas y apertura de bultos (e2e)', () => {
         name: `E2E Bulto WH ${ts}`,
         code: `BU-${ts.toString().slice(-5)}`,
       });
+    warehouseId = wh.body.id;
 
     const sup = await request(app.getHttpServer())
       .post('/api/suppliers')
@@ -47,6 +49,16 @@ describe('Recepción por cajas y apertura de bultos (e2e)', () => {
         nit: `902${ts.toString().slice(-6)}-3`,
       });
 
+    // Curva 2+2 = 4 unidades por caja (pequeña, para poder contarlas a mano).
+    const sizeIds: string[] = [];
+    const sizeNames = [`B40-${ts}`, `B41-${ts}`];
+    for (const name of sizeNames) {
+      const s = await request(app.getHttpServer())
+        .post('/api/sizes')
+        .set(auth())
+        .send({ name });
+      sizeIds.push(s.body.id);
+    }
     const prod = await request(app.getHttpServer())
       .post('/api/products')
       .set(auth())
@@ -54,18 +66,8 @@ describe('Recepción por cajas y apertura de bultos (e2e)', () => {
         name: `E2E Bulto Producto ${ts}`,
         basePrice: 120000,
         costPrice: 50000,
-        variants: [{ size: 'U', color: 'Negro' }],
+        variants: sizeNames.map((size) => ({ size, color: 'Negro' })),
       });
-
-    // Curva 2+2 = 4 unidades por caja (pequeña, para poder contarlas a mano).
-    const sizeIds: string[] = [];
-    for (const name of [`B40-${ts}`, `B41-${ts}`]) {
-      const s = await request(app.getHttpServer())
-        .post('/api/sizes')
-        .set(auth())
-        .send({ name });
-      sizeIds.push(s.body.id);
-    }
     const curve = await request(app.getHttpServer())
       .post('/api/size-curves')
       .set(auth())
@@ -89,6 +91,7 @@ describe('Recepción por cajas y apertura de bultos (e2e)', () => {
         boxes: 3,
         unitsPerBox: 4,
         unitCost: 25000,
+        salePrice: 100000,
       });
     boxLineId = line.body.id;
   }, 90000);
@@ -192,6 +195,9 @@ describe('Recepción por cajas y apertura de bultos (e2e)', () => {
     expect(
       res.body.units.every((u: { sizeId: string | null }) => u.sizeId),
     ).toBe(true);
+    expect(
+      res.body.units.every((u: { variantId: string | null }) => u.variantId),
+    ).toBe(true);
     // La caja no se borra: queda marcada como abierta para no perder la
     // trazabilidad del código ya impreso.
     expect(res.body.parent.status).toBe('SPLIT');
@@ -234,6 +240,40 @@ describe('Recepción por cajas y apertura de bultos (e2e)', () => {
 
     expect(res.status).toBe(400);
     expect(String(res.body.message)).toMatch(/solo se pueden abrir cajas/i);
+  });
+
+  it('una unidad salida de la caja se puede escanear y vender por su talla real', async () => {
+    const list = await request(app.getHttpServer())
+      .get(`/api/stock-units?boxLineId=${boxLineId}`)
+      .set(auth());
+    const unit = list.body.find((u: { kind: string }) => u.kind === 'UNIT');
+
+    const scan = await request(app.getHttpServer())
+      .get(`/api/pos/scan/${unit.barcode}`)
+      .set(auth())
+      .expect(200);
+
+    expect(scan.body.kind).toBe('UNIT');
+    expect(scan.body.variantId).toBe(unit.variantId);
+    expect(scan.body.quantity).toBe(1);
+    expect(scan.body.suggestedPrice).toBe(100000);
+
+    await request(app.getHttpServer())
+      .post('/api/pos/sales')
+      .set(auth())
+      .send({
+        warehouseId,
+        items: [
+          {
+            variantId: scan.body.variantId,
+            stockUnitId: unit.id,
+            quantity: 1,
+            unitPrice: scan.body.suggestedPrice,
+          },
+        ],
+        payments: [{ method: 'EFECTIVO', amount: 100000 }],
+      })
+      .expect(201);
   });
 
   it('genera las etiquetas en ZPL, una por bulto', async () => {
@@ -283,6 +323,45 @@ describe('Recepción por cajas y apertura de bultos (e2e)', () => {
     // Un escaneo arrastra las 4 unidades: es lo que la hace vendible a granel.
     expect(res.body.quantity).toBe(4);
     expect(res.body.stockUnitId).toBe(box.id);
+    expect(res.body.variantId).toBeTruthy();
+    expect(res.body.warehouseId).toBe(warehouseId);
+    expect(res.body.suggestedPrice).toBe(400000);
+
+    // El servidor no permite vender una parte y marcar todo el bulto como
+    // vendido: esa inconsistencia antes era posible llamando la API a mano.
+    const partial = await request(app.getHttpServer())
+      .post('/api/pos/sales')
+      .set(auth())
+      .send({
+        warehouseId,
+        items: [
+          {
+            variantId: res.body.variantId,
+            stockUnitId: box.id,
+            quantity: 1,
+          },
+        ],
+        payments: [{ method: 'EFECTIVO', amount: 500000 }],
+      });
+    expect(partial.status).toBe(400);
+    expect(String(partial.body.message)).toMatch(/se vende completo/i);
+
+    await request(app.getHttpServer())
+      .post('/api/pos/sales')
+      .set(auth())
+      .send({
+        warehouseId,
+        items: [
+          {
+            variantId: res.body.variantId,
+            stockUnitId: box.id,
+            quantity: res.body.quantity,
+            unitPrice: res.body.suggestedPrice / res.body.quantity,
+          },
+        ],
+        payments: [{ method: 'EFECTIVO', amount: 500000 }],
+      })
+      .expect(201);
   });
 
   it('explica por qué una caja ya abierta no se puede vender', async () => {

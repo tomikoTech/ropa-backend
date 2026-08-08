@@ -4,7 +4,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { PurchaseOrder } from './entities/purchase-order.entity.js';
 import { PurchaseOrderItem } from './entities/purchase-order-item.entity.js';
 import { PurchaseBoxLine } from './entities/purchase-box-line.entity.js';
@@ -19,6 +19,10 @@ import {
   UpdateImportCostsDto,
 } from './dto/purchase-box.dto.js';
 import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
+import {
+  buildPurchaseBoxTemplate,
+  readPurchaseBoxImport,
+} from './purchase-box-import.util.js';
 
 @Injectable()
 export class PurchaseBoxesService {
@@ -37,7 +41,124 @@ export class PurchaseBoxesService {
     private readonly curveRepo: Repository<SizeCurve>,
     @InjectRepository(SizeCurveItem)
     private readonly curveItemRepo: Repository<SizeCurveItem>,
+    private readonly dataSource: DataSource,
   ) {}
+
+  buildImportTemplate(): Promise<Buffer> {
+    return buildPurchaseBoxTemplate();
+  }
+
+  async importLines(
+    orderId: string,
+    file: Express.Multer.File | undefined,
+    tenantId: string,
+  ): Promise<{
+    imported: number;
+    firstConsecutive: number;
+    lastConsecutive: number;
+  }> {
+    await this.getOrder(orderId, tenantId);
+    if (!file)
+      throw new BadRequestException('Selecciona un archivo .xlsx o .csv.');
+    const rows = await readPurchaseBoxImport(file.buffer, file.originalname);
+    const key = (value: string) =>
+      value
+        .trim()
+        .toLocaleLowerCase('es-CO')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
+
+    return retryOnUniqueViolation(() =>
+      this.dataSource.transaction(async (manager) => {
+        const [products, colors, curves, curveItems] = await Promise.all([
+          manager.getRepository(Product).find({ where: { tenantId } }),
+          manager.getRepository(Color).find({ where: { tenantId } }),
+          manager.getRepository(SizeCurve).find({ where: { tenantId } }),
+          manager.getRepository(SizeCurveItem).find({ where: { tenantId } }),
+        ]);
+        const productByCode = new Map(
+          products.map((p) => [key(p.skuPrefix), p]),
+        );
+        const colorByName = new Map(colors.map((c) => [key(c.name), c]));
+        const curveByName = new Map(curves.map((c) => [key(c.name), c]));
+        const curveTotal = new Map<string, number>();
+        for (const item of curveItems) {
+          curveTotal.set(
+            item.curveId,
+            (curveTotal.get(item.curveId) ?? 0) + item.quantity,
+          );
+        }
+
+        const errors: string[] = [];
+        const resolved = rows.map((row) => {
+          const product = productByCode.get(key(row.productCode));
+          const color = row.color ? colorByName.get(key(row.color)) : undefined;
+          const curve = row.curve ? curveByName.get(key(row.curve)) : undefined;
+          if (!product)
+            errors.push(
+              `Fila ${row.rowNumber}: no existe el producto "${row.productCode}".`,
+            );
+          if (row.color && !color)
+            errors.push(
+              `Fila ${row.rowNumber}: no existe el color "${row.color}".`,
+            );
+          if (row.curve && !curve)
+            errors.push(
+              `Fila ${row.rowNumber}: no existe la curva "${row.curve}".`,
+            );
+          if (curve && curveTotal.get(curve.id) !== row.unitsPerBox) {
+            errors.push(
+              `Fila ${row.rowNumber}: la curva "${curve.name}" reparte ${curveTotal.get(curve.id) ?? 0} unidades, ` +
+                `pero la fila declara ${row.unitsPerBox}.`,
+            );
+          }
+          return { row, product, color, curve };
+        });
+        if (errors.length) {
+          const visibleErrors = errors.slice(0, 20);
+          if (errors.length > visibleErrors.length) {
+            visibleErrors.push(
+              `Y ${errors.length - visibleErrors.length} error(es) más.`,
+            );
+          }
+          throw new BadRequestException([
+            `No se importó ningún renglón. Corrige ${errors.length} error(es):`,
+            ...visibleErrors,
+          ]);
+        }
+
+        const boxRepo = manager.getRepository(PurchaseBoxLine);
+        const current = await boxRepo
+          .createQueryBuilder('b')
+          .select('MAX(b.consecutive)', 'max')
+          .where('b.purchaseOrderId = :orderId', { orderId })
+          .andWhere('b.tenantId = :tenantId', { tenantId })
+          .getRawOne<{ max: string | null }>();
+        const firstConsecutive = Number(current?.max ?? 0) + 1;
+        const entities = resolved.map(({ row, product, color, curve }, index) =>
+          boxRepo.create({
+            purchaseOrderId: orderId,
+            productId: product!.id,
+            colorId: color?.id ?? null,
+            sizeCurveId: curve?.id ?? null,
+            boxes: row.boxes,
+            unitsPerBox: row.unitsPerBox,
+            unitCost: row.unitCost,
+            salePrice: row.salePrice ?? null,
+            comment: row.comment ?? null,
+            consecutive: firstConsecutive + index,
+            tenantId,
+          }),
+        );
+        await boxRepo.save(entities);
+        return {
+          imported: entities.length,
+          firstConsecutive,
+          lastConsecutive: firstConsecutive + entities.length - 1,
+        };
+      }),
+    );
+  }
 
   private async getOrder(id: string, tenantId: string): Promise<PurchaseOrder> {
     const order = await this.orderRepo.findOne({ where: { id, tenantId } });
