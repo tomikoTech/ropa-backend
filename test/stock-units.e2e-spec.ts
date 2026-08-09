@@ -14,6 +14,8 @@ describe('Recepción por cajas y apertura de bultos (e2e)', () => {
   let boxIds: string[] = [];
   let warehouseId: string;
   let curveSizeIds: string[] = [];
+  let productName: string;
+  let orderNumber: string;
 
   const ts = Date.now();
   const auth = () => ({ Authorization: `Bearer ${token}` });
@@ -61,11 +63,12 @@ describe('Recepción por cajas y apertura de bultos (e2e)', () => {
       sizeIds.push(s.body.id);
     }
     curveSizeIds = sizeIds;
+    productName = `E2E Bulto Producto ${ts}`;
     const prod = await request(app.getHttpServer())
       .post('/api/products')
       .set(auth())
       .send({
-        name: `E2E Bulto Producto ${ts}`,
+        name: productName,
         basePrice: 120000,
         costPrice: 50000,
         variants: sizeNames.map((size) => ({ size, color: 'Negro' })),
@@ -83,6 +86,7 @@ describe('Recepción por cajas y apertura de bultos (e2e)', () => {
       .set(auth())
       .send({ supplierId: sup.body.id, warehouseId: wh.body.id, items: [] });
     orderId = order.body.id;
+    orderNumber = order.body.orderNumber;
 
     const line = await request(app.getHttpServer())
       .post(`/api/purchases/${orderId}/box-lines`)
@@ -192,6 +196,74 @@ describe('Recepción por cajas y apertura de bultos (e2e)', () => {
       .expect(200);
 
     expect(res.body.barcode).toBe(code);
+  });
+
+  it('consulta el origen y el primer evento del código físico', async () => {
+    const list = await request(app.getHttpServer())
+      .get(`/api/stock-units?boxLineId=${boxLineId}`)
+      .set(auth());
+    const box = list.body[0];
+    const trace = await request(app.getHttpServer())
+      .get(`/api/stock-units/trace/${box.barcode}`)
+      .set(auth())
+      .expect(200);
+
+    expect(trace.body.unit.id).toBe(box.id);
+    expect(trace.body.purchase.orderId).toBe(orderId);
+    expect(trace.body.events[0].eventType).toBe('RECEIVED');
+    expect(trace.body.events[0].user).toMatchObject({
+      firstName: expect.any(String),
+      lastName: expect.any(String),
+    });
+    expect(trace.body.events[0].user).not.toHaveProperty('passwordHash');
+    expect(trace.body.events[0].user).not.toHaveProperty('email');
+    expect(trace.body.sale).toBeNull();
+  });
+
+  it('busca códigos por producto, referencia, estado, bodega y fecha', async () => {
+    const byProduct = await request(app.getHttpServer())
+      .get('/api/stock-units/search')
+      .query({
+        q: productName,
+        status: 'IN_STOCK',
+        warehouseId,
+        from: new Date().toISOString().slice(0, 10),
+        to: new Date().toISOString().slice(0, 10),
+      })
+      .set(auth())
+      .expect(200);
+
+    expect(byProduct.body.meta.total).toBe(3);
+    expect(byProduct.body.data).toHaveLength(3);
+    expect(
+      byProduct.body.data.every(
+        (unit: { product: { name: string }; warehouse: { id: string } }) =>
+          unit.product.name === productName &&
+          unit.warehouse.id === warehouseId,
+      ),
+    ).toBe(true);
+
+    const byOrder = await request(app.getHttpServer())
+      .get('/api/stock-units/search')
+      .query({ q: orderNumber, limit: 2 })
+      .set(auth())
+      .expect(200);
+    expect(byOrder.body.meta.total).toBe(3);
+    expect(byOrder.body.data).toHaveLength(2);
+    expect(byOrder.body.data[0].orderNumber).toBe(orderNumber);
+  });
+
+  it('rechaza filtros inválidos en la búsqueda operativa', async () => {
+    await request(app.getHttpServer())
+      .get('/api/stock-units/search')
+      .query({ status: 'PERDIDO' })
+      .set(auth())
+      .expect(400);
+    await request(app.getHttpServer())
+      .get('/api/stock-units/search')
+      .query({ from: '2026-13-90' })
+      .set(auth())
+      .expect(400);
   });
 
   it('la búsqueda agrupada del POS encuentra el producto por el código físico', async () => {
@@ -361,6 +433,24 @@ describe('Recepción por cajas y apertura de bultos (e2e)', () => {
     }
     expect(quantitiesBySize.get(curveSizeIds[0])).toBe(1);
     expect(quantitiesBySize.get(curveSizeIds[1])).toBe(3);
+
+    const parentTrace = await request(app.getHttpServer())
+      .get(`/api/stock-units/trace/${res.body.parent.barcode}`)
+      .set(auth())
+      .expect(200);
+    expect(parentTrace.body.children).toHaveLength(4);
+    expect(
+      parentTrace.body.events.some(
+        (event: { eventType: string }) => event.eventType === 'SPLIT',
+      ),
+    ).toBe(true);
+
+    const childTrace = await request(app.getHttpServer())
+      .get(`/api/stock-units/trace/${res.body.units[0].barcode}`)
+      .set(auth())
+      .expect(200);
+    expect(childTrace.body.parent.id).toBe(res.body.parent.id);
+    expect(childTrace.body.events[0].eventType).toBe('CREATED_FROM_BOX');
   });
 
   // Regresión: la secuencia de las unidades debe continuar después de la de
@@ -418,7 +508,7 @@ describe('Recepción por cajas y apertura de bultos (e2e)', () => {
     expect(scan.body.quantity).toBe(1);
     expect(scan.body.suggestedPrice).toBe(100000);
 
-    await request(app.getHttpServer())
+    const sale = await request(app.getHttpServer())
       .post('/api/pos/sales')
       .set(auth())
       .send({
@@ -434,6 +524,18 @@ describe('Recepción por cajas y apertura de bultos (e2e)', () => {
         payments: [{ method: 'EFECTIVO', amount: 100000 }],
       })
       .expect(201);
+
+    const trace = await request(app.getHttpServer())
+      .get(`/api/stock-units/trace/${unit.barcode}`)
+      .set(auth())
+      .expect(200);
+    expect(trace.body.sale.id).toBe(sale.body.id);
+    expect(trace.body.sale.saleNumber).toBe(sale.body.saleNumber);
+    expect(
+      trace.body.events.some(
+        (event: { eventType: string }) => event.eventType === 'SOLD',
+      ),
+    ).toBe(true);
   });
 
   it('genera las etiquetas en ZPL, una por bulto', async () => {
@@ -557,5 +659,21 @@ describe('Recepción por cajas y apertura de bultos (e2e)', () => {
       .expect(201);
 
     expect(res.body.count).toBe(boxIds.length);
+
+    const list = await request(app.getHttpServer())
+      .get(`/api/stock-units?boxLineId=${boxLineId}`)
+      .set(auth());
+    const printed = list.body.find(
+      (unit: { id: string }) => unit.id === boxIds[0],
+    );
+    const trace = await request(app.getHttpServer())
+      .get(`/api/stock-units/trace/${printed.barcode}`)
+      .set(auth())
+      .expect(200);
+    expect(
+      trace.body.events.some(
+        (event: { eventType: string }) => event.eventType === 'PRINTED',
+      ),
+    ).toBe(true);
   });
 });

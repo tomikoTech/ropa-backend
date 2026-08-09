@@ -10,6 +10,7 @@ import { Sale } from './sale.entity.js';
 import { ProductVariant } from '../../products/entities/product-variant.entity.js';
 import { TenantAwareEntity } from '../../common/entities/tenant-aware.entity.js';
 import { Promoter } from '../../promoters/promoter.entity.js';
+import { StockUnit } from '../../inventory/entities/stock-unit.entity.js';
 
 @Entity('sale_items')
 export class SaleItem extends TenantAwareEntity {
@@ -40,6 +41,14 @@ export class SaleItem extends TenantAwareEntity {
   /** Snapshot: renombrar al impulsador no reescribe ventas históricas. */
   @Column({ name: 'promoter_name', type: 'varchar', nullable: true })
   promoterName: string | null;
+
+  /** Código físico exacto vendido, si la línea salió de un bulto etiquetado. */
+  @ManyToOne(() => StockUnit, { nullable: true, onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'stock_unit_id' })
+  stockUnit: StockUnit | null;
+
+  @Column({ name: 'stock_unit_id', type: 'uuid', nullable: true })
+  stockUnitId: string | null;
 
   // Snapshot fields — preserve data at time of sale
   @Column({ name: 'product_name' })

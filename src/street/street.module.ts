@@ -13,6 +13,7 @@ import { Payment } from '../pos/entities/payment.entity.js';
 import { StreetService } from './street.service.js';
 import { StreetController } from './street.controller.js';
 import { InvoiceService } from '../pos/services/invoice.service.js';
+import { StockUnitEvent } from '../inventory/entities/stock-unit-event.entity.js';
 
 /**
  * Operación de calle (F6): patinadores y remisión rápida.
@@ -31,6 +32,7 @@ import { InvoiceService } from '../pos/services/invoice.service.js';
       Stock,
       StockMovement,
       StockUnit,
+      StockUnitEvent,
       Sale,
       SaleItem,
       Payment,

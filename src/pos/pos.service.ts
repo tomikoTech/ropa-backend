@@ -14,6 +14,10 @@ import {
   StockUnit,
   StockUnitStatus,
 } from '../inventory/entities/stock-unit.entity.js';
+import {
+  StockUnitEvent,
+  StockUnitEventType,
+} from '../inventory/entities/stock-unit-event.entity.js';
 import { StockMovement } from '../inventory/entities/stock-movement.entity.js';
 import { Client } from '../clients/entities/client.entity.js';
 import { AccountsReceivable } from './entities/accounts-receivable.entity.js';
@@ -425,6 +429,7 @@ export class PosService {
             quantity: data.quantity,
             unitPrice: data.lineCalc.unitPrice,
             unitCost,
+            stockUnitId: soldUnit?.id ?? null,
             promoterId: data.promoter?.id ?? null,
             promoterName: data.promoter?.name ?? null,
             discountPercent: data.discountPercent,
@@ -444,6 +449,23 @@ export class PosService {
                 { id: soldUnit.id, tenantId },
                 { status: StockUnitStatus.SOLD },
               );
+            await manager.getRepository(StockUnitEvent).save(
+              manager.getRepository(StockUnitEvent).create({
+                stockUnitId: soldUnit.id,
+                eventType: StockUnitEventType.SOLD,
+                fromStatus: StockUnitStatus.IN_STOCK,
+                toStatus: StockUnitStatus.SOLD,
+                referenceType: 'SALE',
+                referenceId: savedSale.id,
+                userId,
+                metadata: {
+                  saleNumber,
+                  saleItemId: saleItem.id,
+                  quantity: data.quantity,
+                },
+                tenantId,
+              }),
+            );
           }
 
           // Deduct inventory — cascade: primary warehouse first, then others by qty desc

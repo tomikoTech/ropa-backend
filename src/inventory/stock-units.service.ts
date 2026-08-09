@@ -4,7 +4,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, In, Repository } from 'typeorm';
+import { Brackets, DataSource, EntityManager, In, Repository } from 'typeorm';
 import {
   StockUnit,
   StockUnitKind,
@@ -22,6 +22,11 @@ import { PurchaseOrderStatus } from '../common/enums/purchase-order-status.enum.
 import { buildStockBarcode, withCheckDigit } from './barcode.util.js';
 import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
 import { StockUnitContent } from './entities/stock-unit-content.entity.js';
+import {
+  StockUnitEvent,
+  StockUnitEventType,
+} from './entities/stock-unit-event.entity.js';
+import { SaleItem } from '../pos/entities/sale-item.entity.js';
 
 @Injectable()
 export class StockUnitsService {
@@ -32,6 +37,10 @@ export class StockUnitsService {
     private readonly curveItemRepo: Repository<SizeCurveItem>,
     @InjectRepository(StockUnitContent)
     private readonly contentRepo: Repository<StockUnitContent>,
+    @InjectRepository(StockUnitEvent)
+    private readonly eventRepo: Repository<StockUnitEvent>,
+    @InjectRepository(SaleItem)
+    private readonly saleItemRepo: Repository<SaleItem>,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -188,6 +197,26 @@ export class StockUnitsService {
           );
         }
 
+        await m.getRepository(StockUnitEvent).save(
+          saved.map((box) =>
+            m.getRepository(StockUnitEvent).create({
+              stockUnitId: box.id,
+              eventType: StockUnitEventType.RECEIVED,
+              fromStatus: null,
+              toStatus: StockUnitStatus.IN_STOCK,
+              referenceType: 'PURCHASE_BOX_LINE',
+              referenceId: line.id,
+              userId,
+              metadata: {
+                barcode: box.barcode,
+                quantity: box.quantity,
+                warehouseId,
+              },
+              tenantId,
+            }),
+          ),
+        );
+
         // El renglón lleva su propio contador para poder recibir por partes.
         await m
           .getRepository(PurchaseBoxLine)
@@ -255,6 +284,7 @@ export class StockUnitsService {
    */
   async splitBox(
     unitId: string,
+    userId: string,
     tenantId: string,
   ): Promise<{ parent: StockUnit; units: StockUnit[] }> {
     return retryOnUniqueViolation(async () =>
@@ -446,6 +476,33 @@ export class StockUnitsService {
           { id: box.id, tenantId },
           { status: StockUnitStatus.SPLIT },
         );
+        const eventRepo = m.getRepository(StockUnitEvent);
+        await eventRepo.save([
+          eventRepo.create({
+            stockUnitId: box.id,
+            eventType: StockUnitEventType.SPLIT,
+            fromStatus: StockUnitStatus.IN_STOCK,
+            toStatus: StockUnitStatus.SPLIT,
+            referenceType: 'STOCK_UNIT',
+            referenceId: box.id,
+            userId,
+            metadata: { children: saved.length },
+            tenantId,
+          }),
+          ...saved.map((child) =>
+            eventRepo.create({
+              stockUnitId: child.id,
+              eventType: StockUnitEventType.CREATED_FROM_BOX,
+              fromStatus: null,
+              toStatus: StockUnitStatus.IN_STOCK,
+              referenceType: 'STOCK_UNIT',
+              referenceId: box.id,
+              userId,
+              metadata: { parentBarcode: box.barcode, sizeId: child.sizeId },
+              tenantId,
+            }),
+          ),
+        ]);
 
         // El total agregado no cambia; solo deja de estar concentrado en la
         // variante equivalente de la caja y pasa a las tallas de la curva.
@@ -681,6 +738,26 @@ export class StockUnitsService {
       }
       box.quantity = newQuantity;
       await unitRepo.save(box);
+      await m.getRepository(StockUnitEvent).save(
+        m.getRepository(StockUnitEvent).create({
+          stockUnitId: box.id,
+          eventType: StockUnitEventType.CONTENT_UPDATED,
+          fromStatus: box.status,
+          toStatus: box.status,
+          referenceType: 'STOCK_UNIT',
+          referenceId: box.id,
+          userId,
+          metadata: {
+            previousQuantity: box.quantity - delta,
+            quantity: newQuantity,
+            items: items.map((item) => ({
+              sizeId: item.sizeId,
+              quantity: item.quantity,
+            })),
+          },
+          tenantId,
+        }),
+      );
     });
 
     return this.getBoxContents(boxId, tenantId);
@@ -693,6 +770,277 @@ export class StockUnitsService {
     });
     if (!unit) throw new NotFoundException('No existe un bulto con ese código');
     return unit;
+  }
+
+  async traceByBarcode(barcode: string, tenantId: string) {
+    const normalized = barcode.trim();
+    const unit = await this.unitRepo.findOne({
+      where: { barcode: normalized, tenantId },
+      relations: {
+        product: true,
+        color: true,
+        size: true,
+        stand: true,
+        warehouse: true,
+        contents: true,
+      },
+    });
+    if (!unit) {
+      throw new NotFoundException(
+        `No existe ningún código físico "${normalized}" en esta tienda.`,
+      );
+    }
+
+    const parent = unit.parentUnitId
+      ? await this.unitRepo.findOne({
+          where: { id: unit.parentUnitId, tenantId },
+          relations: { product: true },
+        })
+      : null;
+    const children = await this.unitRepo.find({
+      where: { parentUnitId: unit.id, tenantId },
+      relations: { size: true },
+      order: { barcode: 'ASC' },
+    });
+    const purchaseLine = unit.purchaseBoxLineId
+      ? await this.dataSource.getRepository(PurchaseBoxLine).findOne({
+          where: { id: unit.purchaseBoxLineId, tenantId },
+          relations: { purchaseOrder: { supplier: true } },
+        })
+      : null;
+    const saleItem = await this.saleItemRepo.findOne({
+      where: { stockUnitId: unit.id, tenantId },
+      relations: ['sale', 'sale.client', 'sale.user', 'sale.warehouse'],
+    });
+    const events = await this.eventRepo.find({
+      where: { stockUnitId: unit.id, tenantId },
+      relations: { user: true },
+      order: { createdAt: 'ASC' },
+    });
+
+    return {
+      unit,
+      parent,
+      children,
+      purchase: purchaseLine
+        ? {
+            lineId: purchaseLine.id,
+            consecutive: purchaseLine.consecutive,
+            orderId: purchaseLine.purchaseOrderId,
+            orderNumber: purchaseLine.purchaseOrder?.orderNumber,
+            supplier: purchaseLine.purchaseOrder?.supplier?.name ?? null,
+            unitCost: Number(purchaseLine.unitCost),
+          }
+        : null,
+      sale: saleItem
+        ? {
+            itemId: saleItem.id,
+            quantity: saleItem.quantity,
+            unitPrice: Number(saleItem.unitPrice),
+            lineTotal: Number(saleItem.lineTotal),
+            id: saleItem.sale.id,
+            saleNumber: saleItem.sale.saleNumber,
+            invoiceNumber: saleItem.sale.invoiceNumber,
+            status: saleItem.sale.status,
+            client: saleItem.sale.client
+              ? `${saleItem.sale.client.firstName} ${saleItem.sale.client.lastName}`.trim()
+              : null,
+            user: saleItem.sale.user
+              ? `${saleItem.sale.user.firstName} ${saleItem.sale.user.lastName}`.trim()
+              : null,
+            warehouse: saleItem.sale.warehouse?.name ?? null,
+            createdAt: saleItem.sale.createdAt,
+          }
+        : null,
+      events: events.map((event) => ({
+        id: event.id,
+        eventType: event.eventType,
+        fromStatus: event.fromStatus,
+        toStatus: event.toStatus,
+        referenceType: event.referenceType,
+        referenceId: event.referenceId,
+        metadata: event.metadata,
+        createdAt: event.createdAt,
+        user: event.user
+          ? {
+              id: event.user.id,
+              firstName: event.user.firstName,
+              lastName: event.user.lastName,
+            }
+          : null,
+      })),
+    };
+  }
+
+  async search(params: {
+    q?: string;
+    status?: string;
+    warehouseId?: string;
+    from?: string;
+    to?: string;
+    page?: number;
+    limit?: number;
+    tenantId: string;
+  }) {
+    const page = Math.max(1, Number(params.page) || 1);
+    const limit = Math.min(100, Math.max(1, Number(params.limit) || 25));
+    const q = params.q?.trim();
+    for (const [label, value] of [
+      ['desde', params.from],
+      ['hasta', params.to],
+    ] as const) {
+      if (
+        value &&
+        (!/^\d{4}-\d{2}-\d{2}$/.test(value) ||
+          Number.isNaN(new Date(`${value}T00:00:00.000Z`).getTime()))
+      ) {
+        throw new BadRequestException(`La fecha ${label} no es válida.`);
+      }
+    }
+    if (params.from && params.to && params.from > params.to) {
+      throw new BadRequestException(
+        'La fecha desde no puede ser posterior a la fecha hasta.',
+      );
+    }
+    const qb = this.unitRepo
+      .createQueryBuilder('unit')
+      .leftJoinAndSelect('unit.product', 'product')
+      .leftJoinAndSelect('unit.color', 'color')
+      .leftJoinAndSelect('unit.size', 'size')
+      .leftJoinAndSelect('unit.warehouse', 'warehouse')
+      .leftJoinAndSelect('unit.stand', 'stand')
+      .where('unit.tenantId = :tenantId', { tenantId: params.tenantId });
+
+    if (q) {
+      qb.leftJoin(
+        PurchaseBoxLine,
+        'searchLine',
+        'searchLine.id = unit.purchaseBoxLineId AND searchLine.tenantId = :tenantId',
+      )
+        .leftJoin(
+          PurchaseOrder,
+          'searchOrder',
+          'searchOrder.id = searchLine.purchaseOrderId AND searchOrder.tenantId = :tenantId',
+        )
+        .leftJoin(
+          SaleItem,
+          'searchItem',
+          'searchItem.stockUnitId = unit.id AND searchItem.tenantId = :tenantId',
+        )
+        .leftJoin('searchItem.sale', 'searchSale')
+        .andWhere(
+          new Brackets((where) => {
+            where
+              .where('unit.barcode ILIKE :q')
+              .orWhere('product.name ILIKE :q')
+              .orWhere('product.skuPrefix ILIKE :q')
+              .orWhere('searchOrder.orderNumber ILIKE :q')
+              .orWhere('searchSale.saleNumber ILIKE :q')
+              .orWhere('searchSale.invoiceNumber ILIKE :q');
+          }),
+          { q: `%${q}%` },
+        );
+    }
+    if (params.status) {
+      if (
+        !Object.values(StockUnitStatus).includes(
+          params.status as StockUnitStatus,
+        )
+      ) {
+        throw new BadRequestException('Estado de código físico inválido.');
+      }
+      qb.andWhere('unit.status = :status', { status: params.status });
+    }
+    if (params.warehouseId) {
+      if (
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+          params.warehouseId,
+        )
+      ) {
+        throw new BadRequestException('Bodega inválida.');
+      }
+      qb.andWhere('unit.warehouseId = :warehouseId', {
+        warehouseId: params.warehouseId,
+      });
+    }
+    if (params.from) {
+      qb.andWhere('unit.createdAt >= :from', {
+        from: new Date(`${params.from}T00:00:00.000Z`),
+      });
+    }
+    if (params.to) {
+      const exclusiveTo = new Date(`${params.to}T00:00:00.000Z`);
+      exclusiveTo.setUTCDate(exclusiveTo.getUTCDate() + 1);
+      qb.andWhere('unit.createdAt < :to', { to: exclusiveTo });
+    }
+
+    const [units, total] = await qb
+      .distinct(true)
+      .orderBy('unit.createdAt', 'DESC')
+      .addOrderBy('unit.barcode', 'ASC')
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getManyAndCount();
+
+    const lineIds = [
+      ...new Set(units.map((unit) => unit.purchaseBoxLineId).filter(Boolean)),
+    ] as string[];
+    const unitIds = units.map((unit) => unit.id);
+    const lines: PurchaseBoxLine[] = lineIds.length
+      ? await this.dataSource.getRepository(PurchaseBoxLine).find({
+          where: { id: In(lineIds), tenantId: params.tenantId },
+          relations: { purchaseOrder: true },
+        })
+      : [];
+    const saleItems: SaleItem[] = unitIds.length
+      ? await this.saleItemRepo.find({
+          where: { stockUnitId: In(unitIds), tenantId: params.tenantId },
+          relations: { sale: true },
+          order: { createdAt: 'DESC' },
+        })
+      : [];
+    const lineById = new Map(lines.map((line) => [line.id, line]));
+    const saleByUnit = new Map<string, SaleItem>();
+    for (const item of saleItems) {
+      if (item.stockUnitId && !saleByUnit.has(item.stockUnitId)) {
+        saleByUnit.set(item.stockUnitId, item);
+      }
+    }
+
+    return {
+      data: units.map((unit) => {
+        const line = unit.purchaseBoxLineId
+          ? lineById.get(unit.purchaseBoxLineId)
+          : null;
+        const saleItem = saleByUnit.get(unit.id);
+        return {
+          id: unit.id,
+          barcode: unit.barcode,
+          kind: unit.kind,
+          status: unit.status,
+          quantity: unit.quantity,
+          cost: Number(unit.cost),
+          createdAt: unit.createdAt,
+          product: {
+            id: unit.product.id,
+            name: unit.product.name,
+            skuPrefix: unit.product.skuPrefix,
+          },
+          color: unit.color
+            ? { id: unit.color.id, name: unit.color.name }
+            : null,
+          size: unit.size ? { id: unit.size.id, name: unit.size.name } : null,
+          warehouse: { id: unit.warehouse.id, name: unit.warehouse.name },
+          stand: unit.stand
+            ? { id: unit.stand.id, name: unit.stand.name }
+            : null,
+          orderNumber: line?.purchaseOrder?.orderNumber ?? null,
+          saleNumber: saleItem?.sale?.saleNumber ?? null,
+          invoiceNumber: saleItem?.sale?.invoiceNumber ?? null,
+        };
+      }),
+      meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    };
   }
 
   async findByBoxLine(
@@ -708,17 +1056,43 @@ export class StockUnitsService {
 
   async markPrinted(
     ids: string[],
+    userId: string,
     tenantId: string,
   ): Promise<{ count: number }> {
     if (ids.length === 0) return { count: 0 };
-    const result = await this.unitRepo
-      .createQueryBuilder()
-      .update(StockUnit)
-      .set({ printedAt: new Date() })
-      .whereInIds(ids)
-      .andWhere('tenant_id = :tenantId', { tenantId })
-      .execute();
-    return { count: result.affected ?? 0 };
+    return this.dataSource.transaction(async (manager) => {
+      const units = await manager.getRepository(StockUnit).find({
+        where: { id: In(ids), tenantId },
+      });
+      const printedAt = new Date();
+      await manager
+        .getRepository(StockUnit)
+        .createQueryBuilder()
+        .update(StockUnit)
+        .set({ printedAt })
+        .whereInIds(units.map((unit) => unit.id))
+        .andWhere('tenant_id = :tenantId', { tenantId })
+        .execute();
+      if (units.length > 0) {
+        const eventRepo = manager.getRepository(StockUnitEvent);
+        await eventRepo.save(
+          units.map((unit) =>
+            eventRepo.create({
+              stockUnitId: unit.id,
+              eventType: StockUnitEventType.PRINTED,
+              fromStatus: unit.status,
+              toStatus: unit.status,
+              referenceType: 'STOCK_UNIT',
+              referenceId: unit.id,
+              userId,
+              metadata: {},
+              tenantId,
+            }),
+          ),
+        );
+      }
+      return { count: units.length };
+    });
   }
 
   /**

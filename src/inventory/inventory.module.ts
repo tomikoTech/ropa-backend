@@ -7,6 +7,7 @@ import { Shelf } from './entities/shelf.entity.js';
 import { Stand } from './entities/stand.entity.js';
 import { StockUnit } from './entities/stock-unit.entity.js';
 import { StockUnitContent } from './entities/stock-unit-content.entity.js';
+import { StockUnitEvent } from './entities/stock-unit-event.entity.js';
 import { StockUnitsService } from './stock-units.service.js';
 import { StockUnitsController } from './stock-units.controller.js';
 import { LabelsService } from './labels/labels.service.js';
@@ -25,6 +26,7 @@ import { StockMovement } from './entities/stock-movement.entity.js';
 import { StockTransfer } from './entities/stock-transfer.entity.js';
 import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
 import { ProductsModule } from '../products/products.module.js';
+import { SaleItem } from '../pos/entities/sale-item.entity.js';
 
 @Module({
   imports: [
@@ -33,6 +35,8 @@ import { ProductsModule } from '../products/products.module.js';
       Stand,
       StockUnit,
       StockUnitContent,
+      StockUnitEvent,
+      SaleItem,
       InventoryCount,
       InventoryCountLine,
       PurchaseBoxLine,

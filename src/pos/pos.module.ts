@@ -20,11 +20,13 @@ import { ReceiptService } from './services/receipt.service.js';
 import { ClientsModule } from '../clients/clients.module.js';
 import { Promoter } from '../promoters/promoter.entity.js';
 import { PurchaseBoxLine } from '../purchases/entities/purchase-box-line.entity.js';
+import { StockUnitEvent } from '../inventory/entities/stock-unit-event.entity.js';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([
       StockUnit,
+      StockUnitEvent,
       Sale,
       SaleItem,
       Payment,

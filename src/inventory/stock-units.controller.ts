@@ -36,6 +36,40 @@ export class StockUnitsController {
     return this.units.findByBarcode(barcode, tenantId);
   }
 
+  @Get('trace/:barcode')
+  @ApiOperation({
+    summary: 'Consulta operativa e historial de un código físico',
+  })
+  trace(@Param('barcode') barcode: string, @TenantId() tenantId: string) {
+    return this.units.traceByBarcode(barcode, tenantId);
+  }
+
+  @Get('search')
+  @ApiOperation({
+    summary: 'Buscar códigos por texto, estado, bodega y fecha',
+  })
+  search(
+    @Query('q') q: string | undefined,
+    @Query('status') status: string | undefined,
+    @Query('warehouseId') warehouseId: string | undefined,
+    @Query('from') from: string | undefined,
+    @Query('to') to: string | undefined,
+    @Query('page') page: string | undefined,
+    @Query('limit') limit: string | undefined,
+    @TenantId() tenantId: string,
+  ) {
+    return this.units.search({
+      q,
+      status,
+      warehouseId,
+      from,
+      to,
+      page: Number(page),
+      limit: Number(limit),
+      tenantId,
+    });
+  }
+
   @Get()
   @ApiOperation({ summary: 'Bultos de un renglón de compra' })
   findByBoxLine(
@@ -60,8 +94,12 @@ export class StockUnitsController {
 
   @Post(':id/split')
   @ApiOperation({ summary: 'Abrir una caja en sus unidades, según su curva' })
-  split(@Param('id', ParseUUIDPipe) id: string, @TenantId() tenantId: string) {
-    return this.units.splitBox(id, tenantId);
+  split(
+    @Param('id', ParseUUIDPipe) id: string,
+    @UserId() userId: string,
+    @TenantId() tenantId: string,
+  ) {
+    return this.units.splitBox(id, userId, tenantId);
   }
 
   @Get(':id/contents')
@@ -86,7 +124,11 @@ export class StockUnitsController {
 
   @Post('mark-printed')
   @ApiOperation({ summary: 'Registrar que se imprimieron estas etiquetas' })
-  markPrinted(@Body() dto: MarkPrintedDto, @TenantId() tenantId: string) {
-    return this.units.markPrinted(dto.ids, tenantId);
+  markPrinted(
+    @Body() dto: MarkPrintedDto,
+    @UserId() userId: string,
+    @TenantId() tenantId: string,
+  ) {
+    return this.units.markPrinted(dto.ids, userId, tenantId);
   }
 }

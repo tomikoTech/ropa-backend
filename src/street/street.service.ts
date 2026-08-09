@@ -19,6 +19,10 @@ import {
   StockUnit,
   StockUnitStatus,
 } from '../inventory/entities/stock-unit.entity.js';
+import {
+  StockUnitEvent,
+  StockUnitEventType,
+} from '../inventory/entities/stock-unit-event.entity.js';
 import { Sale } from '../pos/entities/sale.entity.js';
 import { SaleItem } from '../pos/entities/sale-item.entity.js';
 import { Payment } from '../pos/entities/payment.entity.js';
@@ -279,6 +283,22 @@ export class StreetService {
               { id: unit.id, tenantId },
               { status: StockUnitStatus.CONSIGNED },
             );
+            await manager.getRepository(StockUnitEvent).save(
+              manager.getRepository(StockUnitEvent).create({
+                stockUnitId: unit.id,
+                eventType: StockUnitEventType.CONSIGNED,
+                fromStatus: StockUnitStatus.IN_STOCK,
+                toStatus: StockUnitStatus.CONSIGNED,
+                referenceType: REF_DISPATCH,
+                referenceId: dispatch.id,
+                userId,
+                metadata: {
+                  dispatchNumber: dispatch.dispatchNumber,
+                  seller: seller.name,
+                },
+                tenantId,
+              }),
+            );
           }
 
           const precio =
@@ -487,16 +507,39 @@ export class StreetService {
 
           // El bulto etiquetado: vendido si se vendió, de vuelta si volvió.
           if (item.stockUnitId) {
+            const nextStatus =
+              line.sold > 0
+                ? StockUnitStatus.SOLD
+                : line.returned > 0
+                  ? StockUnitStatus.IN_STOCK
+                  : StockUnitStatus.WRITTEN_OFF;
             await manager.getRepository(StockUnit).update(
               { id: item.stockUnitId, tenantId },
               {
-                status:
-                  line.sold > 0
-                    ? StockUnitStatus.SOLD
-                    : line.returned > 0
-                      ? StockUnitStatus.IN_STOCK
-                      : StockUnitStatus.WRITTEN_OFF,
+                status: nextStatus,
               },
+            );
+            await manager.getRepository(StockUnitEvent).save(
+              manager.getRepository(StockUnitEvent).create({
+                stockUnitId: item.stockUnitId,
+                eventType:
+                  nextStatus === StockUnitStatus.SOLD
+                    ? StockUnitEventType.SOLD
+                    : nextStatus === StockUnitStatus.IN_STOCK
+                      ? StockUnitEventType.RETURNED
+                      : StockUnitEventType.WRITTEN_OFF,
+                fromStatus: StockUnitStatus.CONSIGNED,
+                toStatus: nextStatus,
+                referenceType: REF_DISPATCH,
+                referenceId: dispatch.id,
+                userId,
+                metadata: {
+                  sold: line.sold,
+                  returned: line.returned,
+                  dispatchNumber: dispatch.dispatchNumber,
+                },
+                tenantId,
+              }),
             );
           }
         }
@@ -591,6 +634,7 @@ export class StreetService {
           quantity: line.sold,
           unitPrice: item.unitPrice,
           unitCost: item.unitCost,
+          stockUnitId: original.stockUnitId,
           discountPercent: 0,
           taxRate: 0,
           taxAmount: 0,
@@ -678,6 +722,22 @@ export class StreetService {
               { id: item.stockUnitId, tenantId },
               { status: StockUnitStatus.IN_STOCK },
             );
+          await manager.getRepository(StockUnitEvent).save(
+            manager.getRepository(StockUnitEvent).create({
+              stockUnitId: item.stockUnitId,
+              eventType: StockUnitEventType.RETURNED,
+              fromStatus: StockUnitStatus.CONSIGNED,
+              toStatus: StockUnitStatus.IN_STOCK,
+              referenceType: REF_DISPATCH,
+              referenceId: dispatch.id,
+              userId,
+              metadata: {
+                reason: 'DISPATCH_CANCELLED',
+                dispatchNumber: dispatch.dispatchNumber,
+              },
+              tenantId,
+            }),
+          );
         }
       }
 
