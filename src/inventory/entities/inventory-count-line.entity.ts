@@ -40,6 +40,10 @@ export class InventoryCountLine extends TenantAwareEntity {
   @Column({ name: 'counted_quantity', type: 'int', default: 0 })
   countedQuantity: number;
 
+  /** Foto del stock agregado al momento de abrir el conteo. */
+  @Column({ name: 'expected_quantity', type: 'int', default: 0 })
+  expectedQuantity: number;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 }

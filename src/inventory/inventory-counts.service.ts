@@ -1,20 +1,34 @@
 import {
+  BadRequestException,
   Injectable,
   NotFoundException,
-  BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, In, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import {
   InventoryCount,
   InventoryCountStatus,
 } from './entities/inventory-count.entity.js';
 import { InventoryCountLine } from './entities/inventory-count-line.entity.js';
+import { InventoryCountExpectedUnit } from './entities/inventory-count-expected-unit.entity.js';
+import {
+  InventoryCountScan,
+  InventoryCountScanResult,
+} from './entities/inventory-count-scan.entity.js';
 import { Stock } from './entities/stock.entity.js';
 import { StockMovement } from './entities/stock-movement.entity.js';
+import {
+  StockUnit,
+  StockUnitKind,
+  StockUnitStatus,
+} from './entities/stock-unit.entity.js';
+import {
+  StockUnitEvent,
+  StockUnitEventType,
+} from './entities/stock-unit-event.entity.js';
+import { StockUnitContent } from './entities/stock-unit-content.entity.js';
 import { ProductVariant } from '../products/entities/product-variant.entity.js';
 import { MovementType } from '../common/enums/movement-type.enum.js';
-import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
 
 export interface CountDifference {
   variantId: string;
@@ -22,13 +36,21 @@ export interface CountDifference {
   productName: string;
   size: string;
   color: string;
-  /** Lo que dice el sistema. */
   expected: number;
-  /** Lo que se contó físicamente. */
   counted: number;
-  /** counted − expected: negativo es faltante, positivo es sobrante. */
   difference: number;
 }
+
+export interface ScanInput {
+  barcode: string;
+  clientScanId: string;
+  deviceId?: string;
+}
+
+const SUCCESS_RESULTS = [
+  InventoryCountScanResult.COUNTED,
+  InventoryCountScanResult.SURPLUS,
+];
 
 @Injectable()
 export class InventoryCountsService {
@@ -37,6 +59,10 @@ export class InventoryCountsService {
     private readonly countRepo: Repository<InventoryCount>,
     @InjectRepository(InventoryCountLine)
     private readonly lineRepo: Repository<InventoryCountLine>,
+    @InjectRepository(InventoryCountExpectedUnit)
+    private readonly expectedUnitRepo: Repository<InventoryCountExpectedUnit>,
+    @InjectRepository(InventoryCountScan)
+    private readonly scanRepo: Repository<InventoryCountScan>,
     @InjectRepository(Stock)
     private readonly stockRepo: Repository<Stock>,
     @InjectRepository(ProductVariant)
@@ -44,8 +70,12 @@ export class InventoryCountsService {
     private readonly dataSource: DataSource,
   ) {}
 
-  private async nextNumber(tenantId: string): Promise<string> {
-    const row = await this.countRepo
+  private async nextNumber(
+    manager: EntityManager,
+    tenantId: string,
+  ): Promise<string> {
+    const row = await manager
+      .getRepository(InventoryCount)
       .createQueryBuilder('c')
       .select(
         "MAX(CAST(substring(c.count_number FROM '^INV-0*([0-9]+)$') AS integer))",
@@ -62,33 +92,91 @@ export class InventoryCountsService {
     userId: string,
     tenantId: string,
   ): Promise<InventoryCount> {
-    // Dos conteos abiertos a la vez sobre la misma bodega darían resultados
-    // contradictorios al cerrarlos.
-    const openOne = await this.countRepo.findOne({
-      where: { warehouseId, tenantId, status: InventoryCountStatus.OPEN },
-    });
-    if (openOne) {
-      throw new BadRequestException(
-        `Ya hay un conteo abierto en esta bodega (${openOne.countNumber}). Ciérralo antes de abrir otro.`,
-      );
-    }
+    return this.dataSource.transaction(async (manager) => {
+      // Serializa apertura y consecutivo sin bloquear otros tenants/bodegas.
+      await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+        `inventory-count:${tenantId}:${warehouseId}`,
+      ]);
+      await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+        `inventory-count-number:${tenantId}`,
+      ]);
 
-    return retryOnUniqueViolation(async () =>
-      this.countRepo.save(
-        this.countRepo.create({
-          countNumber: await this.nextNumber(tenantId),
+      const countRepo = manager.getRepository(InventoryCount);
+      const openOne = await countRepo.findOne({
+        where: { warehouseId, tenantId, status: InventoryCountStatus.OPEN },
+      });
+      if (openOne) {
+        throw new BadRequestException(
+          `Ya hay un conteo abierto en esta bodega (${openOne.countNumber}). Ciérralo antes de abrir otro.`,
+        );
+      }
+
+      const count = await countRepo.save(
+        countRepo.create({
+          countNumber: await this.nextNumber(manager, tenantId),
           warehouseId,
           startedAt: new Date(),
           notes: notes ?? null,
           createdById: userId,
           tenantId,
         }),
-      ),
-    );
+      );
+
+      // La comparación siempre se hace contra esta foto, no contra un stock
+      // que pudo cambiar mientras varios dispositivos estaban contando.
+      const stocks = await manager.getRepository(Stock).find({
+        where: { warehouseId, tenantId },
+      });
+      if (stocks.length > 0) {
+        await manager.getRepository(InventoryCountLine).insert(
+          stocks.map((stock) => ({
+            countId: count.id,
+            variantId: stock.variantId,
+            expectedQuantity: stock.quantity,
+            countedQuantity: 0,
+            tenantId,
+          })),
+        );
+      }
+
+      const physicalUnits = await manager.getRepository(StockUnit).find({
+        where: {
+          warehouseId,
+          tenantId,
+          status: StockUnitStatus.IN_STOCK,
+        },
+      });
+      if (physicalUnits.length > 0) {
+        await manager.getRepository(InventoryCountExpectedUnit).insert(
+          physicalUnits.map((unit) => ({
+            countId: count.id,
+            stockUnitId: unit.id,
+            barcode: unit.barcode,
+            quantity: unit.quantity,
+            tenantId,
+          })),
+        );
+      }
+
+      return count;
+    });
   }
 
-  private async getOpen(id: string, tenantId: string): Promise<InventoryCount> {
-    const count = await this.countRepo.findOne({ where: { id, tenantId } });
+  private async lockOpen(
+    manager: EntityManager,
+    id: string,
+    tenantId: string,
+  ): Promise<InventoryCount> {
+    // `warehouse` es eager; pedir FOR UPDATE mediante TypeORM intentaría
+    // bloquear también el lado nullable del LEFT JOIN y PostgreSQL lo rechaza.
+    // Bloqueamos exclusivamente la fila madre y después la hidratamos.
+    await manager.query(
+      'SELECT id FROM inventory_counts WHERE id = $1 AND tenant_id = $2 FOR UPDATE',
+      [id, tenantId],
+    );
+    const count = await manager.getRepository(InventoryCount).findOne({
+      where: { id, tenantId },
+    });
     if (!count) throw new NotFoundException('Conteo no encontrado');
     if (count.status !== InventoryCountStatus.OPEN) {
       throw new BadRequestException('Este conteo ya está cerrado.');
@@ -96,48 +184,185 @@ export class InventoryCountsService {
     return count;
   }
 
-  /**
-   * Registra unidades contadas. Se **acumula**: así se puede contar pasando el
-   * lector por la mercancía, que es como se hace en bodega.
-   */
+  private async incrementLine(
+    manager: EntityManager,
+    countId: string,
+    variantId: string,
+    quantity: number,
+    tenantId: string,
+  ): Promise<InventoryCountLine> {
+    const repo = manager.getRepository(InventoryCountLine);
+    await manager.query(
+      'SELECT id FROM inventory_count_lines WHERE count_id = $1 AND variant_id = $2 AND tenant_id = $3 FOR UPDATE',
+      [countId, variantId, tenantId],
+    );
+    let line = await repo.findOne({
+      where: { countId, variantId, tenantId },
+    });
+    if (!line) {
+      line = repo.create({
+        countId,
+        variantId,
+        expectedQuantity: 0,
+        countedQuantity: 0,
+        tenantId,
+      });
+    }
+    line.countedQuantity += quantity;
+    return repo.save(line);
+  }
+
+  /** Conteo manual compatible con productos que no tienen código individual. */
   async addCount(
     countId: string,
     variantId: string,
     quantity: number,
     tenantId: string,
   ): Promise<InventoryCountLine> {
-    await this.getOpen(countId, tenantId);
-
-    const variant = await this.variantRepo.findOne({
-      where: { id: variantId, tenantId },
-    });
-    if (!variant) throw new NotFoundException('Variante no encontrada');
-
-    return retryOnUniqueViolation(async () => {
-      const existing = await this.lineRepo.findOne({
-        where: { countId, variantId, tenantId },
+    return this.dataSource.transaction(async (manager) => {
+      await this.lockOpen(manager, countId, tenantId);
+      const variant = await manager.getRepository(ProductVariant).findOne({
+        where: { id: variantId, tenantId },
       });
-      if (existing) {
-        existing.countedQuantity += quantity;
-        return this.lineRepo.save(existing);
+      if (!variant) throw new NotFoundException('Variante no encontrada');
+      return this.incrementLine(
+        manager,
+        countId,
+        variantId,
+        quantity,
+        tenantId,
+      );
+    });
+  }
+
+  /**
+   * Escanea un código físico de caja o unidad. El bloqueo de la sesión hace
+   * que dos pistolas nunca puedan contar el mismo código simultáneamente.
+   */
+  async scan(
+    countId: string,
+    input: ScanInput,
+    userId: string,
+    tenantId: string,
+  ): Promise<InventoryCountScan> {
+    return this.dataSource.transaction(async (manager) => {
+      const count = await this.lockOpen(manager, countId, tenantId);
+      const scanRepo = manager.getRepository(InventoryCountScan);
+      const clientScanId = input.clientScanId.trim();
+      const barcode = input.barcode.trim();
+
+      const retried = await scanRepo.findOne({
+        where: { countId, clientScanId, tenantId },
+        relations: { stockUnit: { product: true, warehouse: true } },
+      });
+      if (retried) return retried;
+
+      const unit = await manager.getRepository(StockUnit).findOne({
+        where: { barcode, tenantId },
+        relations: {
+          product: true,
+          warehouse: true,
+          variant: true,
+          contents: { variant: true, size: true },
+        },
+      });
+
+      let result: InventoryCountScanResult;
+      let quantity = 0;
+      let message: string;
+
+      if (!unit) {
+        result = InventoryCountScanResult.UNKNOWN;
+        message = 'Código no registrado en esta tienda';
+      } else {
+        const prior = await scanRepo.findOne({
+          where: {
+            countId,
+            stockUnitId: unit.id,
+            tenantId,
+            result: In(SUCCESS_RESULTS),
+          },
+        });
+        if (prior) {
+          result = InventoryCountScanResult.DUPLICATE;
+          message = `Ya fue contado en ${count.countNumber}`;
+        } else if (unit.status !== StockUnitStatus.IN_STOCK) {
+          result = InventoryCountScanResult.NOT_AVAILABLE;
+          message = `Código con estado ${unit.status}; no se sumó`;
+        } else if (unit.warehouseId !== count.warehouseId) {
+          result = InventoryCountScanResult.WRONG_WAREHOUSE;
+          message = `Pertenece a ${unit.warehouse?.name ?? 'otra bodega'}; no se sumó`;
+        } else {
+          const expected = await manager
+            .getRepository(InventoryCountExpectedUnit)
+            .findOne({
+              where: { countId, stockUnitId: unit.id, tenantId },
+            });
+          result = expected
+            ? InventoryCountScanResult.COUNTED
+            : InventoryCountScanResult.SURPLUS;
+
+          const components = await this.componentsForUnit(manager, unit);
+          for (const component of components) {
+            await this.incrementLine(
+              manager,
+              countId,
+              component.variantId,
+              component.quantity,
+              tenantId,
+            );
+            quantity += component.quantity;
+          }
+          message = expected
+            ? `${unit.product?.name ?? 'Producto'}: ${quantity} unidad(es) contadas`
+            : `Sobrante físico: no estaba al abrir el conteo; se sumaron ${quantity}`;
+        }
       }
-      return this.lineRepo.save(
-        this.lineRepo.create({
+
+      return scanRepo.save(
+        scanRepo.create({
           countId,
-          variantId,
-          countedQuantity: quantity,
+          clientScanId,
+          deviceId: input.deviceId?.trim() || null,
+          barcode,
+          stockUnitId: unit?.id ?? null,
+          stockUnit: unit ?? null,
+          result,
+          quantity,
+          message,
+          scannedById: userId,
           tenantId,
         }),
       );
     });
   }
 
-  /**
-   * Diferencias entre lo contado y lo que dice el sistema.
-   *
-   * Incluye lo que tiene existencias pero **no se contó** (aparece como
-   * faltante total): es justo lo que un conteo debe sacar a la luz.
-   */
+  private async componentsForUnit(
+    manager: EntityManager,
+    unit: StockUnit,
+  ): Promise<Array<{ variantId: string; quantity: number }>> {
+    if (unit.kind === StockUnitKind.BOX) {
+      const contents =
+        unit.contents ??
+        (await manager.getRepository(StockUnitContent).find({
+          where: { boxUnitId: unit.id, tenantId: unit.tenantId },
+        }));
+      const components = contents
+        .filter((content) => content.variantId && content.actualQuantity > 0)
+        .map((content) => ({
+          variantId: content.variantId as string,
+          quantity: content.actualQuantity,
+        }));
+      if (components.length > 0) return components;
+    }
+    if (!unit.variantId) {
+      throw new BadRequestException(
+        `El código ${unit.barcode} no tiene variante asociada y requiere conciliación.`,
+      );
+    }
+    return [{ variantId: unit.variantId, quantity: unit.quantity }];
+  }
+
   async getDifferences(
     countId: string,
     tenantId: string,
@@ -147,101 +372,318 @@ export class InventoryCountsService {
     });
     if (!count) throw new NotFoundException('Conteo no encontrado');
 
-    const [lines, stocks] = await Promise.all([
-      this.lineRepo.find({ where: { countId, tenantId } }),
-      this.stockRepo.find({
-        where: { warehouseId: count.warehouseId, tenantId },
-      }),
-    ]);
-
-    const countedByVariant = new Map(
-      lines.map((l) => [l.variantId, l.countedQuantity]),
-    );
-    const expectedByVariant = new Map(
-      stocks.map((s) => [s.variantId, s.quantity]),
-    );
-
-    const variantIds = new Set([
-      ...countedByVariant.keys(),
-      ...expectedByVariant.keys(),
-    ]);
-    if (variantIds.size === 0) return [];
-
+    const lines = await this.lineRepo.find({ where: { countId, tenantId } });
+    if (lines.length === 0) return [];
     const variants = await this.variantRepo.find({
-      where: { id: In([...variantIds]) },
+      where: { id: In(lines.map((line) => line.variantId)), tenantId },
       relations: { product: true },
     });
-
+    const byVariant = new Map(lines.map((line) => [line.variantId, line]));
     return variants
-      .map((v) => {
-        const expected = expectedByVariant.get(v.id) ?? 0;
-        const counted = countedByVariant.get(v.id) ?? 0;
+      .map((variant) => {
+        const line = byVariant.get(variant.id)!;
         return {
-          variantId: v.id,
-          sku: v.sku,
-          productName: v.product?.name ?? '',
-          size: v.sizeName,
-          color: v.colorName,
-          expected,
-          counted,
-          difference: counted - expected,
+          variantId: variant.id,
+          sku: variant.sku,
+          productName: variant.product?.name ?? '',
+          size: variant.sizeName,
+          color: variant.colorName,
+          expected: line.expectedQuantity,
+          counted: line.countedQuantity,
+          difference: line.countedQuantity - line.expectedQuantity,
         };
       })
-      .filter((d) => d.difference !== 0)
+      .filter((difference) => difference.difference !== 0)
       .sort((a, b) => Math.abs(b.difference) - Math.abs(a.difference));
   }
 
-  /**
-   * Cierra el conteo. Si `adjust` es true, deja el inventario igual a lo
-   * contado y registra el movimiento de ajuste de cada diferencia, para que
-   * quede claro qué se corrigió y por qué.
-   */
+  async getPhysicalDifferences(countId: string, tenantId: string) {
+    const count = await this.countRepo.findOne({
+      where: { id: countId, tenantId },
+    });
+    if (!count) throw new NotFoundException('Conteo no encontrado');
+    const [expected, scans] = await Promise.all([
+      this.expectedUnitRepo.find({
+        where: { countId, tenantId },
+        relations: {
+          stockUnit: {
+            product: true,
+            warehouse: true,
+            size: true,
+            color: true,
+          },
+        },
+        order: { barcode: 'ASC' },
+      }),
+      this.scanRepo.find({
+        where: { countId, tenantId },
+        relations: {
+          stockUnit: {
+            product: true,
+            warehouse: true,
+            size: true,
+            color: true,
+          },
+        },
+        order: { createdAt: 'DESC' },
+      }),
+    ]);
+    const countedIds = new Set(
+      scans
+        .filter((scan) => SUCCESS_RESULTS.includes(scan.result))
+        .map((scan) => scan.stockUnitId),
+    );
+    const expectedIds = new Set(expected.map((row) => row.stockUnitId));
+    return {
+      missing: expected.filter((row) => !countedIds.has(row.stockUnitId)),
+      surplus: scans.filter(
+        (scan) =>
+          SUCCESS_RESULTS.includes(scan.result) &&
+          scan.stockUnitId &&
+          !expectedIds.has(scan.stockUnitId),
+      ),
+      exceptions: scans.filter(
+        (scan) => !SUCCESS_RESULTS.includes(scan.result),
+      ),
+    };
+  }
+
+  async getSession(countId: string, tenantId: string) {
+    const count = await this.countRepo.findOne({
+      where: { id: countId, tenantId },
+    });
+    if (!count) throw new NotFoundException('Conteo no encontrado');
+    const [lines, expected, scans, physical] = await Promise.all([
+      this.lineRepo.find({ where: { countId, tenantId } }),
+      this.expectedUnitRepo.find({ where: { countId, tenantId } }),
+      this.scanRepo.find({
+        where: { countId, tenantId },
+        relations: {
+          stockUnit: {
+            product: true,
+            warehouse: true,
+            size: true,
+            color: true,
+          },
+        },
+        order: { createdAt: 'DESC' },
+        take: 100,
+      }),
+      this.getPhysicalDifferences(countId, tenantId),
+    ]);
+    return {
+      count,
+      summary: {
+        expectedQuantity: lines.reduce(
+          (sum, line) => sum + line.expectedQuantity,
+          0,
+        ),
+        countedQuantity: lines.reduce(
+          (sum, line) => sum + line.countedQuantity,
+          0,
+        ),
+        expectedCodes: expected.length,
+        // No usar `recentScans`: está limitado a 100 para la pantalla.
+        countedCodes:
+          expected.length - physical.missing.length + physical.surplus.length,
+        missingCodes: physical.missing.length,
+        surplusCodes: physical.surplus.length,
+        exceptions: physical.exceptions.length,
+      },
+      recentScans: scans,
+    };
+  }
+
   async close(
     countId: string,
     adjust: boolean,
+    confirmation: string,
+    acknowledgeExceptions: boolean,
     userId: string,
     tenantId: string,
-  ): Promise<{ count: InventoryCount; adjusted: number }> {
-    const count = await this.getOpen(countId, tenantId);
-    const differences = await this.getDifferences(countId, tenantId);
+  ): Promise<{
+    count: InventoryCount;
+    adjusted: number;
+    writtenOffCodes: number;
+  }> {
+    return this.dataSource.transaction(async (manager) => {
+      const count = await this.lockOpen(manager, countId, tenantId);
+      if (confirmation.trim() !== count.countNumber) {
+        throw new BadRequestException(
+          `Escribe ${count.countNumber} para confirmar el cierre irreversible.`,
+        );
+      }
+      const exceptionCount = await manager
+        .getRepository(InventoryCountScan)
+        .count({
+          where: {
+            countId,
+            tenantId,
+            result: In([
+              InventoryCountScanResult.UNKNOWN,
+              InventoryCountScanResult.WRONG_WAREHOUSE,
+              InventoryCountScanResult.NOT_AVAILABLE,
+            ]),
+          },
+        });
+      if (exceptionCount > 0 && !acknowledgeExceptions) {
+        throw new BadRequestException(
+          `Hay ${exceptionCount} novedad(es). Revísalas y confirma que deseas cerrar.`,
+        );
+      }
 
-    await this.dataSource.transaction(async (m) => {
+      const lines = await manager.getRepository(InventoryCountLine).find({
+        where: { countId, tenantId },
+      });
+      const differences = lines.filter(
+        (line) => line.countedQuantity !== line.expectedQuantity,
+      );
+      let writtenOffCodes = 0;
+
       if (adjust) {
-        for (const d of differences) {
-          await m.getRepository(Stock).update(
-            {
-              variantId: d.variantId,
+        for (const line of differences) {
+          const stockRepo = manager.getRepository(Stock);
+          let stock = await stockRepo.findOne({
+            where: {
+              variantId: line.variantId,
               warehouseId: count.warehouseId,
               tenantId,
             },
-            { quantity: d.counted },
-          );
-          await m.getRepository(StockMovement).save(
-            m.getRepository(StockMovement).create({
-              variantId: d.variantId,
+            lock: { mode: 'pessimistic_write' },
+          });
+          if (!stock) {
+            stock = stockRepo.create({
+              variantId: line.variantId,
               warehouseId: count.warehouseId,
-              movementType:
-                d.difference > 0 ? MovementType.IN : MovementType.OUT,
-              quantity: Math.abs(d.difference),
+              quantity: 0,
+              tenantId,
+            });
+          }
+          stock.quantity = line.countedQuantity;
+          await stockRepo.save(stock);
+          const difference = line.countedQuantity - line.expectedQuantity;
+          await manager.getRepository(StockMovement).save(
+            manager.getRepository(StockMovement).create({
+              variantId: line.variantId,
+              warehouseId: count.warehouseId,
+              movementType: difference > 0 ? MovementType.IN : MovementType.OUT,
+              quantity: Math.abs(difference),
               createdById: userId,
-              notes: `Ajuste por conteo ${count.countNumber}: sistema ${d.expected}, contado ${d.counted}`,
+              notes: `Ajuste por conteo ${count.countNumber}: sistema ${line.expectedQuantity}, contado ${line.countedQuantity}`,
               tenantId,
             }),
           );
         }
-      }
-      await m
-        .getRepository(InventoryCount)
-        .update(
-          { id: countId, tenantId },
-          { status: InventoryCountStatus.CLOSED, closedAt: new Date() },
-        );
-    });
 
-    return {
-      count: { ...count, status: InventoryCountStatus.CLOSED },
-      adjusted: adjust ? differences.length : 0,
-    };
+        const expectedUnits = await manager
+          .getRepository(InventoryCountExpectedUnit)
+          .find({
+            where: { countId, tenantId },
+            relations: { stockUnit: true },
+          });
+        const successfulScans = await manager
+          .getRepository(InventoryCountScan)
+          .find({
+            where: { countId, tenantId, result: In(SUCCESS_RESULTS) },
+          });
+        const foundIds = new Set(
+          successfulScans.map((scan) => scan.stockUnitId),
+        );
+        for (const expected of expectedUnits) {
+          if (foundIds.has(expected.stockUnitId)) continue;
+          const unit = await manager.getRepository(StockUnit).findOne({
+            where: { id: expected.stockUnitId, tenantId },
+            lock: { mode: 'pessimistic_write' },
+          });
+          if (
+            !unit ||
+            unit.status !== StockUnitStatus.IN_STOCK ||
+            unit.warehouseId !== count.warehouseId
+          )
+            continue;
+          unit.status = StockUnitStatus.WRITTEN_OFF;
+          await manager.getRepository(StockUnit).save(unit);
+          await manager.getRepository(StockUnitEvent).save(
+            manager.getRepository(StockUnitEvent).create({
+              stockUnitId: unit.id,
+              eventType: StockUnitEventType.WRITTEN_OFF,
+              fromStatus: StockUnitStatus.IN_STOCK,
+              toStatus: StockUnitStatus.WRITTEN_OFF,
+              referenceType: 'InventoryCount',
+              referenceId: count.id,
+              userId,
+              metadata: {
+                countNumber: count.countNumber,
+                reason: 'MISSING_IN_PHYSICAL_COUNT',
+              },
+              tenantId,
+            }),
+          );
+          writtenOffCodes += 1;
+        }
+      }
+
+      count.status = InventoryCountStatus.CLOSED;
+      count.closedAt = new Date();
+      await manager.getRepository(InventoryCount).save(count);
+      return {
+        count,
+        adjusted: adjust ? differences.length : 0,
+        writtenOffCodes,
+      };
+    });
+  }
+
+  async exportCsv(countId: string, tenantId: string): Promise<string> {
+    const count = await this.countRepo.findOne({
+      where: { id: countId, tenantId },
+    });
+    if (!count) throw new NotFoundException('Conteo no encontrado');
+    const physical = await this.getPhysicalDifferences(countId, tenantId);
+    const quote = (value: string | number | null | undefined) =>
+      `"${String(value ?? '').replaceAll('"', '""')}"`;
+    const rows: string[][] = [
+      [
+        'conteo',
+        'tipo',
+        'codigo',
+        'producto',
+        'talla',
+        'color',
+        'bodega',
+        'estado',
+        'fecha',
+      ],
+    ];
+    for (const row of physical.missing) {
+      rows.push([
+        count.countNumber,
+        'FALTANTE',
+        row.barcode,
+        row.stockUnit?.product?.name ?? '',
+        row.stockUnit?.size?.name ?? '',
+        row.stockUnit?.color?.name ?? '',
+        row.stockUnit?.warehouse?.name ?? '',
+        row.stockUnit?.status ?? '',
+        '',
+      ]);
+    }
+    for (const scan of [...physical.surplus, ...physical.exceptions]) {
+      rows.push([
+        count.countNumber,
+        scan.result === InventoryCountScanResult.SURPLUS
+          ? 'SOBRANTE'
+          : 'NOVEDAD',
+        scan.barcode,
+        scan.stockUnit?.product?.name ?? '',
+        scan.stockUnit?.size?.name ?? '',
+        scan.stockUnit?.color?.name ?? '',
+        scan.stockUnit?.warehouse?.name ?? '',
+        scan.message,
+        scan.createdAt?.toISOString() ?? '',
+      ]);
+    }
+    return `\uFEFF${rows.map((row) => row.map(quote).join(',')).join('\n')}`;
   }
 
   async findAll(tenantId: string): Promise<InventoryCount[]> {

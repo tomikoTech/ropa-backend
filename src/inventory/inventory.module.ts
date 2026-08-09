@@ -14,6 +14,8 @@ import { LabelsService } from './labels/labels.service.js';
 import { LabelsController } from './labels/labels.controller.js';
 import { InventoryCount } from './entities/inventory-count.entity.js';
 import { InventoryCountLine } from './entities/inventory-count-line.entity.js';
+import { InventoryCountExpectedUnit } from './entities/inventory-count-expected-unit.entity.js';
+import { InventoryCountScan } from './entities/inventory-count-scan.entity.js';
 import { InventoryCountsService } from './inventory-counts.service.js';
 import { InventoryCountsController } from './inventory-counts.controller.js';
 import { PurchaseBoxLine } from '../purchases/entities/purchase-box-line.entity.js';
@@ -39,6 +41,8 @@ import { SaleItem } from '../pos/entities/sale-item.entity.js';
       SaleItem,
       InventoryCount,
       InventoryCountLine,
+      InventoryCountExpectedUnit,
+      InventoryCountScan,
       PurchaseBoxLine,
       SizeCurveItem,
       ProductVariant,
