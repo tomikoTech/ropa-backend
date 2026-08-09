@@ -1,4 +1,5 @@
 import {
+  buildReconciliationConfirmation,
   ExistingPhysicalUnit,
   LegacyPhysicalUnit,
   previewPhysicalUnitImport,
@@ -174,5 +175,66 @@ describe('previewPhysicalUnitImport', () => {
       ...catalog,
     });
     expect(preview.issues[0].code).toBe('EXISTING_BARCODE_CONFLICT');
+  });
+});
+
+describe('buildReconciliationConfirmation', () => {
+  it('es estable aunque cambie el orden de las diferencias', () => {
+    const params = {
+      checksum: 'corte-1',
+      tenantId: 'tenant-1',
+      aggregateQuantity: 3,
+      resolvedPhysicalQuantity: 8,
+      stockMismatches: [
+        {
+          variantId: 'variant-b',
+          warehouseId: 'warehouse-1',
+          aggregateQuantity: 1,
+          physicalQuantity: 4,
+          difference: 3,
+        },
+        {
+          variantId: 'variant-a',
+          warehouseId: 'warehouse-1',
+          aggregateQuantity: 2,
+          physicalQuantity: 4,
+          difference: 2,
+        },
+      ],
+    };
+
+    expect(buildReconciliationConfirmation(params)).toBe(
+      buildReconciliationConfirmation({
+        ...params,
+        stockMismatches: [...params.stockMismatches].reverse(),
+      }),
+    );
+  });
+
+  it('cambia si cambia cualquier cantidad objetivo', () => {
+    const params = {
+      checksum: 'corte-1',
+      tenantId: 'tenant-1',
+      aggregateQuantity: 1,
+      resolvedPhysicalQuantity: 2,
+      stockMismatches: [
+        {
+          variantId: 'variant-a',
+          warehouseId: 'warehouse-1',
+          aggregateQuantity: 1,
+          physicalQuantity: 2,
+          difference: 1,
+        },
+      ],
+    };
+    expect(buildReconciliationConfirmation(params)).not.toBe(
+      buildReconciliationConfirmation({
+        ...params,
+        resolvedPhysicalQuantity: 3,
+        stockMismatches: [
+          { ...params.stockMismatches[0], physicalQuantity: 3, difference: 2 },
+        ],
+      }),
+    );
   });
 });

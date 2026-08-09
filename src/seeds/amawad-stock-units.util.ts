@@ -2,6 +2,7 @@ import {
   StockUnitKind,
   StockUnitStatus,
 } from '../inventory/entities/stock-unit.entity.js';
+import { createHash } from 'node:crypto';
 
 export interface LegacyPhysicalUnit {
   line: number;
@@ -98,6 +99,39 @@ export interface ProductStockTotal {
   aggregateQuantity: number;
   physicalQuantity: number;
   difference: number;
+}
+
+export function buildReconciliationConfirmation(params: {
+  checksum: string;
+  tenantId: string;
+  aggregateQuantity: number;
+  resolvedPhysicalQuantity: number;
+  stockMismatches: StockMismatch[];
+}) {
+  const mismatches = [...params.stockMismatches]
+    .sort(
+      (a, b) =>
+        a.variantId.localeCompare(b.variantId) ||
+        a.warehouseId.localeCompare(b.warehouseId),
+    )
+    .map((row) => [
+      row.variantId,
+      row.warehouseId,
+      row.aggregateQuantity,
+      row.physicalQuantity,
+    ]);
+  return createHash('sha256')
+    .update(
+      JSON.stringify({
+        checksum: params.checksum,
+        tenantId: params.tenantId,
+        aggregateQuantity: params.aggregateQuantity,
+        resolvedPhysicalQuantity: params.resolvedPhysicalQuantity,
+        mismatches,
+      }),
+    )
+    .digest('hex')
+    .slice(0, 24);
 }
 
 const normalize = (value: string | null | undefined) =>

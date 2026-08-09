@@ -1,9 +1,11 @@
 /**
- * Preview/aplicación de códigos físicos AMAWAD extraídos desde demachine.
+ * Preview/aplicación/conciliación de códigos físicos AMAWAD extraídos desde
+ * demachine.
  *
- * Por defecto SOLO genera reportes. Para escribir exige simultáneamente:
+ * Por defecto SOLO genera reportes. Para importar códigos exige:
  *   MODE=apply CONFIRM_TENANT=amawad CONFIRM_CHECKSUM=<sha256 del preview>
- * y cero conflictos. Nunca modifica la tabla agregada `stock`.
+ * Para conciliar stock agregado exige además el token exacto publicado por el
+ * preview y que todos los códigos ya hayan sido importados.
  */
 import 'dotenv/config';
 import * as fs from 'node:fs';
@@ -14,15 +16,20 @@ import { Tenant } from '../tenants/entities/tenant.entity.js';
 import { Product } from '../products/entities/product.entity.js';
 import { Warehouse } from '../inventory/entities/warehouse.entity.js';
 import { Stock } from '../inventory/entities/stock.entity.js';
+import { StockMovement } from '../inventory/entities/stock-movement.entity.js';
+import { MovementType } from '../common/enums/movement-type.enum.js';
 import { StockUnit } from '../inventory/entities/stock-unit.entity.js';
 import {
   StockUnitEvent,
   StockUnitEventType,
 } from '../inventory/entities/stock-unit-event.entity.js';
 import {
+  buildReconciliationConfirmation,
   LegacyPhysicalUnit,
   previewPhysicalUnitImport,
 } from './amawad-stock-units.util.js';
+
+type ImportMode = 'preview' | 'apply' | 'reconcile';
 
 interface ImportDocument {
   meta: {
@@ -70,6 +77,11 @@ function legacyDate(value: string | null): Date {
 }
 
 async function main() {
+  const requestedMode = process.env.MODE;
+  const mode: ImportMode =
+    requestedMode === 'apply' || requestedMode === 'reconcile'
+      ? requestedMode
+      : 'preview';
   const payloadPath = path.resolve(
     process.env.PAYLOAD_PATH ??
       path.join('..', 'migracion-amawad', 'out', 'stock-units.json'),
@@ -165,8 +177,41 @@ async function main() {
       })),
     });
 
+    const reconciliationConfirmation = buildReconciliationConfirmation({
+      checksum: document.meta.sha256,
+      tenantId: tenant.id,
+      aggregateQuantity: preview.summary.aggregateQuantity,
+      resolvedPhysicalQuantity: preview.summary.resolvedPhysicalQuantity,
+      stockMismatches: preview.stockMismatches,
+    });
+    const productByVariant = new Map(
+      products.flatMap((product) =>
+        product.variants.map((variant) => [variant.id, product] as const),
+      ),
+    );
+    const variantById = new Map(
+      products.flatMap((product) =>
+        product.variants.map((variant) => [variant.id, variant] as const),
+      ),
+    );
+    const warehouseById = new Map(
+      warehouses.map((warehouse) => [warehouse.id, warehouse]),
+    );
+    const reconciliationRows = preview.stockMismatches.map((row) => {
+      const product = productByVariant.get(row.variantId);
+      const variant = variantById.get(row.variantId);
+      return {
+        ...row,
+        productId: product?.id ?? null,
+        productName: product?.name ?? null,
+        size: variant?.sizeRef?.name ?? null,
+        color: variant?.colorRef?.name ?? null,
+        warehouseName: warehouseById.get(row.warehouseId)?.name ?? null,
+      };
+    });
+
     const report = {
-      mode: process.env.MODE === 'apply' ? 'apply' : 'preview',
+      mode,
       tenant: { id: tenant.id, slug: tenant.slug },
       source: document.meta,
       exclusions: {
@@ -182,7 +227,17 @@ async function main() {
       issues: preview.issues,
       stockMismatches: preview.stockMismatches,
       productTotals: preview.productTotals,
-      note: 'El importador nunca modifica stock agregado. Las diferencias requieren conciliación explícita.',
+      reconciliation: {
+        confirmation: reconciliationConfirmation,
+        rows: reconciliationRows,
+        aggregateBefore: preview.summary.aggregateQuantity,
+        physicalTarget: preview.summary.resolvedPhysicalQuantity,
+        difference: preview.summary.aggregateDifference,
+      },
+      note:
+        mode === 'reconcile'
+          ? 'La conciliación reemplaza solamente las cantidades discrepantes y registra un movimiento ADJUSTMENT por fila.'
+          : 'Apply importa códigos sin tocar stock agregado. MODE=reconcile es una operación posterior y explícita.',
     };
     fs.writeFileSync(
       path.join(reportDir, 'stock-units-preview.json'),
@@ -218,30 +273,177 @@ async function main() {
       ],
       preview.productTotals,
     );
+    writeCsv(
+      path.join(reportDir, 'stock-units-reconciliation.csv'),
+      [
+        'productId',
+        'productName',
+        'variantId',
+        'size',
+        'color',
+        'warehouseId',
+        'warehouseName',
+        'aggregateQuantity',
+        'physicalQuantity',
+        'difference',
+      ],
+      reconciliationRows,
+    );
     console.log(JSON.stringify(report, null, 2));
 
-    if (process.env.MODE !== 'apply') {
+    if (mode === 'preview') {
       console.log('PREVIEW: no se escribió ninguna fila en MiPinta.');
       return;
     }
     if (process.env.CONFIRM_TENANT !== 'amawad') {
-      throw new Error('Apply bloqueado: falta CONFIRM_TENANT=amawad.');
+      throw new Error('Operación bloqueada: falta CONFIRM_TENANT=amawad.');
     }
     if (process.env.CONFIRM_CHECKSUM !== document.meta.sha256) {
       throw new Error(
-        `Apply bloqueado: CONFIRM_CHECKSUM debe ser ${document.meta.sha256}.`,
+        `Operación bloqueada: CONFIRM_CHECKSUM debe ser ${document.meta.sha256}.`,
       );
     }
     if (excludedRows.length > 0 && !process.env.EXCLUSION_REASON?.trim()) {
       throw new Error(
-        'Apply bloqueado: toda exclusión exige EXCLUSION_REASON para quedar auditada.',
+        'Operación bloqueada: toda exclusión exige EXCLUSION_REASON para quedar auditada.',
       );
     }
     if (preview.issues.length > 0) {
       throw new Error(
-        `Apply bloqueado: hay ${preview.issues.length} conflicto(s) en el reporte.`,
+        `Operación bloqueada: hay ${preview.issues.length} conflicto(s) en el reporte.`,
       );
     }
+
+    if (mode === 'reconcile') {
+      if (preview.summary.ready > 0) {
+        throw new Error(
+          `Conciliación bloqueada: primero importa los ${preview.summary.ready} código(s) pendientes con MODE=apply.`,
+        );
+      }
+      if (process.env.CONFIRM_RECONCILIATION !== reconciliationConfirmation) {
+        throw new Error(
+          `Conciliación bloqueada: CONFIRM_RECONCILIATION debe ser ${reconciliationConfirmation}.`,
+        );
+      }
+      if (preview.stockMismatches.length === 0) {
+        console.log(
+          'RECONCILE: el stock agregado ya coincide; no se escribió nada.',
+        );
+        return;
+      }
+
+      const backupCreatedAt = new Date();
+      const backupFile = path.join(
+        reportDir,
+        `stock-reconciliation-backup-${backupCreatedAt
+          .toISOString()
+          .replaceAll(':', '-')}.json`,
+      );
+      await AppDataSource.transaction(async (manager) => {
+        const stockRepo = manager.getRepository(Stock);
+        const movementRepo = manager.getRepository(StockMovement);
+        const locked = await stockRepo
+          .createQueryBuilder('stock')
+          .setLock('pessimistic_write')
+          .where('stock.tenant_id = :tenantId', { tenantId: tenant.id })
+          .andWhere(
+            `(${preview.stockMismatches
+              .map(
+                (_, index) =>
+                  `(stock.variant_id = :variant${index} AND stock.warehouse_id = :warehouse${index})`,
+              )
+              .join(' OR ')})`,
+            Object.fromEntries(
+              preview.stockMismatches.flatMap((row, index) => [
+                [`variant${index}`, row.variantId],
+                [`warehouse${index}`, row.warehouseId],
+              ]),
+            ),
+          )
+          .getMany();
+        const lockedByKey = new Map(
+          locked.map((stock) => [
+            `${stock.variantId}|${stock.warehouseId}`,
+            stock,
+          ]),
+        );
+        const exactRows = reconciliationRows.map((row) => {
+          const key = `${row.variantId}|${row.warehouseId}`;
+          const current = lockedByKey.get(key);
+          const currentQuantity = current ? Number(current.quantity) : 0;
+          if (currentQuantity !== row.aggregateQuantity) {
+            throw new Error(
+              `Conciliación abortada: ${key} cambió de ${row.aggregateQuantity} a ${currentQuantity} después del preview.`,
+            );
+          }
+          return { ...row, stockId: current?.id ?? null, currentQuantity };
+        });
+        const backup = {
+          tenant: { id: tenant.id, slug: tenant.slug },
+          source: document.meta,
+          createdAt: backupCreatedAt.toISOString(),
+          confirmation: reconciliationConfirmation,
+          exclusions: report.exclusions,
+          totals: {
+            before: preview.summary.aggregateQuantity,
+            target: preview.summary.resolvedPhysicalQuantity,
+            difference: preview.summary.aggregateDifference,
+          },
+          rows: exactRows,
+        };
+        fs.writeFileSync(backupFile, JSON.stringify(backup, null, 2), 'utf8');
+        writeCsv(
+          backupFile.replace(/\.json$/, '.csv'),
+          [
+            'stockId',
+            'productId',
+            'productName',
+            'variantId',
+            'size',
+            'color',
+            'warehouseId',
+            'warehouseName',
+            'currentQuantity',
+            'physicalQuantity',
+            'difference',
+          ],
+          exactRows,
+        );
+
+        for (const row of exactRows) {
+          const key = `${row.variantId}|${row.warehouseId}`;
+          const current = lockedByKey.get(key);
+          const stock =
+            current ??
+            stockRepo.create({
+              variantId: row.variantId,
+              warehouseId: row.warehouseId,
+              tenantId: tenant.id,
+              quantity: 0,
+              minStock: 0,
+            });
+          stock.quantity = row.physicalQuantity;
+          await stockRepo.save(stock);
+          await movementRepo.save(
+            movementRepo.create({
+              variantId: row.variantId,
+              warehouseId: row.warehouseId,
+              tenantId: tenant.id,
+              movementType: MovementType.ADJUSTMENT,
+              quantity: row.physicalQuantity,
+              referenceType: 'DEMACHINE_RECONCILIATION',
+              referenceId: document.meta.sha256,
+              notes: `Conciliación AMAWAD ${row.currentQuantity}→${row.physicalQuantity}; corte ${document.meta.extracted_at}`,
+            }),
+          );
+        }
+      });
+      console.log(
+        `RECONCILE completado: ${preview.stockMismatches.length} fila(s), ${preview.summary.aggregateQuantity}→${preview.summary.resolvedPhysicalQuantity}. Respaldo: ${backupFile}`,
+      );
+      return;
+    }
+
     if (
       preview.stockMismatches.length > 0 &&
       process.env.CONFIRM_STOCK_MISMATCH !== '1'
