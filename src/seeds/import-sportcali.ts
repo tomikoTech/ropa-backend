@@ -15,9 +15,9 @@
  *   nest build && node dist/seeds/import-sportcali.js               # usa .env (¡PROD!)
  *   DB_HOST=localhost DB_USERNAME=dylanbc1 DB_PASSWORD= DB_DATABASE=ropa_pos \
  *     node dist/seeds/import-sportcali.js                            # prueba local
- *   DRY_RUN=1 node dist/seeds/import-sportcali.js                    # no escribe, solo cuenta
+ *   DRY_RUN=1 RECONCILE_STOCK=1 node dist/seeds/import-sportcali.js # preview completo
  */
-import { DataSource } from 'typeorm';
+import { DataSource, In, Like } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -41,6 +41,7 @@ import { MovementType } from '../common/enums/movement-type.enum.js';
 dotenv.config();
 
 const DRY_RUN = process.env.DRY_RUN === '1';
+const RECONCILE_STOCK = process.env.RECONCILE_STOCK === '1';
 const TENANT_SLUG = 'sportcali';
 const TENANT_NAME = 'Sportcali';
 const SOURCE = 'demachine:sportcali';
@@ -123,6 +124,7 @@ async function main() {
     database: process.env.DB_DATABASE || 'ropa_pos',
     entities: [
       Tenant, User, Category, Product, ProductVariant, Warehouse, Stock, StockMovement, StoreSettings,
+      Size, Color,
     ],
     synchronize: isLocal, // en local crea las columnas nuevas (brand, source_ref); en prod NO
     ...(!isLocal && { ssl: { rejectUnauthorized: false } }),
@@ -139,7 +141,18 @@ async function main() {
   const movementRepo = dataSource.getRepository(StockMovement);
   const settingsRepo = dataSource.getRepository(StoreSettings);
 
-  const stats = { warehouses: 0, staff: 0, products: 0, variants: 0, stockRows: 0, skippedExisting: 0 };
+  const stats = {
+    warehouses: 0,
+    staff: 0,
+    products: 0,
+    variants: 0,
+    stockRows: 0,
+    skippedExisting: 0,
+    reconciledProducts: 0,
+    stockAdjustments: 0,
+    variantsAddedToExisting: 0,
+    staleStockAdjustments: 0,
+  };
 
   // ── 1. Tenant ──
   let tenant = await tenantRepo.findOne({ where: { slug: TENANT_SLUG } });
@@ -227,6 +240,7 @@ async function main() {
   const usedSkuPrefixes = new Set<string>();
   const usedSlugs = new Set<string>();
   const failures: { source_id: number; error: string }[] = [];
+  const catalog = new CatalogCache(dataSource);
   const variantKey = (size: string | null, color: string | null) =>
     `${size || ''}|${color || ''}`;
   // Color/talla completos y normalizados para el SKU (evita colisiones de truncado).
@@ -238,11 +252,84 @@ async function main() {
       .replace(/[^A-Z0-9]+/g, '')
       .slice(0, 12) || 'NA';
 
+  const reconcileExistingProduct = async (product: Product, p: PayloadProduct) => {
+    const variants = await variantRepo.find({ where: { tenantId, productId: product.id } });
+    const byKey = new Map<string, ProductVariant>();
+    for (const variant of variants) {
+      byKey.set(`${variant.sizeId || ''}|${variant.colorId || ''}`, variant);
+    }
+    for (const v of p.variants) {
+      const sizeId = await catalog.sizeId(v.size, tenantId);
+      const colorId = await catalog.colorId(v.color, tenantId);
+      const key = `${sizeId || ''}|${colorId || ''}`;
+      if (byKey.has(key)) continue;
+      let sku = `${product.skuPrefix}-${skuPart(v.size || '')}-${skuPart(v.color || '')}`;
+      let suffix = 1;
+      while (await variantRepo.findOne({ where: { tenantId, sku } })) {
+        sku = `${product.skuPrefix}-${skuPart(v.size || '')}-${skuPart(v.color || '')}-${++suffix}`;
+      }
+      const variant = variantRepo.create({
+        productId: product.id,
+        sku,
+        sizeId,
+        colorId,
+        barcode: `78${Date.now().toString().slice(-8)}${String(suffix).padStart(4, '0')}`,
+        isActive: true,
+        tenantId,
+      });
+      if (!DRY_RUN) await variantRepo.save(variant);
+      byKey.set(key, variant);
+      stats.variantsAddedToExisting++;
+    }
+
+    const desired = new Map<string, number>();
+    for (const row of p.stock_by_warehouse) {
+      const sizeId = await catalog.sizeId(row.size, tenantId);
+      const colorId = await catalog.colorId(row.color, tenantId);
+      const variant = byKey.get(`${sizeId || ''}|${colorId || ''}`);
+      const warehouseId = whMap.get(String(row.warehouse_id));
+      if (!variant || !warehouseId) continue;
+      const key = `${variant.id}|${warehouseId}`;
+      desired.set(key, (desired.get(key) || 0) + (row.qty || 0));
+    }
+
+    const variantIds = [...byKey.values()].map((variant) => variant.id).filter(Boolean);
+    const currentRows = variantIds.length
+      ? await stockRepo.find({ where: { tenantId, variantId: In(variantIds) } })
+      : [];
+    const currentByKey = new Map(currentRows.map((row) => [`${row.variantId}|${row.warehouseId}`, row]));
+    const keys = new Set([...currentByKey.keys(), ...desired.keys()]);
+    for (const key of keys) {
+      const current = currentByKey.get(key);
+      const target = desired.get(key) || 0;
+      const before = current?.quantity || 0;
+      if (before === target) continue;
+      const [variantId, warehouseId] = key.split('|');
+      if (!DRY_RUN) {
+        const row = current || stockRepo.create({ variantId, warehouseId, tenantId, minStock: 0 });
+        row.quantity = target;
+        await stockRepo.save(row);
+        await movementRepo.save(movementRepo.create({
+          variantId,
+          warehouseId,
+          movementType: MovementType.ADJUSTMENT,
+          quantity: Math.abs(target - before),
+          referenceType: 'RECONCILE_SPORTCALI',
+          notes: `Conciliación demachine ${SOURCE}:${p.source_id} (${before} -> ${target})`,
+          tenantId,
+        }));
+      }
+      stats.stockAdjustments++;
+    }
+    stats.reconciledProducts++;
+  };
+
   for (const p of payload.products) {
     const sourceRef = `${SOURCE}:${p.source_id}`;
     const existing = await productRepo.findOne({ where: { tenantId, sourceRef } });
     if (existing) {
       stats.skippedExisting++;
+      if (RECONCILE_STOCK) await reconcileExistingProduct(existing, p);
       continue;
     }
 
@@ -357,6 +444,38 @@ async function main() {
     }
   }
   if (failures.length) console.log(`\n⚠️  ${failures.length} productos fallaron:`, failures.slice(0, 10));
+
+  // Si una referencia desaparece del reporte fuente, no la borramos: dejamos
+  // su stock en cero y registramos el ajuste para no conservar pares obsoletos.
+  if (RECONCILE_STOCK) {
+    const sourceRefs = new Set(payload.products.map((p) => `${SOURCE}:${p.source_id}`));
+    const sourceProducts = await productRepo.find({ where: { tenantId, sourceRef: Like(`${SOURCE}:%`) } });
+    for (const product of sourceProducts) {
+      if (!product.sourceRef || sourceRefs.has(product.sourceRef)) continue;
+      const variants = await variantRepo.find({ where: { tenantId, productId: product.id } });
+      for (const variant of variants) {
+        const rows = await stockRepo.find({ where: { tenantId, variantId: variant.id } });
+        for (const row of rows) {
+          if (row.quantity === 0) continue;
+          const before = row.quantity;
+          row.quantity = 0;
+          if (!DRY_RUN) {
+            await stockRepo.save(row);
+            await movementRepo.save(movementRepo.create({
+              variantId: variant.id,
+              warehouseId: row.warehouseId,
+              movementType: MovementType.ADJUSTMENT,
+              quantity: Math.abs(before),
+              referenceType: 'RECONCILE_SPORTCALI_STALE',
+              notes: `Referencia ausente del reporte demachine ${product.sourceRef} (${before} -> 0)`,
+              tenantId,
+            }));
+          }
+          stats.staleStockAdjustments++;
+        }
+      }
+    }
+  }
 
   // ── 5. Store settings ──
   let settings = await settingsRepo.findOne({ where: { tenantId } });
