@@ -5,6 +5,7 @@ import {
   Body,
   Param,
   ParseUUIDPipe,
+  Query,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { ReturnsService } from './returns.service.js';
@@ -41,6 +42,18 @@ export class ReturnsController {
   @ApiOperation({ summary: 'Listar notas crédito' })
   findCreditNotes(@TenantId() tenantId: string) {
     return this.returnsService.findCreditNotes(tenantId);
+  }
+
+  @Get('sales/search')
+  @ApiOperation({ summary: 'Buscar venta para cambio o devolución' })
+  searchSale(@Query('q') query: string, @TenantId() tenantId: string) {
+    return this.returnsService.searchSale(query, tenantId);
+  }
+
+  @Get('scan/:barcode')
+  @ApiOperation({ summary: 'Resolver código físico para cambio o devolución' })
+  scanBarcode(@Param('barcode') barcode: string, @TenantId() tenantId: string) {
+    return this.returnsService.scanBarcode(barcode, tenantId);
   }
 
   @Get(':id')

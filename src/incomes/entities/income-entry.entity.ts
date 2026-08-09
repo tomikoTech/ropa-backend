@@ -13,10 +13,9 @@ import {
   IncomeCategory,
 } from '../../common/enums/income-type.enum.js';
 
-// Libro de movimientos manuales de tesorería: ingresos que no vienen de una
-// venta (OTROS), ajustes de saldo y transferencias entre banco/método. Las
-// ventas NO se guardan aquí (se derivan de los pagos); este libro solo agrega
-// lo manual sobre esa base.
+// Libro complementario de tesorería: movimientos manuales y diferencias de
+// cambios/devoluciones. La venta original se deriva de payments; aquí solo se
+// registra el valor incremental (positivo o negativo) de la operación.
 @Entity('income_entries')
 export class IncomeEntry extends TenantAwareEntity {
   @PrimaryGeneratedColumn('uuid')

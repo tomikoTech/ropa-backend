@@ -13,6 +13,7 @@ describe('Returns (e2e)', () => {
   let warehouseId: string;
   let clientId: string;
   let saleId: string;
+  let saleNumber: string;
   let saleItemId: string;
   let _saleItemQuantity: number;
   let returnId: string;
@@ -104,6 +105,7 @@ describe('Returns (e2e)', () => {
 
     const sale = saleRes.body;
     saleId = sale.id;
+    saleNumber = sale.saleNumber;
     saleItemId = sale.items[0].id;
     _saleItemQuantity = sale.items[0].quantity;
 
@@ -221,6 +223,41 @@ describe('Returns (e2e)', () => {
   });
 
   // ─── VALIDATION: RETURN MORE THAN SOLD ───
+
+  it('GET /api/returns/sales/search → trae el saldo ya devuelto', async () => {
+    const sale = await request(app.getHttpServer())
+      .get('/api/returns/sales/search')
+      .query({ q: saleNumber })
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const item = sale.body.items.find(
+      (candidate: { id: string }) => candidate.id === saleItemId,
+    );
+    expect(item.returnedQuantity).toBe(2);
+    expect(item.returnableQuantity).toBe(1);
+  });
+
+  it('serializa dos devoluciones concurrentes y no excede el saldo vendido', async () => {
+    const payload = {
+      saleId,
+      reason: 'Concurrencia E2E',
+      items: [{ saleItemId, quantity: 1 }],
+    };
+    const responses = await Promise.all(
+      [payload, payload].map((body) =>
+        request(app.getHttpServer())
+          .post('/api/returns')
+          .set('Authorization', `Bearer ${token}`)
+          .send(body),
+      ),
+    );
+    expect(responses.map((response) => response.status).sort()).toEqual([
+      201, 400,
+    ]);
+    expect(
+      responses.find((response) => response.status === 400)?.body.message,
+    ).toContain('saldo pendiente');
+  });
 
   it('POST /api/returns → rejects returning more than sold quantity', async () => {
     const res = await request(app.getHttpServer())

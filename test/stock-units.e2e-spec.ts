@@ -16,9 +16,43 @@ describe('Recepción por cajas y apertura de bultos (e2e)', () => {
   let curveSizeIds: string[] = [];
   let productName: string;
   let orderNumber: string;
+  let soldUnitBarcode: string;
+  let soldSaleId: string;
+  let soldSaleItemId: string;
 
   const ts = Date.now();
   const auth = () => ({ Authorization: `Bearer ${token}` });
+  const sellAvailableUnit = async () => {
+    const list = await request(app.getHttpServer())
+      .get(`/api/stock-units?boxLineId=${boxLineId}`)
+      .set(auth())
+      .expect(200);
+    const unit = list.body.find(
+      (candidate: { kind: string; status: string }) =>
+        candidate.kind === 'UNIT' && candidate.status === 'IN_STOCK',
+    );
+    const scan = await request(app.getHttpServer())
+      .get(`/api/pos/scan/${unit.barcode}`)
+      .set(auth())
+      .expect(200);
+    const sale = await request(app.getHttpServer())
+      .post('/api/pos/sales')
+      .set(auth())
+      .send({
+        warehouseId,
+        items: [
+          {
+            variantId: scan.body.variantId,
+            stockUnitId: unit.id,
+            quantity: 1,
+            unitPrice: 100000,
+          },
+        ],
+        payments: [{ method: 'EFECTIVO', amount: 100000 }],
+      })
+      .expect(201);
+    return { unit, sale: sale.body };
+  };
 
   beforeAll(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -524,6 +558,9 @@ describe('Recepción por cajas y apertura de bultos (e2e)', () => {
         payments: [{ method: 'EFECTIVO', amount: 100000 }],
       })
       .expect(201);
+    soldUnitBarcode = unit.barcode;
+    soldSaleId = sale.body.id;
+    soldSaleItemId = sale.body.items[0].id;
 
     const trace = await request(app.getHttpServer())
       .get(`/api/stock-units/trace/${unit.barcode}`)
@@ -536,6 +573,227 @@ describe('Recepción por cajas y apertura de bultos (e2e)', () => {
         (event: { eventType: string }) => event.eventType === 'SOLD',
       ),
     ).toBe(true);
+  });
+
+  it('resuelve el código vendido y permite cambiarlo por otro código disponible', async () => {
+    const returnedScan = await request(app.getHttpServer())
+      .get(`/api/returns/scan/${soldUnitBarcode}`)
+      .set(auth())
+      .expect(200);
+    expect(returnedScan.body.returnEligible).toBe(true);
+    expect(returnedScan.body.sale.id).toBe(soldSaleId);
+    expect(returnedScan.body.saleItem.id).toBe(soldSaleItemId);
+
+    const list = await request(app.getHttpServer())
+      .get(`/api/stock-units?boxLineId=${boxLineId}`)
+      .set(auth())
+      .expect(200);
+    const replacement = list.body.find(
+      (candidate: { kind: string; status: string; barcode: string }) =>
+        candidate.kind === 'UNIT' &&
+        candidate.status === 'IN_STOCK' &&
+        candidate.barcode !== soldUnitBarcode,
+    );
+    const replacementScan = await request(app.getHttpServer())
+      .get(`/api/returns/scan/${replacement.barcode}`)
+      .set(auth())
+      .expect(200);
+    expect(replacementScan.body.replacementEligible).toBe(true);
+
+    const result = await request(app.getHttpServer())
+      .post('/api/returns')
+      .set(auth())
+      .send({
+        saleId: soldSaleId,
+        reason: 'Cambio de talla E2E',
+        destinationWarehouseId: warehouseId,
+        items: [
+          {
+            saleItemId: soldSaleItemId,
+            returnedBarcode: soldUnitBarcode,
+            replacementBarcode: replacement.barcode,
+            replacementPrice: 100000,
+          },
+        ],
+      })
+      .expect(201);
+
+    expect(Number(result.body.priceDifference)).toBe(0);
+    expect(Number(result.body.refundAmount)).toBe(0);
+    expect(result.body.items[0].stockUnit.barcode).toBe(soldUnitBarcode);
+    expect(result.body.items[0].replacementStockUnit.barcode).toBe(
+      replacement.barcode,
+    );
+
+    const returnedTrace = await request(app.getHttpServer())
+      .get(`/api/stock-units/trace/${soldUnitBarcode}`)
+      .set(auth())
+      .expect(200);
+    expect(returnedTrace.body.unit.status).toBe('IN_STOCK');
+    expect(
+      returnedTrace.body.events.some(
+        (event: { eventType: string }) => event.eventType === 'RETURNED',
+      ),
+    ).toBe(true);
+
+    const replacementTrace = await request(app.getHttpServer())
+      .get(`/api/stock-units/trace/${replacement.barcode}`)
+      .set(auth())
+      .expect(200);
+    expect(replacementTrace.body.unit.status).toBe('SOLD');
+    expect(
+      replacementTrace.body.events.some(
+        (event: { eventType: string; referenceType: string }) =>
+          event.eventType === 'SOLD' && event.referenceType === 'RETURN',
+      ),
+    ).toBe(true);
+  });
+
+  it('impide devolver dos veces el mismo código físico', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/returns')
+      .set(auth())
+      .send({
+        saleId: soldSaleId,
+        reason: 'Duplicada E2E',
+        destinationWarehouseId: warehouseId,
+        items: [
+          {
+            saleItemId: soldSaleItemId,
+            returnedBarcode: soldUnitBarcode,
+          },
+        ],
+        settlementMethod: 'EFECTIVO',
+      })
+      .expect(400);
+    expect(String(res.body.message)).toMatch(
+      /no está vendido|saldo pendiente/i,
+    );
+  });
+
+  it('calcula y exige el cobro cuando el reemplazo vale más', async () => {
+    const { unit: returned, sale } = await sellAvailableUnit();
+    const beforeSummary = await request(app.getHttpServer())
+      .get('/api/incomes/summary')
+      .set(auth())
+      .expect(200);
+    const list = await request(app.getHttpServer())
+      .get(`/api/stock-units?boxLineId=${boxLineId}`)
+      .set(auth())
+      .expect(200);
+    const replacement = list.body.find(
+      (candidate: { kind: string; status: string; id: string }) =>
+        candidate.kind === 'UNIT' &&
+        candidate.status === 'IN_STOCK' &&
+        candidate.id !== returned.id,
+    );
+    const payload = {
+      saleId: sale.id,
+      reason: 'Cambio por producto más costoso',
+      destinationWarehouseId: warehouseId,
+      items: [
+        {
+          saleItemId: sale.items[0].id,
+          returnedBarcode: returned.barcode,
+          replacementBarcode: replacement.barcode,
+          replacementPrice: 120000,
+        },
+      ],
+    };
+    await request(app.getHttpServer())
+      .post('/api/returns')
+      .set(auth())
+      .send(payload)
+      .expect(400);
+    const result = await request(app.getHttpServer())
+      .post('/api/returns')
+      .set(auth())
+      .send({ ...payload, settlementMethod: 'EFECTIVO' })
+      .expect(201);
+    expect(Number(result.body.priceDifference)).toBe(20000);
+    expect(Number(result.body.refundAmount)).toBe(0);
+    expect(result.body.settlementMethod).toBe('EFECTIVO');
+    const afterSummary = await request(app.getHttpServer())
+      .get('/api/incomes/summary')
+      .set(auth())
+      .expect(200);
+    expect(Number(afterSummary.body.totals.ventas)).toBe(
+      Number(beforeSummary.body.totals.ventas) + 20000,
+    );
+  });
+
+  it('calcula el reintegro cuando el reemplazo vale menos', async () => {
+    const { unit: returned, sale } = await sellAvailableUnit();
+    const beforeSummary = await request(app.getHttpServer())
+      .get('/api/incomes/summary')
+      .set(auth())
+      .expect(200);
+    const list = await request(app.getHttpServer())
+      .get(`/api/stock-units?boxLineId=${boxLineId}`)
+      .set(auth())
+      .expect(200);
+    const replacement = list.body.find(
+      (candidate: { kind: string; status: string; id: string }) =>
+        candidate.kind === 'UNIT' &&
+        candidate.status === 'IN_STOCK' &&
+        candidate.id !== returned.id,
+    );
+    const result = await request(app.getHttpServer())
+      .post('/api/returns')
+      .set(auth())
+      .send({
+        saleId: sale.id,
+        reason: 'Cambio por producto menos costoso',
+        destinationWarehouseId: warehouseId,
+        settlementMethod: 'EFECTIVO',
+        items: [
+          {
+            saleItemId: sale.items[0].id,
+            returnedBarcode: returned.barcode,
+            replacementBarcode: replacement.barcode,
+            replacementPrice: 80000,
+          },
+        ],
+      })
+      .expect(201);
+    expect(Number(result.body.priceDifference)).toBe(-20000);
+    expect(Number(result.body.refundAmount)).toBe(20000);
+    const afterSummary = await request(app.getHttpServer())
+      .get('/api/incomes/summary')
+      .set(auth())
+      .expect(200);
+    expect(Number(afterSummary.body.totals.ventas)).toBe(
+      Number(beforeSummary.body.totals.ventas) - 20000,
+    );
+  });
+
+  it('permite devolver sin reemplazo y deja el código disponible', async () => {
+    const { unit: returned, sale } = await sellAvailableUnit();
+    const result = await request(app.getHttpServer())
+      .post('/api/returns')
+      .set(auth())
+      .send({
+        saleId: sale.id,
+        reason: 'Devolución sin reemplazo',
+        destinationWarehouseId: warehouseId,
+        settlementMethod: 'EFECTIVO',
+        items: [
+          {
+            saleItemId: sale.items[0].id,
+            returnedBarcode: returned.barcode,
+          },
+        ],
+      })
+      .expect(201);
+    expect(Number(result.body.priceDifference)).toBe(-100000);
+    expect(Number(result.body.refundAmount)).toBe(100000);
+    const scan = await request(app.getHttpServer())
+      .get(`/api/returns/scan/${returned.barcode}`)
+      .set(auth())
+      .expect(200);
+    expect(scan.body.unit.status).toBe('IN_STOCK');
+    expect(scan.body.returnEligible).toBe(false);
+    expect(scan.body.replacementEligible).toBe(true);
   });
 
   it('genera las etiquetas en ZPL, una por bulto', async () => {

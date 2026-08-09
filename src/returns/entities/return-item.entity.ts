@@ -9,6 +9,7 @@ import { Return } from './return.entity.js';
 import { SaleItem } from '../../pos/entities/sale-item.entity.js';
 import { ProductVariant } from '../../products/entities/product-variant.entity.js';
 import { TenantAwareEntity } from '../../common/entities/tenant-aware.entity.js';
+import { StockUnit } from '../../inventory/entities/stock-unit.entity.js';
 
 @Entity('return_items')
 export class ReturnItem extends TenantAwareEntity {
@@ -41,4 +42,43 @@ export class ReturnItem extends TenantAwareEntity {
 
   @Column({ name: 'unit_price', type: 'decimal', precision: 14, scale: 2 })
   unitPrice: number;
+
+  @Column({
+    name: 'returned_value',
+    type: 'decimal',
+    precision: 14,
+    scale: 2,
+    default: 0,
+  })
+  returnedValue: number;
+
+  @ManyToOne(() => StockUnit, { nullable: true, onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'stock_unit_id' })
+  stockUnit: StockUnit | null;
+
+  @Column({ name: 'stock_unit_id', type: 'uuid', nullable: true })
+  stockUnitId: string | null;
+
+  @ManyToOne(() => StockUnit, { nullable: true, onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'replacement_stock_unit_id' })
+  replacementStockUnit: StockUnit | null;
+
+  @Column({ name: 'replacement_stock_unit_id', type: 'uuid', nullable: true })
+  replacementStockUnitId: string | null;
+
+  @ManyToOne(() => ProductVariant, { nullable: true, onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'replacement_variant_id' })
+  replacementVariant: ProductVariant | null;
+
+  @Column({ name: 'replacement_variant_id', type: 'uuid', nullable: true })
+  replacementVariantId: string | null;
+
+  @Column({
+    name: 'replacement_price',
+    type: 'decimal',
+    precision: 14,
+    scale: 2,
+    nullable: true,
+  })
+  replacementPrice: number | null;
 }

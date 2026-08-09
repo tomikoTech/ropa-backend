@@ -17,6 +17,25 @@ import { ReturnStatus } from '../common/enums/return-status.enum.js';
 import { SaleStatus } from '../common/enums/sale-status.enum.js';
 import { MovementType } from '../common/enums/movement-type.enum.js';
 import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
+import {
+  StockUnit,
+  StockUnitStatus,
+} from '../inventory/entities/stock-unit.entity.js';
+import {
+  StockUnitEvent,
+  StockUnitEventType,
+} from '../inventory/entities/stock-unit-event.entity.js';
+import { Warehouse } from '../inventory/entities/warehouse.entity.js';
+import { User } from '../users/entities/user.entity.js';
+import { Bank } from '../banks/entities/bank.entity.js';
+import { PaymentMethod } from '../common/enums/payment-method.enum.js';
+import { IncomeEntry } from '../incomes/entities/income-entry.entity.js';
+import {
+  IncomeCategory,
+  IncomeType,
+} from '../common/enums/income-type.enum.js';
+
+const money = (value: number) => Math.round(value * 100) / 100;
 
 @Injectable()
 export class ReturnsService {
@@ -78,10 +97,11 @@ export class ReturnsService {
         const stockRepo = manager.getRepository(Stock);
         const movementRepo = manager.getRepository(StockMovement);
 
-        // Validate sale
+        // La fila de venta serializa dos devoluciones concurrentes de la misma
+        // factura. Sin este lock, ambas podrían leer el mismo saldo devolvible.
         const sale = await saleRepo.findOne({
           where: { id: dto.saleId, tenantId },
-          relations: ['items', 'client'],
+          lock: { mode: 'pessimistic_write' },
         });
         if (!sale) {
           throw new NotFoundException('Venta no encontrada');
@@ -92,26 +112,193 @@ export class ReturnsService {
           );
         }
 
-        const returnNumber = await this.generateReturnNumber(tenantId);
-        let refundAmount = 0;
+        const saleItems = await manager.getRepository(SaleItem).find({
+          where: { saleId: sale.id, tenantId },
+        });
+        const duplicateItem = dto.items.find(
+          (item, index) =>
+            dto.items.findIndex(
+              (candidate) => candidate.saleItemId === item.saleItemId,
+            ) !== index,
+        );
+        if (duplicateItem) {
+          throw new BadRequestException(
+            'Cada item de venta puede aparecer una sola vez por devolución',
+          );
+        }
 
-        // Validate items and calculate refund
-        const returnItemsData: { saleItem: SaleItem; quantity: number }[] = [];
+        const destinationWarehouseId =
+          dto.destinationWarehouseId ?? sale.warehouseId;
+        const destinationWarehouse = await manager
+          .getRepository(Warehouse)
+          .findOne({ where: { id: destinationWarehouseId, tenantId } });
+        if (!destinationWarehouse) {
+          throw new NotFoundException('Bodega destino no encontrada');
+        }
+        const receivedById = dto.receivedById ?? userId;
+        const receivedBy = await manager
+          .getRepository(User)
+          .findOne({ where: { id: receivedById, tenantId } });
+        if (!receivedBy) {
+          throw new NotFoundException('Responsable de recepción no encontrado');
+        }
+        if (dto.settlementBankId) {
+          const bank = await manager.getRepository(Bank).findOne({
+            where: { id: dto.settlementBankId, tenantId, isActive: true },
+          });
+          if (!bank) throw new NotFoundException('Banco no encontrado');
+        }
+
+        const returnNumber = await this.generateReturnNumber(tenantId);
+        let returnedTotal = 0;
+        let replacementTotal = 0;
+
+        const returnItemsData: {
+          saleItem: SaleItem;
+          quantity: number;
+          returnedValue: number;
+          returnedUnit: StockUnit | null;
+          replacementUnit: StockUnit | null;
+          replacementPrice: number | null;
+        }[] = [];
 
         for (const itemDto of dto.items) {
-          const saleItem = sale.items.find((i) => i.id === itemDto.saleItemId);
+          const saleItem = saleItems.find((i) => i.id === itemDto.saleItemId);
           if (!saleItem) {
             throw new NotFoundException(
               `Item de venta ${itemDto.saleItemId} no encontrado`,
             );
           }
-          if (itemDto.quantity > saleItem.quantity) {
+          let returnedUnit: StockUnit | null = null;
+          if (itemDto.returnedBarcode?.trim()) {
+            returnedUnit = await manager.getRepository(StockUnit).findOne({
+              where: { barcode: itemDto.returnedBarcode.trim(), tenantId },
+              lock: { mode: 'pessimistic_write' },
+            });
+            if (!returnedUnit) {
+              throw new NotFoundException(
+                `Código devuelto ${itemDto.returnedBarcode} no encontrado`,
+              );
+            }
+            if (saleItem.stockUnitId !== returnedUnit.id) {
+              throw new BadRequestException(
+                `El código ${returnedUnit.barcode} no pertenece a este item de la venta`,
+              );
+            }
+            if (returnedUnit.status !== StockUnitStatus.SOLD) {
+              throw new BadRequestException(
+                `El código ${returnedUnit.barcode} no está vendido; estado actual: ${returnedUnit.status}`,
+              );
+            }
+          }
+
+          const quantity = returnedUnit?.quantity ?? itemDto.quantity;
+          if (!quantity || !Number.isInteger(quantity) || quantity <= 0) {
             throw new BadRequestException(
-              `Cantidad a devolver (${itemDto.quantity}) excede la vendida (${saleItem.quantity}) para "${saleItem.productName}"`,
+              `Indica una cantidad o escanea el código físico de "${saleItem.productName}"`,
             );
           }
-          returnItemsData.push({ saleItem, quantity: itemDto.quantity });
-          refundAmount += itemDto.quantity * Number(saleItem.unitPrice);
+          if (
+            returnedUnit &&
+            itemDto.quantity &&
+            itemDto.quantity !== quantity
+          ) {
+            throw new BadRequestException(
+              `El código ${returnedUnit.barcode} representa ${quantity} unidad(es) y no admite devolución parcial`,
+            );
+          }
+
+          const alreadyReturned = await returnItemRepo
+            .createQueryBuilder('item')
+            .innerJoin('item.return', 'ret')
+            .select('COALESCE(SUM(item.quantity), 0)', 'quantity')
+            .where('item.sale_item_id = :saleItemId', {
+              saleItemId: saleItem.id,
+            })
+            .andWhere('item.tenant_id = :tenantId', { tenantId })
+            .andWhere('ret.status = :status', {
+              status: ReturnStatus.COMPLETED,
+            })
+            .getRawOne<{ quantity: string }>();
+          const remaining =
+            saleItem.quantity - Number(alreadyReturned?.quantity ?? 0);
+          if (quantity > remaining) {
+            throw new BadRequestException(
+              `Cantidad a devolver (${quantity}) excede el saldo pendiente (${remaining}) para "${saleItem.productName}"`,
+            );
+          }
+
+          let replacementUnit: StockUnit | null = null;
+          let replacementPrice: number | null = null;
+          if (itemDto.replacementBarcode?.trim()) {
+            if (!returnedUnit) {
+              throw new BadRequestException(
+                'Un cambio por código exige escanear también el código devuelto',
+              );
+            }
+            replacementUnit = await manager.getRepository(StockUnit).findOne({
+              where: { barcode: itemDto.replacementBarcode.trim(), tenantId },
+              lock: { mode: 'pessimistic_write' },
+            });
+            if (!replacementUnit) {
+              throw new NotFoundException(
+                `Código de reemplazo ${itemDto.replacementBarcode} no encontrado`,
+              );
+            }
+            if (replacementUnit.id === returnedUnit.id) {
+              throw new BadRequestException(
+                'El código devuelto y el reemplazo deben ser diferentes',
+              );
+            }
+            if (
+              replacementUnit.status !== StockUnitStatus.IN_STOCK ||
+              !replacementUnit.variantId
+            ) {
+              throw new BadRequestException(
+                `El reemplazo ${replacementUnit.barcode} no está disponible`,
+              );
+            }
+            if (itemDto.replacementPrice == null) {
+              throw new BadRequestException(
+                'Confirma el valor total del producto de reemplazo',
+              );
+            }
+            replacementPrice = money(itemDto.replacementPrice);
+            replacementTotal += replacementPrice;
+          }
+
+          const returnedValue = money(
+            (Number(saleItem.lineTotal) / saleItem.quantity) * quantity,
+          );
+          returnedTotal += returnedValue;
+          returnItemsData.push({
+            saleItem,
+            quantity,
+            returnedValue,
+            returnedUnit,
+            replacementUnit,
+            replacementPrice,
+          });
+        }
+
+        returnedTotal = money(returnedTotal);
+        replacementTotal = money(replacementTotal);
+        const priceDifference = money(replacementTotal - returnedTotal);
+        const hasPhysicalFlow = returnItemsData.some(
+          (item) => item.returnedUnit || item.replacementUnit,
+        );
+        if (hasPhysicalFlow && priceDifference !== 0 && !dto.settlementMethod) {
+          throw new BadRequestException(
+            'Selecciona la forma de pago o reintegro de la diferencia',
+          );
+        }
+        if (
+          dto.settlementMethod === PaymentMethod.TRANSFERENCIA &&
+          !dto.settlementBankId
+        ) {
+          throw new BadRequestException(
+            'Selecciona el banco para la transferencia',
+          );
         }
 
         // Create return
@@ -122,40 +309,96 @@ export class ReturnsService {
           userId,
           reason: dto.reason,
           status: ReturnStatus.COMPLETED,
-          refundAmount,
+          refundAmount: Math.max(-priceDifference, 0),
+          priceDifference,
+          settlementMethod: dto.settlementMethod ?? null,
+          settlementBankId: dto.settlementBankId ?? null,
+          settlementReference: dto.settlementReference?.trim() || null,
+          receivedById,
+          destinationWarehouseId,
+          notes: dto.notes?.trim() || null,
           tenantId,
         });
         const savedReturn = await returnRepo.save(returnEntity);
 
+        // La diferencia hace parte de la misma operación comercial. Un valor
+        // positivo entra; uno negativo sale. Crédito no mueve caja/banco.
+        if (
+          priceDifference !== 0 &&
+          dto.settlementMethod &&
+          dto.settlementMethod !== PaymentMethod.CREDITO
+        ) {
+          const incomeRepo = manager.getRepository(IncomeEntry);
+          await incomeRepo.save(
+            incomeRepo.create({
+              type: IncomeType.INGRESO,
+              category: IncomeCategory.VENTAS,
+              amount: priceDifference,
+              method: dto.settlementMethod,
+              bankId: dto.settlementBankId ?? null,
+              note: `${priceDifference > 0 ? 'Cobro' : 'Reintegro'} de diferencia ${returnNumber}`,
+              createdById: userId,
+              tenantId,
+            }),
+          );
+        }
+
         // Create return items + restore inventory
-        for (const { saleItem, quantity } of returnItemsData) {
+        for (const item of returnItemsData) {
+          const {
+            saleItem,
+            quantity,
+            returnedValue,
+            returnedUnit,
+            replacementUnit,
+            replacementPrice,
+          } = item;
           const ri = returnItemRepo.create({
             returnId: savedReturn.id,
             saleItemId: saleItem.id,
             variantId: saleItem.variantId,
             quantity,
             unitPrice: saleItem.unitPrice,
+            returnedValue,
+            stockUnitId: returnedUnit?.id ?? null,
+            replacementStockUnitId: replacementUnit?.id ?? null,
+            replacementVariantId: replacementUnit?.variantId ?? null,
+            replacementPrice,
             tenantId,
           });
           await returnItemRepo.save(ri);
 
-          // Restore stock
-          const stock = await stockRepo.findOne({
+          const returnedVariantId =
+            returnedUnit?.variantId ?? saleItem.variantId;
+          if (!returnedVariantId) {
+            throw new BadRequestException(
+              `El código ${returnedUnit?.barcode} no tiene variante conciliada`,
+            );
+          }
+          let stock = await stockRepo.findOne({
             where: {
-              variantId: saleItem.variantId,
-              warehouseId: sale.warehouseId,
+              variantId: returnedVariantId,
+              warehouseId: destinationWarehouseId,
               tenantId,
             },
+            lock: { mode: 'pessimistic_write' },
           });
-          if (stock) {
-            stock.quantity += quantity;
-            await stockRepo.save(stock);
+          if (!stock) {
+            stock = stockRepo.create({
+              variantId: returnedVariantId,
+              warehouseId: destinationWarehouseId,
+              quantity: 0,
+              minStock: 0,
+              tenantId,
+            });
           }
+          stock.quantity = Number(stock.quantity) + quantity;
+          await stockRepo.save(stock);
 
           // Record movement
           const movement = movementRepo.create({
-            variantId: saleItem.variantId,
-            warehouseId: sale.warehouseId,
+            variantId: returnedVariantId,
+            warehouseId: destinationWarehouseId,
             movementType: MovementType.IN,
             quantity,
             referenceType: 'RETURN',
@@ -165,6 +408,85 @@ export class ReturnsService {
             tenantId,
           });
           await movementRepo.save(movement);
+
+          if (returnedUnit) {
+            returnedUnit.status = StockUnitStatus.IN_STOCK;
+            returnedUnit.warehouseId = destinationWarehouseId;
+            await manager.getRepository(StockUnit).save(returnedUnit);
+            await manager.getRepository(StockUnitEvent).save(
+              manager.getRepository(StockUnitEvent).create({
+                stockUnitId: returnedUnit.id,
+                eventType: StockUnitEventType.RETURNED,
+                fromStatus: StockUnitStatus.SOLD,
+                toStatus: StockUnitStatus.IN_STOCK,
+                referenceType: 'RETURN',
+                referenceId: savedReturn.id,
+                userId,
+                metadata: {
+                  saleId: sale.id,
+                  saleItemId: saleItem.id,
+                  destinationWarehouseId,
+                  receivedById,
+                  replacementStockUnitId: replacementUnit?.id ?? null,
+                },
+                tenantId,
+              }),
+            );
+          }
+
+          if (replacementUnit?.variantId) {
+            const replacementStock = await stockRepo.findOne({
+              where: {
+                variantId: replacementUnit.variantId,
+                warehouseId: replacementUnit.warehouseId,
+                tenantId,
+              },
+              lock: { mode: 'pessimistic_write' },
+            });
+            if (
+              !replacementStock ||
+              Number(replacementStock.quantity) < replacementUnit.quantity
+            ) {
+              throw new BadRequestException(
+                `Stock agregado insuficiente para el reemplazo ${replacementUnit.barcode}`,
+              );
+            }
+            replacementStock.quantity =
+              Number(replacementStock.quantity) - replacementUnit.quantity;
+            await stockRepo.save(replacementStock);
+            await movementRepo.save(
+              movementRepo.create({
+                variantId: replacementUnit.variantId,
+                warehouseId: replacementUnit.warehouseId,
+                movementType: MovementType.OUT,
+                quantity: replacementUnit.quantity,
+                referenceType: 'RETURN_EXCHANGE',
+                referenceId: savedReturn.id,
+                notes: `Reemplazo en ${returnNumber}`,
+                createdById: userId,
+                tenantId,
+              }),
+            );
+            replacementUnit.status = StockUnitStatus.SOLD;
+            await manager.getRepository(StockUnit).save(replacementUnit);
+            await manager.getRepository(StockUnitEvent).save(
+              manager.getRepository(StockUnitEvent).create({
+                stockUnitId: replacementUnit.id,
+                eventType: StockUnitEventType.SOLD,
+                fromStatus: StockUnitStatus.IN_STOCK,
+                toStatus: StockUnitStatus.SOLD,
+                referenceType: 'RETURN',
+                referenceId: savedReturn.id,
+                userId,
+                metadata: {
+                  exchangeForStockUnitId: returnedUnit?.id ?? null,
+                  replacementPrice,
+                  priceDifference,
+                },
+                tenantId,
+              }),
+            );
+          }
         }
 
         // Create credit note
@@ -172,7 +494,7 @@ export class ReturnsService {
         const creditNote = creditNoteRepo.create({
           creditNoteNumber: cnNumber,
           returnId: savedReturn.id,
-          amount: refundAmount,
+          amount: returnedTotal,
           notes: `Nota crédito por devolución ${returnNumber}`,
           tenantId,
         });
@@ -187,7 +509,13 @@ export class ReturnsService {
             'user',
             'items',
             'items.variant',
+            'items.stockUnit',
+            'items.replacementStockUnit',
+            'items.replacementVariant',
             'creditNotes',
+            'receivedBy',
+            'destinationWarehouse',
+            'settlementBank',
           ],
         });
         if (!fullReturn) {
@@ -198,6 +526,132 @@ export class ReturnsService {
         return fullReturn;
       }),
     );
+  }
+
+  async scanBarcode(barcode: string, tenantId: string) {
+    const normalized = barcode.trim();
+    const unit = await this.dataSource.getRepository(StockUnit).findOne({
+      where: { barcode: normalized, tenantId },
+      relations: {
+        product: true,
+        variant: true,
+        size: true,
+        color: true,
+        warehouse: true,
+      },
+    });
+    if (!unit) {
+      throw new NotFoundException(
+        `No existe ningún código físico "${normalized}" en esta tienda`,
+      );
+    }
+    const saleItem = await this.dataSource.getRepository(SaleItem).findOne({
+      where: { stockUnitId: unit.id, tenantId },
+      relations: { sale: { client: true } },
+      order: { createdAt: 'DESC' },
+    });
+    const priorReturn = saleItem
+      ? await this.dataSource.getRepository(ReturnItem).findOne({
+          where: {
+            stockUnitId: unit.id,
+            saleItemId: saleItem.id,
+            tenantId,
+          },
+          relations: { return: true },
+        })
+      : null;
+    const usedAsReplacement = await this.dataSource
+      .getRepository(ReturnItem)
+      .findOne({
+        where: { replacementStockUnitId: unit.id, tenantId },
+        relations: { return: true },
+      });
+    return {
+      unit: {
+        id: unit.id,
+        barcode: unit.barcode,
+        kind: unit.kind,
+        status: unit.status,
+        quantity: unit.quantity,
+        productId: unit.productId,
+        productName: unit.product?.name ?? '',
+        variantId: unit.variantId,
+        sku: unit.variant?.sku ?? '',
+        size: unit.size?.name ?? '',
+        color: unit.color?.name ?? '',
+        warehouseId: unit.warehouseId,
+        warehouseName: unit.warehouse?.name ?? '',
+        suggestedPrice:
+          Number(unit.variant?.priceOverride ?? unit.product?.basePrice ?? 0) *
+          unit.quantity,
+      },
+      returnEligible:
+        unit.status === StockUnitStatus.SOLD &&
+        Boolean(saleItem) &&
+        !priorReturn,
+      replacementEligible: unit.status === StockUnitStatus.IN_STOCK,
+      sale: saleItem?.sale ?? null,
+      saleItem: saleItem
+        ? {
+            id: saleItem.id,
+            productName: saleItem.productName,
+            quantity: saleItem.quantity,
+            unitPrice: Number(saleItem.unitPrice),
+            lineTotal: Number(saleItem.lineTotal),
+            stockUnitId: saleItem.stockUnitId,
+          }
+        : null,
+      priorReturn: priorReturn?.return ?? null,
+      usedAsReplacement: usedAsReplacement?.return ?? null,
+    };
+  }
+
+  async searchSale(query: string, tenantId: string) {
+    const normalized = query.trim();
+    if (!normalized)
+      throw new BadRequestException('Escribe una venta o factura');
+    const qb = this.dataSource
+      .getRepository(Sale)
+      .createQueryBuilder('sale')
+      .leftJoinAndSelect('sale.items', 'items')
+      .leftJoinAndSelect('items.stockUnit', 'stockUnit')
+      .leftJoinAndSelect('sale.client', 'client')
+      .leftJoinAndSelect('sale.warehouse', 'warehouse')
+      .where('sale.tenant_id = :tenantId', { tenantId })
+      .andWhere('sale.status = :status', { status: SaleStatus.COMPLETED })
+      .andWhere(
+        '(sale.sale_number = :query OR sale.invoice_number = :query' +
+          (/^[0-9a-f-]{36}$/i.test(normalized) ? ' OR sale.id = :query' : '') +
+          ')',
+        { query: normalized },
+      );
+    const sale = await qb.getOne();
+    if (!sale) throw new NotFoundException('Venta completada no encontrada');
+
+    const returnedRows = await this.dataSource
+      .getRepository(ReturnItem)
+      .createQueryBuilder('item')
+      .innerJoin('item.return', 'ret')
+      .select('item.sale_item_id', 'saleItemId')
+      .addSelect('SUM(item.quantity)', 'quantity')
+      .where('item.tenant_id = :tenantId', { tenantId })
+      .andWhere('ret.status = :status', { status: ReturnStatus.COMPLETED })
+      .andWhere('item.sale_item_id IN (:...itemIds)', {
+        itemIds: sale.items.map((item) => item.id),
+      })
+      .groupBy('item.sale_item_id')
+      .getRawMany<{ saleItemId: string; quantity: string }>();
+    const returnedByItem = new Map(
+      returnedRows.map((row) => [row.saleItemId, Number(row.quantity)]),
+    );
+    return {
+      ...sale,
+      items: sale.items.map((item) => ({
+        ...item,
+        returnedQuantity: returnedByItem.get(item.id) ?? 0,
+        returnableQuantity: item.quantity - (returnedByItem.get(item.id) ?? 0),
+      })),
+    };
   }
 
   async findAll(tenantId: string): Promise<Return[]> {
@@ -218,7 +672,13 @@ export class ReturnsService {
         'items',
         'items.variant',
         'items.saleItem',
+        'items.stockUnit',
+        'items.replacementStockUnit',
+        'items.replacementVariant',
         'creditNotes',
+        'receivedBy',
+        'destinationWarehouse',
+        'settlementBank',
       ],
     });
     if (!ret) {

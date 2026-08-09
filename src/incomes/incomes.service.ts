@@ -162,13 +162,14 @@ export class IncomesService {
     // Movimientos manuales.
     const entryRows: {
       type: IncomeType;
+      category: IncomeCategory;
       method: string | null;
       bankId: string | null;
       targetMethod: string | null;
       targetBankId: string | null;
       amount: string;
     }[] = await this.dataSource.query(
-      `SELECT e.type, e.method, e.bank_id AS "bankId",
+      `SELECT e.type, e.category, e.method, e.bank_id AS "bankId",
               e.target_method AS "targetMethod", e.target_bank_id AS "targetBankId",
               e.amount
        FROM income_entries e
@@ -237,13 +238,17 @@ export class IncomesService {
     for (const e of entryRows) {
       const amt = Number(e.amount);
       if (e.type === IncomeType.INGRESO) {
-        otros += amt;
-        const b = bank(e.bankId);
-        b.otros += amt;
-        b.balance += amt;
-        const m = meth(e.method);
-        m.otros += amt;
-        m.balance += amt;
+        if (e.category === IncomeCategory.VENTAS) {
+          addVentas(e.bankId, e.method ?? 'EFECTIVO', amt);
+        } else {
+          otros += amt;
+          const b = bank(e.bankId);
+          b.otros += amt;
+          b.balance += amt;
+          const m = meth(e.method);
+          m.otros += amt;
+          m.balance += amt;
+        }
       } else if (e.type === IncomeType.AJUSTE) {
         ajustes += amt;
         bank(e.bankId).balance += amt;
