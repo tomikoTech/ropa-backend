@@ -102,7 +102,12 @@ describe('Compra por cajas y costeo de importación (e2e)', () => {
     const importOrder = await request(app.getHttpServer())
       .post('/api/purchases')
       .set(auth())
-      .send({ supplierId: sup.body.id, warehouseId: wh.body.id, items: [] });
+      .send({
+        supplierId: sup.body.id,
+        warehouseId: wh.body.id,
+        paymentDueDate: '2026-12-31',
+        items: [],
+      });
     importOrderId = importOrder.body.id;
   }, 90000);
 
@@ -129,6 +134,12 @@ describe('Compra por cajas y costeo de importación (e2e)', () => {
     expect(res.body.unitsPerBox).toBe(12);
     expect(res.body.consecutive).toBe(1);
     lineId = res.body.id;
+
+    const order = await request(app.getHttpServer())
+      .get(`/api/purchases/${orderId}`)
+      .set(auth())
+      .expect(200);
+    expect(Number(order.body.total)).toBe(1200);
   });
 
   // Si la caja dice 24 pero la curva reparte 12, el detallado dejaría
@@ -158,6 +169,12 @@ describe('Compra por cajas y costeo de importación (e2e)', () => {
       .expect(201);
 
     expect(res.body.consecutive).toBe(2);
+
+    const order = await request(app.getHttpServer())
+      .get(`/api/purchases/${orderId}`)
+      .set(auth())
+      .expect(200);
+    expect(Number(order.body.total)).toBe(1400);
   });
 
   it('descarga la plantilla e importa CSV de forma atómica', async () => {
@@ -178,6 +195,13 @@ describe('Compra por cajas y costeo de importación (e2e)', () => {
       .expect(201);
     expect(imported.body.imported).toBe(1);
     expect(imported.body.firstConsecutive).toBe(1);
+
+    const order = await request(app.getHttpServer())
+      .get(`/api/purchases/${importOrderId}`)
+      .set(auth())
+      .expect(200);
+    expect(Number(order.body.total)).toBe(414);
+    expect(Number(order.body.accountsPayable[0].amount)).toBe(414);
 
     const before = await request(app.getHttpServer())
       .get(`/api/purchases/${importOrderId}/box-lines`)
@@ -216,6 +240,12 @@ describe('Compra por cajas y costeo de importación (e2e)', () => {
 
     expect(Number(res.body.exchangeRate)).toBe(4000);
     expect(res.body.freightCosts).toHaveLength(2);
+
+    const order = await request(app.getHttpServer())
+      .get(`/api/purchases/${orderId}`)
+      .set(auth())
+      .expect(200);
+    expect(Number(order.body.total)).toBe(5_600_000);
   });
 
   it('calcula el costo puesto en bodega repartiendo el flete por unidades', async () => {
@@ -270,6 +300,12 @@ describe('Compra por cajas y costeo de importación (e2e)', () => {
       .expect(200);
 
     expect(res.body.boxes).toBe(12);
+
+    const order = await request(app.getHttpServer())
+      .get(`/api/purchases/${orderId}`)
+      .set(auth())
+      .expect(200);
+    expect(Number(order.body.total)).toBe(6_560_000);
   });
 
   it('rechaza un producto de otro tenant', async () => {
@@ -298,5 +334,11 @@ describe('Compra por cajas y costeo de importación (e2e)', () => {
       .expect(200);
 
     expect(res.body).toHaveLength(1);
+
+    const order = await request(app.getHttpServer())
+      .get(`/api/purchases/${orderId}`)
+      .set(auth())
+      .expect(200);
+    expect(Number(order.body.total)).toBe(800_000);
   });
 });

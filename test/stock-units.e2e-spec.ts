@@ -13,6 +13,7 @@ describe('Recepción por cajas y apertura de bultos (e2e)', () => {
   let boxLineId: string;
   let boxIds: string[] = [];
   let warehouseId: string;
+  let curveSizeIds: string[] = [];
 
   const ts = Date.now();
   const auth = () => ({ Authorization: `Bearer ${token}` });
@@ -59,6 +60,7 @@ describe('Recepción por cajas y apertura de bultos (e2e)', () => {
         .send({ name });
       sizeIds.push(s.body.id);
     }
+    curveSizeIds = sizeIds;
     const prod = await request(app.getHttpServer())
       .post('/api/products')
       .set(auth())
@@ -116,6 +118,12 @@ describe('Recepción por cajas y apertura de bultos (e2e)', () => {
       true,
     );
     boxIds = res.body.map((u: { id: string }) => u.id);
+
+    const order = await request(app.getHttpServer())
+      .get(`/api/purchases/${orderId}`)
+      .set(auth())
+      .expect(200);
+    expect(order.body.status).toBe('PARTIAL');
   });
 
   it('los códigos son válidos y no se repiten', async () => {
@@ -154,6 +162,12 @@ describe('Recepción por cajas y apertura de bultos (e2e)', () => {
       .expect(200);
 
     expect(res.body[0].boxesReceived).toBe(3);
+
+    const order = await request(app.getHttpServer())
+      .get(`/api/purchases/${orderId}`)
+      .set(auth())
+      .expect(200);
+    expect(order.body.status).toBe('RECEIVED');
   });
 
   it('avisa cuando ya no queda nada por recibir', async () => {
@@ -196,6 +210,127 @@ describe('Recepción por cajas y apertura de bultos (e2e)', () => {
     expect(res.body.data[0].variants.length).toBeGreaterThan(0);
   });
 
+  it('cada caja conserva su propio contenido esperado y permite detallar el real', async () => {
+    const initial = await request(app.getHttpServer())
+      .get(`/api/stock-units/${boxIds[0]}/contents`)
+      .set(auth())
+      .expect(200);
+
+    expect(initial.body.items).toHaveLength(2);
+    expect(
+      initial.body.items.map(
+        (item: { expectedQuantity: number; actualQuantity: number }) => [
+          item.expectedQuantity,
+          item.actualQuantity,
+        ],
+      ),
+    ).toEqual([
+      [2, 2],
+      [2, 2],
+    ]);
+
+    const detailed = await request(app.getHttpServer())
+      .post(`/api/stock-units/${boxIds[0]}/contents`)
+      .set(auth())
+      .send({
+        items: [
+          { sizeId: curveSizeIds[0], quantity: 1 },
+          { sizeId: curveSizeIds[1], quantity: 3 },
+        ],
+      })
+      .expect(201);
+
+    expect(
+      detailed.body.items.map(
+        (item: { actualQuantity: number }) => item.actualQuantity,
+      ),
+    ).toEqual([1, 3]);
+    // La caja hermana sigue con su propia copia 2+2.
+    const sibling = await request(app.getHttpServer())
+      .get(`/api/stock-units/${boxIds[1]}/contents`)
+      .set(auth())
+      .expect(200);
+    expect(
+      sibling.body.items.map(
+        (item: { actualQuantity: number }) => item.actualQuantity,
+      ),
+    ).toEqual([2, 2]);
+  });
+
+  it('ajusta el total físico de una caja y permite restaurarlo sin afectar las demás', async () => {
+    const changed = await request(app.getHttpServer())
+      .post(`/api/stock-units/${boxIds[1]}/contents`)
+      .set(auth())
+      .send({
+        items: [
+          { sizeId: curveSizeIds[0], quantity: 1 },
+          { sizeId: curveSizeIds[1], quantity: 2 },
+        ],
+      })
+      .expect(201);
+    expect(changed.body.box.quantity).toBe(3);
+
+    const restored = await request(app.getHttpServer())
+      .post(`/api/stock-units/${boxIds[1]}/contents`)
+      .set(auth())
+      .send({
+        items: [
+          { sizeId: curveSizeIds[0], quantity: 2 },
+          { sizeId: curveSizeIds[1], quantity: 2 },
+        ],
+      })
+      .expect(201);
+    expect(restored.body.box.quantity).toBe(4);
+  });
+
+  it('serializa dos detalles simultáneos de la misma caja sin mezclar tallas', async () => {
+    const payloads = [
+      [
+        { sizeId: curveSizeIds[0], quantity: 1 },
+        { sizeId: curveSizeIds[1], quantity: 2 },
+      ],
+      [
+        { sizeId: curveSizeIds[0], quantity: 4 },
+        { sizeId: curveSizeIds[1], quantity: 1 },
+      ],
+    ];
+    const responses = await Promise.all(
+      payloads.map((items) =>
+        request(app.getHttpServer())
+          .post(`/api/stock-units/${boxIds[1]}/contents`)
+          .set(auth())
+          .send({ items }),
+      ),
+    );
+    expect(responses.map((response) => response.status)).toEqual([201, 201]);
+
+    const final = await request(app.getHttpServer())
+      .get(`/api/stock-units/${boxIds[1]}/contents`)
+      .set(auth())
+      .expect(200);
+    const actual = final.body.items.map(
+      (item: { actualQuantity: number }) => item.actualQuantity,
+    );
+    expect(
+      JSON.stringify(actual) === JSON.stringify([1, 2]) ||
+        JSON.stringify(actual) === JSON.stringify([4, 1]),
+    ).toBe(true);
+    expect(final.body.box.quantity).toBe(
+      actual.reduce((sum: number, quantity: number) => sum + quantity, 0),
+    );
+
+    await request(app.getHttpServer())
+      .post(`/api/stock-units/${boxIds[1]}/contents`)
+      .set(auth())
+      .send({
+        items: [
+          { sizeId: curveSizeIds[0], quantity: 2 },
+          { sizeId: curveSizeIds[1], quantity: 2 },
+        ],
+      })
+      .expect(201);
+  });
+
   it('abre una caja y crea una unidad por par de la curva', async () => {
     const res = await request(app.getHttpServer())
       .post(`/api/stock-units/${boxIds[0]}/split`)
@@ -217,6 +352,15 @@ describe('Recepción por cajas y apertura de bultos (e2e)', () => {
     // La caja no se borra: queda marcada como abierta para no perder la
     // trazabilidad del código ya impreso.
     expect(res.body.parent.status).toBe('SPLIT');
+    const quantitiesBySize = new Map<string, number>();
+    for (const unit of res.body.units as { sizeId: string }[]) {
+      quantitiesBySize.set(
+        unit.sizeId,
+        (quantitiesBySize.get(unit.sizeId) ?? 0) + 1,
+      );
+    }
+    expect(quantitiesBySize.get(curveSizeIds[0])).toBe(1);
+    expect(quantitiesBySize.get(curveSizeIds[1])).toBe(3);
   });
 
   // Regresión: la secuencia de las unidades debe continuar después de la de

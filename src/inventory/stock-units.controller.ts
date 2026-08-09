@@ -11,7 +11,11 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { StockUnitsService } from './stock-units.service.js';
 import { TenantId } from '../common/decorators/tenant-id.decorator.js';
 import { UserId } from '../common/decorators/user-id.decorator.js';
-import { ReceiveBoxesDto, MarkPrintedDto } from './dto/stock-unit.dto.js';
+import {
+  ReceiveBoxesDto,
+  MarkPrintedDto,
+  UpdateBoxContentsDto,
+} from './dto/stock-unit.dto.js';
 
 /**
  * Inventario por unidades etiquetadas: recibir cajas, abrirlas y buscarlas
@@ -58,6 +62,26 @@ export class StockUnitsController {
   @ApiOperation({ summary: 'Abrir una caja en sus unidades, según su curva' })
   split(@Param('id', ParseUUIDPipe) id: string, @TenantId() tenantId: string) {
     return this.units.splitBox(id, tenantId);
+  }
+
+  @Get(':id/contents')
+  @ApiOperation({ summary: 'Contenido esperado y real de una caja física' })
+  contents(
+    @Param('id', ParseUUIDPipe) id: string,
+    @TenantId() tenantId: string,
+  ) {
+    return this.units.getBoxContents(id, tenantId);
+  }
+
+  @Post(':id/contents')
+  @ApiOperation({ summary: 'Detallar el contenido real de una caja física' })
+  updateContents(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateBoxContentsDto,
+    @UserId() userId: string,
+    @TenantId() tenantId: string,
+  ) {
+    return this.units.updateBoxContents(id, dto.items, userId, tenantId);
   }
 
   @Post('mark-printed')

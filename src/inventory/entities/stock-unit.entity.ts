@@ -8,6 +8,7 @@ import {
   UpdateDateColumn,
   Unique,
   Index,
+  OneToMany,
 } from 'typeorm';
 import { Product } from '../../products/entities/product.entity.js';
 import { ProductVariant } from '../../products/entities/product-variant.entity.js';
@@ -16,6 +17,7 @@ import { Stand } from './stand.entity.js';
 import { Color } from '../../catalogs/entities/color.entity.js';
 import { Size } from '../../catalogs/entities/size.entity.js';
 import { TenantAwareEntity } from '../../common/entities/tenant-aware.entity.js';
+import { StockUnitContent } from './stock-unit-content.entity.js';
 
 export enum StockUnitKind {
   /** Caja cerrada: se mueve y se vende como un bulto. */
@@ -130,6 +132,9 @@ export class StockUnit extends TenantAwareEntity {
   /** Caja de la que salió esta unidad, si vino de abrir una. */
   @Column({ name: 'parent_unit_id', type: 'uuid', nullable: true })
   parentUnitId: string | null;
+
+  @OneToMany(() => StockUnitContent, (content) => content.boxUnit)
+  contents: StockUnitContent[];
 
   @Column({ name: 'printed_at', type: 'timestamptz', nullable: true })
   printedAt: Date | null;

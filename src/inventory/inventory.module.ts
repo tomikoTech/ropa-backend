@@ -6,6 +6,7 @@ import { LocationsController } from './locations.controller.js';
 import { Shelf } from './entities/shelf.entity.js';
 import { Stand } from './entities/stand.entity.js';
 import { StockUnit } from './entities/stock-unit.entity.js';
+import { StockUnitContent } from './entities/stock-unit-content.entity.js';
 import { StockUnitsService } from './stock-units.service.js';
 import { StockUnitsController } from './stock-units.controller.js';
 import { LabelsService } from './labels/labels.service.js';
@@ -31,6 +32,7 @@ import { ProductsModule } from '../products/products.module.js';
       Shelf,
       Stand,
       StockUnit,
+      StockUnitContent,
       InventoryCount,
       InventoryCountLine,
       PurchaseBoxLine,

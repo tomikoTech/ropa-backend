@@ -4,7 +4,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
 import { PurchaseOrder } from './entities/purchase-order.entity.js';
 import { PurchaseOrderItem } from './entities/purchase-order-item.entity.js';
 import { PurchaseBoxLine } from './entities/purchase-box-line.entity.js';
@@ -19,6 +19,8 @@ import {
   UpdateImportCostsDto,
 } from './dto/purchase-box.dto.js';
 import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
+import { AccountsPayable } from './entities/accounts-payable.entity.js';
+import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
 import {
   buildPurchaseBoxTemplate,
   readPurchaseBoxImport,
@@ -48,6 +50,82 @@ export class PurchaseBoxesService {
     return buildPurchaseBoxTemplate();
   }
 
+  /**
+   * Las líneas por caja son parte financiera de la misma orden, no un anexo.
+   * Mantiene cabecera y cuenta por pagar sincronizadas dentro de la transacción
+   * que agrega, importa, modifica o elimina el renglón.
+   */
+  private async recalculateOrderTotals(
+    manager: EntityManager,
+    orderId: string,
+    tenantId: string,
+  ): Promise<void> {
+    const orderRepo = manager.getRepository(PurchaseOrder);
+    const order = await orderRepo
+      .createQueryBuilder('purchase')
+      .setLock('pessimistic_write')
+      .where('purchase.id = :orderId', { orderId })
+      .andWhere('purchase.tenantId = :tenantId', { tenantId })
+      .getOne();
+    if (!order) throw new NotFoundException('Orden de compra no encontrada');
+
+    const boxLines = await manager.getRepository(PurchaseBoxLine).find({
+      where: { purchaseOrderId: orderId, tenantId, isActive: true },
+    });
+    const classicItems = await manager.getRepository(PurchaseOrderItem).find({
+      where: { purchaseOrderId: orderId, tenantId },
+    });
+    const settings = await manager
+      .getRepository(StoreSettings)
+      .findOne({ where: { tenantId } });
+    const payable = await manager.getRepository(AccountsPayable).findOne({
+      where: { purchaseOrderId: orderId, tenantId },
+    });
+    const exchangeRate = Math.max(0, Number(order.exchangeRate) || 1);
+    const gross =
+      classicItems.reduce(
+        (sum, item) => sum + item.quantityOrdered * Number(item.unitCost),
+        0,
+      ) +
+      boxLines.reduce(
+        (sum, line) =>
+          sum +
+          line.boxes * line.unitsPerBox * Number(line.unitCost) * exchangeRate,
+        0,
+      );
+    const round = (value: number) => Math.round(value * 100) / 100;
+    const rate = Math.max(0, Number(order.taxRate) || 0);
+    const included = settings?.ivaMode !== 'added';
+    const subtotal =
+      rate > 0 && included ? round(gross / (1 + rate / 100)) : round(gross);
+    const taxAmount =
+      rate <= 0
+        ? 0
+        : included
+          ? round(gross - subtotal)
+          : round(subtotal * (rate / 100));
+    const total = included ? round(gross) : round(subtotal + taxAmount);
+
+    if (
+      payable &&
+      Number(payable.amount) !== total &&
+      (payable.isPaid || Number(payable.paidAmount) > 0)
+    ) {
+      throw new BadRequestException(
+        'No se pueden cambiar los valores por caja porque la cuenta por pagar ya tiene pagos.',
+      );
+    }
+
+    order.subtotal = subtotal;
+    order.taxAmount = taxAmount;
+    order.total = total;
+    await orderRepo.save(order);
+    if (payable && !payable.isPaid) {
+      payable.amount = total;
+      await manager.getRepository(AccountsPayable).save(payable);
+    }
+  }
+
   async importLines(
     orderId: string,
     file: Express.Multer.File | undefined,
@@ -70,12 +148,25 @@ export class PurchaseBoxesService {
 
     return retryOnUniqueViolation(() =>
       this.dataSource.transaction(async (manager) => {
-        const [products, colors, curves, curveItems] = await Promise.all([
-          manager.getRepository(Product).find({ where: { tenantId } }),
-          manager.getRepository(Color).find({ where: { tenantId } }),
-          manager.getRepository(SizeCurve).find({ where: { tenantId } }),
-          manager.getRepository(SizeCurveItem).find({ where: { tenantId } }),
-        ]);
+        await manager
+          .getRepository(PurchaseOrder)
+          .createQueryBuilder('purchase')
+          .setLock('pessimistic_write')
+          .where('purchase.id = :orderId', { orderId })
+          .andWhere('purchase.tenantId = :tenantId', { tenantId })
+          .getOne();
+        const products = await manager
+          .getRepository(Product)
+          .find({ where: { tenantId } });
+        const colors = await manager
+          .getRepository(Color)
+          .find({ where: { tenantId } });
+        const curves = await manager
+          .getRepository(SizeCurve)
+          .find({ where: { tenantId } });
+        const curveItems = await manager
+          .getRepository(SizeCurveItem)
+          .find({ where: { tenantId } });
         const productByCode = new Map(
           products.map((p) => [key(p.skuPrefix), p]),
         );
@@ -151,6 +242,7 @@ export class PurchaseBoxesService {
           }),
         );
         await boxRepo.save(entities);
+        await this.recalculateOrderTotals(manager, orderId, tenantId);
         return {
           imported: entities.length,
           firstConsecutive,
@@ -195,20 +287,6 @@ export class PurchaseBoxesService {
     }
   }
 
-  /** Siguiente correlativo libre de la orden (nunca el conteo: deja huecos). */
-  private async nextConsecutive(
-    purchaseOrderId: string,
-    tenantId: string,
-  ): Promise<number> {
-    const row = await this.boxRepo
-      .createQueryBuilder('b')
-      .select('MAX(b.consecutive)', 'max')
-      .where('b.purchaseOrderId = :purchaseOrderId', { purchaseOrderId })
-      .andWhere('b.tenantId = :tenantId', { tenantId })
-      .getRawOne<{ max: string | null }>();
-    return Number(row?.max ?? 0) + 1;
-  }
-
   async addLine(
     orderId: string,
     dto: CreateBoxLineDto,
@@ -235,22 +313,41 @@ export class PurchaseBoxesService {
       );
     }
 
-    return retryOnUniqueViolation(async () => {
-      const line = this.boxRepo.create({
-        purchaseOrderId: orderId,
-        productId: dto.productId,
-        colorId: dto.colorId ?? null,
-        sizeCurveId: dto.sizeCurveId ?? null,
-        boxes: dto.boxes,
-        unitsPerBox: dto.unitsPerBox,
-        unitCost: dto.unitCost,
-        salePrice: dto.salePrice ?? null,
-        comment: dto.comment ?? null,
-        consecutive: await this.nextConsecutive(orderId, tenantId),
-        tenantId,
-      });
-      return this.boxRepo.save(line);
-    });
+    return retryOnUniqueViolation(() =>
+      this.dataSource.transaction(async (manager) => {
+        // La cabecera serializa la asignación del correlativo y el recálculo.
+        await manager
+          .getRepository(PurchaseOrder)
+          .createQueryBuilder('purchase')
+          .setLock('pessimistic_write')
+          .where('purchase.id = :orderId', { orderId })
+          .andWhere('purchase.tenantId = :tenantId', { tenantId })
+          .getOne();
+        const boxRepo = manager.getRepository(PurchaseBoxLine);
+        const row = await boxRepo
+          .createQueryBuilder('b')
+          .select('MAX(b.consecutive)', 'max')
+          .where('b.purchaseOrderId = :orderId', { orderId })
+          .andWhere('b.tenantId = :tenantId', { tenantId })
+          .getRawOne<{ max: string | null }>();
+        const line = boxRepo.create({
+          purchaseOrderId: orderId,
+          productId: dto.productId,
+          colorId: dto.colorId ?? null,
+          sizeCurveId: dto.sizeCurveId ?? null,
+          boxes: dto.boxes,
+          unitsPerBox: dto.unitsPerBox,
+          unitCost: dto.unitCost,
+          salePrice: dto.salePrice ?? null,
+          comment: dto.comment ?? null,
+          consecutive: Number(row?.max ?? 0) + 1,
+          tenantId,
+        });
+        const saved = await boxRepo.save(line);
+        await this.recalculateOrderTotals(manager, orderId, tenantId);
+        return saved;
+      }),
+    );
   }
 
   async updateLine(
@@ -276,16 +373,37 @@ export class PurchaseBoxesService {
       await this.assertCurveMatchesBox(curveId, unitsPerBox, tenantId);
     }
 
-    Object.assign(line, {
-      ...(dto.boxes !== undefined && { boxes: dto.boxes }),
-      ...(dto.unitsPerBox !== undefined && { unitsPerBox: dto.unitsPerBox }),
-      ...(dto.unitCost !== undefined && { unitCost: dto.unitCost }),
-      ...(dto.salePrice !== undefined && { salePrice: dto.salePrice }),
-      ...(dto.comment !== undefined && { comment: dto.comment }),
-      ...(dto.sizeCurveId !== undefined && { sizeCurveId: dto.sizeCurveId }),
-      ...(dto.isActive !== undefined && { isActive: dto.isActive }),
+    return this.dataSource.transaction(async (manager) => {
+      const boxRepo = manager.getRepository(PurchaseBoxLine);
+      const locked = await boxRepo
+        .createQueryBuilder('line')
+        .setLock('pessimistic_write')
+        .where('line.id = :lineId', { lineId })
+        .andWhere('line.tenantId = :tenantId', { tenantId })
+        .getOne();
+      if (!locked) throw new NotFoundException('Renglón no encontrado');
+      if (locked.boxesReceived > 0) {
+        throw new BadRequestException(
+          'No se puede modificar un renglón que ya fue recibido en inventario.',
+        );
+      }
+      Object.assign(locked, {
+        ...(dto.boxes !== undefined && { boxes: dto.boxes }),
+        ...(dto.unitsPerBox !== undefined && { unitsPerBox: dto.unitsPerBox }),
+        ...(dto.unitCost !== undefined && { unitCost: dto.unitCost }),
+        ...(dto.salePrice !== undefined && { salePrice: dto.salePrice }),
+        ...(dto.comment !== undefined && { comment: dto.comment }),
+        ...(dto.sizeCurveId !== undefined && { sizeCurveId: dto.sizeCurveId }),
+        ...(dto.isActive !== undefined && { isActive: dto.isActive }),
+      });
+      const saved = await boxRepo.save(locked);
+      await this.recalculateOrderTotals(
+        manager,
+        locked.purchaseOrderId,
+        tenantId,
+      );
+      return saved;
     });
-    return this.boxRepo.save(line);
   }
 
   async removeLine(
@@ -301,7 +419,17 @@ export class PurchaseBoxesService {
         'No se puede eliminar un renglón que ya fue recibido en inventario. Desactívalo.',
       );
     }
-    await this.boxRepo.delete({ id: lineId, tenantId });
+    await this.dataSource.transaction(async (manager) => {
+      await manager.getRepository(PurchaseBoxLine).delete({
+        id: lineId,
+        tenantId,
+      });
+      await this.recalculateOrderTotals(
+        manager,
+        line.purchaseOrderId,
+        tenantId,
+      );
+    });
     return { success: true };
   }
 
@@ -321,15 +449,26 @@ export class PurchaseBoxesService {
     dto: UpdateImportCostsDto,
     tenantId: string,
   ): Promise<PurchaseOrder> {
-    const order = await this.getOrder(orderId, tenantId);
-    if (dto.exchangeRate !== undefined) order.exchangeRate = dto.exchangeRate;
-    if (dto.freightCosts !== undefined) order.freightCosts = dto.freightCosts;
-    if (dto.freightAllocation !== undefined)
-      order.freightAllocation = dto.freightAllocation;
-    if (dto.arrivalDate !== undefined) {
-      order.arrivalDate = dto.arrivalDate ? new Date(dto.arrivalDate) : null;
-    }
-    return this.orderRepo.save(order);
+    await this.dataSource.transaction(async (manager) => {
+      const orderRepo = manager.getRepository(PurchaseOrder);
+      const order = await orderRepo
+        .createQueryBuilder('purchase')
+        .setLock('pessimistic_write')
+        .where('purchase.id = :orderId', { orderId })
+        .andWhere('purchase.tenantId = :tenantId', { tenantId })
+        .getOne();
+      if (!order) throw new NotFoundException('Orden de compra no encontrada');
+      if (dto.exchangeRate !== undefined) order.exchangeRate = dto.exchangeRate;
+      if (dto.freightCosts !== undefined) order.freightCosts = dto.freightCosts;
+      if (dto.freightAllocation !== undefined)
+        order.freightAllocation = dto.freightAllocation;
+      if (dto.arrivalDate !== undefined) {
+        order.arrivalDate = dto.arrivalDate ? new Date(dto.arrivalDate) : null;
+      }
+      await orderRepo.save(order);
+      await this.recalculateOrderTotals(manager, orderId, tenantId);
+    });
+    return this.getOrder(orderId, tenantId);
   }
 
   /**

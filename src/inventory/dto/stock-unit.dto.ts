@@ -5,8 +5,11 @@ import {
   IsOptional,
   IsUUID,
   Min,
+  ArrayMinSize,
+  ValidateNested,
 } from 'class-validator';
 import { ApiPropertyOptional, ApiProperty } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 
 export class ReceiveBoxesDto {
   @ApiPropertyOptional({
@@ -45,4 +48,24 @@ export class MarkPrintedDto {
   @IsArray()
   @IsUUID('4', { each: true })
   ids: string[];
+}
+
+export class BoxContentItemDto {
+  @ApiProperty()
+  @IsUUID()
+  sizeId: string;
+
+  @ApiProperty({ minimum: 0 })
+  @IsInt()
+  @Min(0)
+  quantity: number;
+}
+
+export class UpdateBoxContentsDto {
+  @ApiProperty({ type: [BoxContentItemDto] })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => BoxContentItemDto)
+  items: BoxContentItemDto[];
 }
