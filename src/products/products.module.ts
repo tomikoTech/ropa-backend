@@ -11,6 +11,7 @@ import { Category } from '../categories/entities/category.entity.js';
 import { Warehouse } from '../inventory/entities/warehouse.entity.js';
 import { Stock } from '../inventory/entities/stock.entity.js';
 import { StockMovement } from '../inventory/entities/stock-movement.entity.js';
+import { StockUnit } from '../inventory/entities/stock-unit.entity.js';
 import { BrandsModule } from '../brands/brands.module.js';
 import { CatalogsModule } from '../catalogs/catalogs.module.js';
 
@@ -25,6 +26,7 @@ import { CatalogsModule } from '../catalogs/catalogs.module.js';
       Warehouse,
       Stock,
       StockMovement,
+      StockUnit,
     ]),
     BrandsModule,
     CatalogsModule,

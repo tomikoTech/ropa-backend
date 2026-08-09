@@ -120,6 +120,9 @@ export class InventoryReportService {
         { key: 'color', label: 'Color', type: 'text' },
         { key: 'bodega', label: 'Bodega', type: 'text' },
         { key: 'cantidad', label: 'Cantidad', type: 'number' },
+        { key: 'paresSueltos', label: 'Pares sueltos', type: 'number', hint: 'No están dentro de una caja cerrada' },
+        { key: 'paresEnCajas', label: 'Pares en cajas', type: 'number', hint: 'Pares dentro de cajas cerradas; la caja puede contener tallas mixtas' },
+        { key: 'cajasCerradas', label: 'Cajas', type: 'number' },
         { key: 'minimo', label: 'Mínimo', type: 'number' },
         { key: 'costoUnit', label: 'Costo unit.', type: 'money' },
         { key: 'precio', label: 'Precio venta', type: 'money' },
@@ -134,6 +137,33 @@ export class InventoryReportService {
         .addSelect('co.name', 'color')
         .addSelect('w.name', 'bodega')
         .addSelect('st.quantity', 'cantidad')
+        .addSelect(`GREATEST(0, st.quantity - (
+          SELECT COALESCE(SUM(u.quantity), 0)
+          FROM stock_units u
+          WHERE u.tenant_id = :tenantId
+            AND u.variant_id = v.id
+            AND u.warehouse_id = st.warehouse_id
+            AND u.kind = 'BOX'
+            AND u.status = 'IN_STOCK'
+        ))`, 'paresSueltos')
+        .addSelect(`(
+          SELECT COALESCE(SUM(u.quantity), 0)
+          FROM stock_units u
+          WHERE u.tenant_id = :tenantId
+            AND u.variant_id = v.id
+            AND u.warehouse_id = st.warehouse_id
+            AND u.kind = 'BOX'
+            AND u.status = 'IN_STOCK'
+        )`, 'paresEnCajas')
+        .addSelect(`(
+          SELECT COUNT(*)
+          FROM stock_units u
+          WHERE u.tenant_id = :tenantId
+            AND u.variant_id = v.id
+            AND u.warehouse_id = st.warehouse_id
+            AND u.kind = 'BOX'
+            AND u.status = 'IN_STOCK'
+        )`, 'cajasCerradas')
         .addSelect('st.min_stock', 'minimo')
         .addSelect('p.cost_price', 'costoUnit')
         .addSelect(this.priceSql, 'precio')
@@ -166,12 +196,42 @@ export class InventoryReportService {
           hint: 'Combinaciones distintas de talla y color',
         },
         { key: 'cantidad', label: 'Unidades', type: 'number' },
+        { key: 'paresSueltos', label: 'Pares sueltos', type: 'number' },
+        { key: 'paresEnCajas', label: 'Pares en cajas', type: 'number' },
+        { key: 'cajasCerradas', label: 'Cajas cerradas', type: 'number' },
         { key: 'valorCosto', label: 'Valor costo', type: 'money' },
         { key: 'valorVenta', label: 'Valor venta', type: 'money' },
       ];
       qb.select(d.sql, 'grupo')
         .addSelect('COUNT(DISTINCT v.id)', 'referencias')
         .addSelect('COALESCE(SUM(st.quantity), 0)', 'cantidad')
+        .addSelect(`COALESCE(SUM(GREATEST(0, st.quantity - (
+          SELECT COALESCE(SUM(u.quantity), 0)
+          FROM stock_units u
+          WHERE u.tenant_id = :tenantId
+            AND u.variant_id = v.id
+            AND u.warehouse_id = st.warehouse_id
+            AND u.kind = 'BOX'
+            AND u.status = 'IN_STOCK'
+        ))), 0)`, 'paresSueltos')
+        .addSelect(`COALESCE(SUM((
+          SELECT COALESCE(SUM(u.quantity), 0)
+          FROM stock_units u
+          WHERE u.tenant_id = :tenantId
+            AND u.variant_id = v.id
+            AND u.warehouse_id = st.warehouse_id
+            AND u.kind = 'BOX'
+            AND u.status = 'IN_STOCK'
+        )), 0)`, 'paresEnCajas')
+        .addSelect(`COALESCE(SUM((
+          SELECT COUNT(*)
+          FROM stock_units u
+          WHERE u.tenant_id = :tenantId
+            AND u.variant_id = v.id
+            AND u.warehouse_id = st.warehouse_id
+            AND u.kind = 'BOX'
+            AND u.status = 'IN_STOCK'
+        )), 0)`, 'cajasCerradas')
         .addSelect(`COALESCE(${costValue}, 0)`, 'valorCosto')
         .addSelect(`COALESCE(${retailValue}, 0)`, 'valorVenta')
         .groupBy(d.sql)
@@ -190,11 +250,17 @@ export class InventoryReportService {
             grupo: String(r.grupo ?? ''),
             referencias: int(r.referencias),
             cantidad: int(r.cantidad),
+            paresSueltos: int(r.paresSueltos),
+            paresEnCajas: int(r.paresEnCajas),
+            cajasCerradas: int(r.cajasCerradas),
             valorCosto: money(r.valorCosto),
             valorVenta: money(r.valorVenta),
           };
         }
         const cantidad = int(r.cantidad);
+        const paresSueltos = int(r.paresSueltos);
+        const paresEnCajas = int(r.paresEnCajas);
+        const cajasCerradas = int(r.cajasCerradas);
         const costoUnit = money(r.costoUnit);
         const precio = money(r.precio);
         return {
@@ -206,6 +272,9 @@ export class InventoryReportService {
           color: str(r.color, '—'),
           bodega: String(r.bodega ?? ''),
           cantidad,
+          paresSueltos,
+          paresEnCajas,
+          cajasCerradas,
           minimo: int(r.minimo),
           costoUnit,
           precio,
@@ -216,6 +285,9 @@ export class InventoryReportService {
     );
 
     const unidades = rows.reduce((s, r) => s + Number(r.cantidad), 0);
+    const paresSueltos = rows.reduce((s, r) => s + Number(r.paresSueltos ?? 0), 0);
+    const paresEnCajas = rows.reduce((s, r) => s + Number(r.paresEnCajas ?? 0), 0);
+    const cajasCerradas = rows.reduce((s, r) => s + Number(r.cajasCerradas ?? 0), 0);
     const valorCosto = money(
       rows.reduce((s, r) => s + Number(r.valorCosto), 0),
     );
@@ -236,6 +308,9 @@ export class InventoryReportService {
       rows,
       totals: [
         { key: 'unidades', label: 'Unidades', type: 'number', value: unidades },
+        { key: 'paresSueltos', label: 'Pares sueltos', type: 'number', value: paresSueltos },
+        { key: 'paresEnCajas', label: 'Pares en cajas', type: 'number', value: paresEnCajas },
+        { key: 'cajasCerradas', label: 'Cajas cerradas', type: 'number', value: cajasCerradas },
         {
           key: 'valorCosto',
           label: 'Valor al costo',
@@ -328,7 +403,7 @@ export class InventoryReportService {
         codigo: String(r.codigo ?? ''),
         tipo: r.tipo === 'BOX' ? 'Caja' : 'Unidad',
         producto: String(r.producto ?? ''),
-        talla: String(r.talla ?? ''),
+        talla: r.tipo === 'BOX' ? 'Tallas mixtas' : String(r.talla ?? ''),
         color: String(r.color ?? ''),
         unidades,
         costoUnit,

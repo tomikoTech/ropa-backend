@@ -121,7 +121,33 @@ export class ScanService {
     const stocks = await this.stockRepo.find({
       where: { variantId: variant.id, tenantId },
     });
-    const available = stocks.reduce((sum, s) => sum + s.quantity, 0);
+    // Las cajas cerradas pueden apuntar internamente a una variante
+    // representativa, pero sus pares son de tallas mixtas. Nunca deben
+    // aparecer como disponibilidad de esa talla al escanear el SKU; la caja
+    // se vende únicamente escaneando su propio código físico.
+    const boxes = await this.unitRepo.find({
+      where: {
+        variantId: variant.id,
+        tenantId,
+        kind: StockUnitKind.BOX,
+        status: StockUnitStatus.IN_STOCK,
+      },
+    });
+    const boxedByWarehouse = new Map<string, number>();
+    for (const box of boxes) {
+      boxedByWarehouse.set(
+        box.warehouseId,
+        (boxedByWarehouse.get(box.warehouseId) ?? 0) + Number(box.quantity),
+      );
+    }
+    const looseStocks = stocks.map((stock) => ({
+      ...stock,
+      quantity: Math.max(
+        0,
+        Number(stock.quantity) - (boxedByWarehouse.get(stock.warehouseId) ?? 0),
+      ),
+    }));
+    const available = looseStocks.reduce((sum, s) => sum + s.quantity, 0);
 
     return {
       source: 'VARIANT',
@@ -141,7 +167,7 @@ export class ScanService {
       stockUnitId: null,
       kind: null,
       available,
-      warehouseId: stocks[0]?.warehouseId ?? null,
+      warehouseId: looseStocks.find((stock) => stock.quantity > 0)?.warehouseId ?? stocks[0]?.warehouseId ?? null,
       minimumSalePrice: variant.product?.minimumSalePrice
         ? Number(variant.product.minimumSalePrice)
         : null,

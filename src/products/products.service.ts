@@ -16,6 +16,7 @@ import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
 import { Category } from '../categories/entities/category.entity.js';
 import { Warehouse } from '../inventory/entities/warehouse.entity.js';
 import { Stock } from '../inventory/entities/stock.entity.js';
+import { StockUnit, StockUnitKind, StockUnitStatus } from '../inventory/entities/stock-unit.entity.js';
 import { CreateProductDto } from './dto/create-product.dto.js';
 import { UpdateProductDto } from './dto/update-product.dto.js';
 import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
@@ -35,6 +36,8 @@ export class ProductsService {
     private readonly warehouseRepository: Repository<Warehouse>,
     @InjectRepository(Stock)
     private readonly stockRepository: Repository<Stock>,
+    @InjectRepository(StockUnit)
+    private readonly stockUnitRepository: Repository<StockUnit>,
     @InjectRepository(ProductEssence)
     private readonly essenceRepository: Repository<ProductEssence>,
     private readonly recipeService: RecipeService,
@@ -945,8 +948,15 @@ export class ProductsService {
         barcode: string | null;
         priceOverride: number | null;
         availableStock: number;
+        /** Pairs libres para vender por variante; no incluye cajas cerradas. */
+        looseStock: number;
+        /** Pairs que siguen dentro de cajas mixtas cerradas. */
+        boxedStock: number;
         stocks: { warehouseId: string; quantity: number }[];
       }[];
+      /** Pairs físicos dentro de cajas cerradas, no asignados a una talla. */
+      boxedStock: number;
+      closedBoxCount: number;
     }[];
     hasMore: boolean;
   }> {
@@ -1048,6 +1058,22 @@ export class ProductsService {
           },
         })
       : [];
+    const closedBoxes = variantIds.length
+      ? await this.stockUnitRepository.find({
+          where: {
+            tenantId,
+            variantId: In(variantIds),
+            kind: StockUnitKind.BOX,
+            status: StockUnitStatus.IN_STOCK,
+            ...(opts?.warehouseId ? { warehouseId: opts.warehouseId } : {}),
+          },
+        })
+      : [];
+    const boxedByKey = new Map<string, number>();
+    for (const box of closedBoxes) {
+      const key = `${box.variantId}|${box.warehouseId}`;
+      boxedByKey.set(key, (boxedByKey.get(key) ?? 0) + Number(box.quantity));
+    }
     const stockByVariant = new Map<
       string,
       { warehouseId: string; quantity: number }[]
@@ -1065,6 +1091,15 @@ export class ProductsService {
         .filter((variant) => variant.isActive)
         .map((variant) => {
           const variantStocks = stockByVariant.get(variant.id) ?? [];
+          const boxedStock = variantStocks.reduce(
+            (sum, stock) =>
+              sum + (boxedByKey.get(`${variant.id}|${stock.warehouseId}`) ?? 0),
+            0,
+          );
+          const totalStock = variantStocks.reduce(
+            (sum, stock) => sum + stock.quantity,
+            0,
+          );
           return {
             id: variant.id,
             sku: variant.sku,
@@ -1075,11 +1110,17 @@ export class ProductsService {
               variant.priceOverride === null
                 ? null
                 : Number(variant.priceOverride),
-            availableStock: variantStocks.reduce(
-              (sum, stock) => sum + stock.quantity,
-              0,
-            ),
-            stocks: variantStocks,
+            availableStock: Math.max(0, totalStock - boxedStock),
+            looseStock: Math.max(0, totalStock - boxedStock),
+            boxedStock,
+            stocks: variantStocks.map((stock) => ({
+              ...stock,
+              quantity: Math.max(
+                0,
+                stock.quantity -
+                  (boxedByKey.get(`${variant.id}|${stock.warehouseId}`) ?? 0),
+              ),
+            })),
           };
         });
       return [
@@ -1100,10 +1141,9 @@ export class ProductsService {
           imageUrl: product.imageUrl ?? null,
           categoryId: product.categoryId ?? null,
           gender: product.gender,
-          totalStock: productVariants.reduce(
-            (sum, variant) => sum + variant.availableStock,
-            0,
-          ),
+          totalStock: productVariants.reduce((sum, variant) => sum + variant.availableStock, 0),
+          boxedStock: productVariants.reduce((sum, variant) => sum + variant.boxedStock, 0),
+          closedBoxCount: closedBoxes.filter((box) => box.productId === product.id).length,
           variants: productVariants,
         },
       ];

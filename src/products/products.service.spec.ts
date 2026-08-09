@@ -9,6 +9,7 @@ import { ProductEssence } from './entities/product-essence.entity.js';
 import { Category } from '../categories/entities/category.entity.js';
 import { Warehouse } from '../inventory/entities/warehouse.entity.js';
 import { Stock } from '../inventory/entities/stock.entity.js';
+import { StockUnit } from '../inventory/entities/stock-unit.entity.js';
 import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
 import { RecipeService } from './services/recipe.service.js';
 import { BrandsService } from '../brands/brands.service.js';
@@ -122,6 +123,7 @@ describe('ProductsService', () => {
         { provide: getRepositoryToken(Category), useValue: emptyRepo() },
         { provide: getRepositoryToken(Warehouse), useValue: emptyRepo() },
         { provide: getRepositoryToken(Stock), useValue: emptyRepo() },
+        { provide: getRepositoryToken(StockUnit), useValue: emptyRepo() },
         { provide: getRepositoryToken(ProductEssence), useValue: emptyRepo() },
         {
           provide: RecipeService,
