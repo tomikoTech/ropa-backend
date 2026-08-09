@@ -41,6 +41,7 @@ describe('catálogo de módulos', () => {
       'inventory/warehouses',
       'inventory/transfers',
       'inventory-counts',
+      'internal-requests',
       'street',
       'reservations',
       'production',
@@ -100,6 +101,13 @@ describe('ruta → módulo', () => {
     expect(moduleForPath('/api/inventory/loans')).toBe('transfers');
     expect(moduleForPath('/api/inventory/adjust')).toBe('inventory');
     expect(moduleForPath('/api/inventory/stock')).toBe('inventory');
+  });
+
+  it('las solicitudes internas tienen permiso propio', () => {
+    expect(moduleForPath('/api/internal-requests')).toBe('internal-requests');
+    expect(moduleForPath('/api/internal-requests/x/prepare')).toBe(
+      'internal-requests',
+    );
   });
 
   it('los pedidos de la tienda online no son la configuración', () => {

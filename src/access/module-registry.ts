@@ -102,6 +102,11 @@ export const MODULES: ModuleDef[] = [
       'volvió (y genera la venta)',
   },
   { key: 'inventory-counts', label: 'Conteos físicos', group: 'Inventario' },
+  {
+    key: 'internal-requests',
+    label: 'Solicitudes internas',
+    group: 'Inventario',
+  },
   { key: 'reservations', label: 'Apartados', group: 'Inventario' },
   { key: 'production', label: 'Producción', group: 'Inventario' },
 
@@ -190,6 +195,7 @@ const ROUTE_MODULES: Record<string, string> = {
   'inventory/loans': 'transfers',
   inventory: 'inventory',
   'inventory-counts': 'inventory-counts',
+  'internal-requests': 'internal-requests',
   street: 'street',
   'stock-units': 'inventory',
   labels: 'inventory',

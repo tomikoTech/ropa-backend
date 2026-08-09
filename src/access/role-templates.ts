@@ -124,6 +124,7 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       reservations: RC,
       // Ve el inventario para saber si hay, pero no lo toca.
       inventory: R,
+      'internal-requests': RCE,
       // Necesita la lista de bodegas: el POS pide en cuál se está vendiendo.
       warehouses: R,
       // Ve lo que hay en la calle, pero despachar no es cosa del cajero.
@@ -141,6 +142,7 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       warehouses: RCE,
       transfers: RCE,
       'inventory-counts': RCE,
+      'internal-requests': RCE,
       // Es quien entrega la mercancía a los patinadores y quien la recibe de
       // vuelta.
       street: RCE,
@@ -164,6 +166,7 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
     permissions: build(NONE, {
       inventory: RE,
       'inventory-counts': RCE,
+      'internal-requests': RCE,
       transfers: RCE,
       warehouses: R,
       products: R,

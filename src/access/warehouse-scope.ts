@@ -121,6 +121,40 @@ export const ENTITY_WAREHOUSE_SOURCES: Record<string, EntityWarehouseSource> = {
     sql: 'SELECT warehouse_id FROM inventory_counts WHERE id = $1',
     action: 'cerrar este conteo',
   },
+  'POST internal-requests/:id/remit': {
+    param: 'id',
+    sql: 'SELECT source_warehouse_id AS warehouse_id FROM internal_requests WHERE id = $1',
+    action: 'remitir esta solicitud',
+  },
+  'POST internal-requests/:id/receive': {
+    param: 'id',
+    sql: 'SELECT destination_warehouse_id AS warehouse_id FROM internal_requests WHERE id = $1',
+    action: 'recibir esta solicitud',
+  },
+  'POST internal-requests/:id/cancel': {
+    param: 'id',
+    sql: 'SELECT destination_warehouse_id AS warehouse_id FROM internal_requests WHERE id = $1',
+    action: 'cancelar esta solicitud',
+  },
+  'POST internal-requests/:id/return': {
+    param: 'id',
+    sql: 'SELECT source_warehouse_id AS warehouse_id FROM internal_requests WHERE id = $1',
+    action: 'devolver esta solicitud',
+  },
+  'GET internal-requests/:id': {
+    param: 'id',
+    sql:
+      'SELECT destination_warehouse_id AS warehouse_id FROM internal_requests WHERE id = $1 ' +
+      'UNION ALL SELECT source_warehouse_id AS warehouse_id FROM internal_requests WHERE id = $1',
+    action: 'ver esta solicitud',
+  },
+  'POST internal-requests/:id/print': {
+    param: 'id',
+    sql:
+      'SELECT destination_warehouse_id AS warehouse_id FROM internal_requests WHERE id = $1 ' +
+      'UNION ALL SELECT source_warehouse_id AS warehouse_id FROM internal_requests WHERE id = $1',
+    action: 'imprimir esta solicitud',
+  },
   // Detallar cajas a inventario: la bodega es la de la orden de compra.
   'POST stock-units/receive/:boxLineId': {
     param: 'boxLineId',

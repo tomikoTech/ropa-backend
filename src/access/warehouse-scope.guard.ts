@@ -85,11 +85,16 @@ export class WarehouseScopeGuard implements CanActivate {
       if (typeof id === 'string' && id) {
         const rows: { warehouse_id: string | null }[] =
           await this.dataSource.query(source.sql, [id]);
-        const warehouseId = rows[0]?.warehouse_id ?? null;
+        const warehouseIds = rows
+          .map((row) => row.warehouse_id)
+          .filter((warehouseId): warehouseId is string => !!warehouseId);
         // Si no existe, que responda el servicio con su propio 404: no es
         // trabajo de este guard decidir eso.
-        if (warehouseId && !permitidas.has(warehouseId)) {
-          await this.reject(warehouseId, source.action);
+        if (
+          warehouseIds.length > 0 &&
+          !warehouseIds.some((warehouseId) => permitidas.has(warehouseId))
+        ) {
+          await this.reject(warehouseIds[0], source.action);
         }
       }
     }
