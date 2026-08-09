@@ -21,6 +21,7 @@ import {
 import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
 import { AccountsPayable } from './entities/accounts-payable.entity.js';
 import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
+import { PurchaseOrderStatus } from '../common/enums/purchase-order-status.enum.js';
 import {
   buildPurchaseBoxTemplate,
   readPurchaseBoxImport,
@@ -59,6 +60,7 @@ export class PurchaseBoxesService {
     manager: EntityManager,
     orderId: string,
     tenantId: string,
+    options?: { allowPayableIncreaseAfterPayment?: boolean },
   ): Promise<void> {
     const orderRepo = manager.getRepository(PurchaseOrder);
     const order = await orderRepo
@@ -106,11 +108,14 @@ export class PurchaseBoxesService {
           : round(subtotal * (rate / 100));
     const total = included ? round(gross) : round(subtotal + taxAmount);
 
-    if (
+    const payableChanged = payable && Number(payable.amount) !== total;
+    const payableHasPayments =
+      payable && (payable.isPaid || Number(payable.paidAmount) > 0);
+    const isAllowedIncrease =
+      options?.allowPayableIncreaseAfterPayment === true &&
       payable &&
-      Number(payable.amount) !== total &&
-      (payable.isPaid || Number(payable.paidAmount) > 0)
-    ) {
+      total >= Number(payable.amount);
+    if (payableChanged && payableHasPayments && !isAllowedIncrease) {
       throw new BadRequestException(
         'No se pueden cambiar los valores por caja porque la cuenta por pagar ya tiene pagos.',
       );
@@ -120,8 +125,11 @@ export class PurchaseBoxesService {
     order.taxAmount = taxAmount;
     order.total = total;
     await orderRepo.save(order);
-    if (payable && !payable.isPaid) {
+    if (payable && (!payable.isPaid || isAllowedIncrease)) {
       payable.amount = total;
+      const remainsPaid = Number(payable.paidAmount) >= total;
+      payable.isPaid = remainsPaid;
+      payable.paidAt = remainsPaid ? (payable.paidAt ?? new Date()) : null!;
       await manager.getRepository(AccountsPayable).save(payable);
     }
   }
@@ -403,6 +411,71 @@ export class PurchaseBoxesService {
         tenantId,
       );
       return saved;
+    });
+  }
+
+  /**
+   * Amplía un renglón ya recibido sin reescribir lo existente. Las cajas
+   * nuevas quedan pendientes y, al recibirlas, continúan 51, 52... según el
+   * total físico ya creado. Costos y cuenta por pagar crecen en la misma
+   * transacción; nunca se rebajan ni se altera un pago previo.
+   */
+  async appendBoxes(
+    lineId: string,
+    additionalBoxes: number,
+    tenantId: string,
+  ): Promise<PurchaseBoxLine> {
+    const candidate = await this.boxRepo.findOne({
+      where: { id: lineId, tenantId },
+    });
+    if (!candidate) throw new NotFoundException('Renglón no encontrado');
+
+    return this.dataSource.transaction(async (manager) => {
+      // Mismo orden de locks que la recepción: renglón → orden. Así anexar y
+      // recibir al mismo tiempo se serializa sin interbloqueos.
+      const boxRepo = manager.getRepository(PurchaseBoxLine);
+      const line = await boxRepo
+        .createQueryBuilder('line')
+        .setLock('pessimistic_write')
+        .where('line.id = :lineId', { lineId })
+        .andWhere('line.tenantId = :tenantId', { tenantId })
+        .getOne();
+      if (!line) throw new NotFoundException('Renglón no encontrado');
+      if (!line.isActive) {
+        throw new BadRequestException(
+          'No se pueden anexar cajas a un renglón inactivo.',
+        );
+      }
+
+      const orderRepo = manager.getRepository(PurchaseOrder);
+      const order = await orderRepo
+        .createQueryBuilder('purchase')
+        .setLock('pessimistic_write')
+        .where('purchase.id = :orderId', {
+          orderId: candidate.purchaseOrderId,
+        })
+        .andWhere('purchase.tenantId = :tenantId', { tenantId })
+        .getOne();
+      if (!order) throw new NotFoundException('Orden de compra no encontrada');
+      if (order.status === PurchaseOrderStatus.CANCELLED) {
+        throw new BadRequestException(
+          'No se pueden anexar cajas a una orden cancelada.',
+        );
+      }
+
+      line.boxes += additionalBoxes;
+      await boxRepo.save(line);
+      if (line.boxesReceived > 0) {
+        order.status = PurchaseOrderStatus.PARTIAL;
+        await orderRepo.save(order);
+      }
+      await this.recalculateOrderTotals(
+        manager,
+        line.purchaseOrderId,
+        tenantId,
+        { allowPayableIncreaseAfterPayment: true },
+      );
+      return line;
     });
   }
 

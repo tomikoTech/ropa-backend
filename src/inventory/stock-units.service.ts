@@ -151,14 +151,28 @@ export class StockUnitsService {
             .map((candidate) => [candidate.sizeId!, candidate]),
         );
 
+        const barcodePrefix = buildStockBarcode({
+          date: today,
+          orderSequence: orderSeq,
+          lineConsecutive: line.consecutive,
+          unitSequence: 0,
+        }).slice(0, 13);
+        let barcodeSequence = await this.nextUnitSequence(
+          line.id,
+          barcodePrefix,
+          tenantId,
+          m,
+        );
+
         for (let i = 0; i < toReceive; i++) {
-          const sequence = line.boxesReceived + i + 1;
+          const boxSequence = line.boxesReceived + i + 1;
           const body = buildStockBarcode({
             date: today,
             orderSequence: orderSeq,
             lineConsecutive: line.consecutive,
-            unitSequence: sequence,
+            unitSequence: barcodeSequence,
           });
+          barcodeSequence++;
           units.push(
             m.getRepository(StockUnit).create({
               barcode: withCheckDigit(body),
@@ -173,6 +187,8 @@ export class StockUnitsService {
               quantity: line.unitsPerBox,
               cost,
               purchaseBoxLineId: line.id,
+              boxSequence,
+              pairSequence: null,
               tenantId,
             }),
           );
@@ -315,9 +331,13 @@ export class StockUnitsService {
           where: { boxUnitId: box.id, tenantId },
         });
         const line = box.purchaseBoxLineId
-          ? await m.getRepository(PurchaseBoxLine).findOne({
-              where: { id: box.purchaseBoxLineId, tenantId },
-            })
+          ? await m
+              .getRepository(PurchaseBoxLine)
+              .createQueryBuilder('line')
+              .setLock('pessimistic_write')
+              .where('line.id = :lineId', { lineId: box.purchaseBoxLineId })
+              .andWhere('line.tenantId = :tenantId', { tenantId })
+              .getOne()
           : null;
         const fallbackCurveItems =
           boxContents.length === 0 && line?.sizeCurveId
@@ -392,7 +412,9 @@ export class StockUnitsService {
           box.purchaseBoxLineId,
           base.slice(0, 13),
           tenantId,
+          m,
         );
+        let pairSequence = 1;
 
         for (const item of distribution) {
           const variant = variantBySize.get(item.sizeId)!;
@@ -414,9 +436,12 @@ export class StockUnitsService {
                 cost: box.cost,
                 purchaseBoxLineId: box.purchaseBoxLineId,
                 parentUnitId: box.id,
+                boxSequence: box.boxSequence,
+                pairSequence,
                 tenantId,
               }),
             );
+            pairSequence++;
           }
         }
 
@@ -525,9 +550,13 @@ export class StockUnitsService {
     boxLineId: string | null,
     prefix: string,
     tenantId: string,
+    manager?: EntityManager,
   ): Promise<number> {
     if (!boxLineId) return 1;
-    const rows = await this.unitRepo.find({
+    const repository = manager
+      ? manager.getRepository(StockUnit)
+      : this.unitRepo;
+    const rows = await repository.find({
       where: { purchaseBoxLineId: boxLineId, tenantId },
       select: { barcode: true },
     });

@@ -458,6 +458,93 @@ describe('POS Sales & Accounts Receivable (e2e)', () => {
     expect(summary.activeAccounts).toBe(0);
   });
 
+  it('aplica un abono FIFO configurable desde la factura más antigua', async () => {
+    const sales: { id: string; total: number }[] = [];
+    for (let index = 0; index < 3; index++) {
+      const sale = await request(app.getHttpServer())
+        .post('/api/pos/sales')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          clientId,
+          warehouseId,
+          items: [{ variantId: variant2Id, quantity: 1, unitPrice: 59500 }],
+          applyTax: false,
+          payments: [{ method: 'CREDITO', amount: 59500 }],
+          creditDueDate: `2026-1${index}-2${index + 1}`,
+        })
+        .expect(201);
+      sales.push({ id: sale.body.id, total: Number(sale.body.total) });
+    }
+
+    await request(app.getHttpServer())
+      .patch('/api/store-settings')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ arPaymentAllocationMode: 'MANUAL' })
+      .expect(200);
+    await request(app.getHttpServer())
+      .post(
+        `/api/pos/accounts-receivable/clients/${clientId}/balance-payment`,
+      )
+      .set('Authorization', `Bearer ${token}`)
+      .send({ amount: 100, method: 'EFECTIVO' })
+      .expect(400);
+
+    try {
+      await request(app.getHttpServer())
+        .patch('/api/store-settings')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ arPaymentAllocationMode: 'FIFO' })
+        .expect(200);
+
+      const partialThird = Math.round((sales[2].total / 2) * 100) / 100;
+      const paymentAmount = sales[0].total + sales[1].total + partialThird;
+      const result = await request(app.getHttpServer())
+        .post(
+          `/api/pos/accounts-receivable/clients/${clientId}/balance-payment`,
+        )
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          amount: paymentAmount,
+          method: 'TRANSFERENCIA',
+          reference: 'FIFO-E2E',
+        })
+        .expect(201);
+
+      expect(result.body.allocations).toHaveLength(3);
+      expect(
+        result.body.allocations.map((row: { saleId: string }) => row.saleId),
+      ).toEqual(sales.map((sale) => sale.id));
+      expect(result.body.allocations[0].isFullyPaid).toBe(true);
+      expect(result.body.allocations[1].isFullyPaid).toBe(true);
+      expect(result.body.allocations[2].isFullyPaid).toBe(false);
+      expect(Number(result.body.allocations[2].remainingBalance)).toBeCloseTo(
+        sales[2].total - partialThird,
+        2,
+      );
+
+      const accounts = await request(app.getHttpServer())
+        .get(`/api/pos/accounts-receivable?clientId=${clientId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      const bySale = new Map<string, { saleId: string; isFullyPaid: boolean }>(
+        accounts.body.map(
+          (account: { saleId: string; isFullyPaid: boolean }) => [
+            account.saleId,
+            account,
+          ],
+        ),
+      );
+      expect(bySale.get(sales[0].id)?.isFullyPaid).toBe(true);
+      expect(bySale.get(sales[1].id)?.isFullyPaid).toBe(true);
+      expect(bySale.get(sales[2].id)?.isFullyPaid).toBe(false);
+    } finally {
+      await request(app.getHttpServer())
+        .patch('/api/store-settings')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ arPaymentAllocationMode: 'MANUAL' });
+    }
+  });
+
   // ─── VALIDATION: INSUFFICIENT STOCK ───
 
   it('POST /api/pos/sales → rejects sale with insufficient stock', async () => {

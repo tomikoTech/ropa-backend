@@ -159,7 +159,8 @@ export class UpdateStoreSettingsDto {
 
   @ApiPropertyOptional({
     example: true,
-    description: 'Habilita el módulo de Producción / perfumería (esencias y frascos)',
+    description:
+      'Habilita el módulo de Producción / perfumería (esencias y frascos)',
   })
   @IsOptional()
   @IsBoolean()
@@ -197,17 +198,42 @@ export class UpdateStoreSettingsDto {
   @IsBoolean()
   quickLoanEnabled?: boolean;
 
-  @ApiPropertyOptional({ example: 8, description: 'Antigüedad (meses) para punta' })
+  @ApiPropertyOptional({
+    enum: ['MANUAL', 'FIFO'],
+    description:
+      'MANUAL abona una factura elegida; FIFO distribuye el abono al saldo desde la factura más antigua',
+  })
+  @IsOptional()
+  @IsIn(['MANUAL', 'FIFO'])
+  arPaymentAllocationMode?: 'MANUAL' | 'FIFO';
+
+  @ApiPropertyOptional({
+    description: 'Muestra Caja N y Par N en las etiquetas físicas',
+  })
+  @IsOptional()
+  @IsBoolean()
+  showBoxPairSequenceOnLabels?: boolean;
+
+  @ApiPropertyOptional({
+    example: 8,
+    description: 'Antigüedad (meses) para punta',
+  })
   @IsOptional()
   @IsNumber()
   leftoverAgeMonths?: number;
 
-  @ApiPropertyOptional({ example: 2, description: 'Máx. tallas restantes para punta' })
+  @ApiPropertyOptional({
+    example: 2,
+    description: 'Máx. tallas restantes para punta',
+  })
   @IsOptional()
   @IsNumber()
   leftoverMaxSizes?: number;
 
-  @ApiPropertyOptional({ example: true, description: 'Habilita comisión por punta' })
+  @ApiPropertyOptional({
+    example: true,
+    description: 'Habilita comisión por punta',
+  })
   @IsOptional()
   @IsBoolean()
   leftoverCommissionEnabled?: boolean;
@@ -217,7 +243,10 @@ export class UpdateStoreSettingsDto {
   @IsIn(['fixed', 'percent'])
   leftoverCommissionMode?: string;
 
-  @ApiPropertyOptional({ example: 3000, description: 'Monto fijo por par o % según el modo' })
+  @ApiPropertyOptional({
+    example: 3000,
+    description: 'Monto fijo por par o % según el modo',
+  })
   @IsOptional()
   @IsNumber()
   leftoverCommissionValue?: number;
@@ -277,7 +306,6 @@ export class UpdateStoreSettingsDto {
   @IsOptional()
   @IsBoolean()
   unitTrackingEnabled?: boolean;
-
 
   @ApiPropertyOptional()
   @IsOptional()

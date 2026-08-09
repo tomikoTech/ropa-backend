@@ -43,6 +43,10 @@ export class AccountsReceivablePayment extends TenantAwareEntity {
   @Column({ nullable: true })
   notes: string;
 
+  /** Une las aplicaciones generadas por un mismo abono FIFO al saldo. */
+  @Column({ name: 'allocation_batch_id', type: 'uuid', nullable: true })
+  allocationBatchId: string | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 }

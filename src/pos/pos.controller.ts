@@ -124,6 +124,18 @@ export class PosController {
     return this.posService.recordArPayment(id, dto, tenantId);
   }
 
+  @Post('accounts-receivable/clients/:clientId/balance-payment')
+  @ApiOperation({
+    summary: 'Aplicar un abono al saldo del cliente por FIFO',
+  })
+  recordClientBalancePayment(
+    @Param('clientId', ParseUUIDPipe) clientId: string,
+    @Body() dto: RecordArPaymentDto,
+    @TenantId() tenantId: string,
+  ) {
+    return this.posService.recordClientBalancePayment(clientId, dto, tenantId);
+  }
+
   @Get('clients/:clientId/account-summary')
   @ApiOperation({ summary: 'Resumen de cuenta del cliente' })
   getClientAccountSummary(

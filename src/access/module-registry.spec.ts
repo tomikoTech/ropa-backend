@@ -195,6 +195,12 @@ describe('método → acción', () => {
         'accounts-receivable',
       ),
     ).toBe('edit');
+    expect(
+      resolvePermission(
+        'POST',
+        '/api/pos/accounts-receivable/clients/abc/balance-payment',
+      ),
+    ).toEqual({ module: 'accounts-receivable', action: 'edit' });
   });
 
   it('una ruta que no coincide con el mapa se resuelve por su forma', () => {

@@ -98,6 +98,16 @@ export class UpdateBoxLineDto {
   isActive?: boolean;
 }
 
+export class AppendBoxesDto {
+  @ApiProperty({
+    example: 10,
+    description: 'Cajas nuevas que se anexan al final del mismo renglón',
+  })
+  @IsInt()
+  @Min(1)
+  additionalBoxes: number;
+}
+
 export class FreightCostDto {
   @ApiProperty({ example: 'Naviera' })
   @IsString()

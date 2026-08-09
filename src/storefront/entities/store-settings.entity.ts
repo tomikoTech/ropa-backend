@@ -353,6 +353,21 @@ export class StoreSettings extends TenantAwareEntity {
   @Column({ name: 'quick_loan_enabled', default: false })
   quickLoanEnabled: boolean;
 
+  // Cartera: MANUAL conserva el abono por factura. FIFO permite registrar un
+  // abono al saldo total del cliente y lo reparte desde la factura más antigua.
+  @Column({
+    name: 'ar_payment_allocation_mode',
+    type: 'varchar',
+    length: 10,
+    default: 'MANUAL',
+  })
+  arPaymentAllocationMode: 'MANUAL' | 'FIFO';
+
+  // Hace visible en las etiquetas el número operativo de caja y, al abrirla,
+  // la secuencia del par. El código de barras permanece opaco e inmutable.
+  @Column({ name: 'show_box_pair_sequence_on_labels', default: false })
+  showBoxPairSequenceOnLabels: boolean;
+
   // Puntas (leftovers) + comisiones. Criterio automático: una referencia es
   // "punta" si su antigüedad ≥ leftover_age_months Y le quedan ≤ leftover_max_sizes
   // tallas. Se puede sobreescribir manualmente por producto (products.is_leftover).
@@ -367,7 +382,11 @@ export class StoreSettings extends TenantAwareEntity {
   leftoverCommissionEnabled: boolean;
 
   // 'fixed' = monto fijo por par; 'percent' = % del valor de la línea.
-  @Column({ name: 'leftover_commission_mode', type: 'varchar', default: 'fixed' })
+  @Column({
+    name: 'leftover_commission_mode',
+    type: 'varchar',
+    default: 'fixed',
+  })
   leftoverCommissionMode: string;
 
   @Column({

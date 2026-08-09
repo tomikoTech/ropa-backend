@@ -18,6 +18,7 @@ import { PurchaseBoxesService } from './purchase-boxes.service.js';
 import {
   CreateBoxLineDto,
   UpdateBoxLineDto,
+  AppendBoxesDto,
   UpdateImportCostsDto,
 } from './dto/purchase-box.dto.js';
 import { TenantId } from '../common/decorators/tenant-id.decorator.js';
@@ -90,6 +91,18 @@ export class PurchaseBoxesController {
     @TenantId() tenantId: string,
   ) {
     return this.boxes.updateLine(lineId, dto, tenantId);
+  }
+
+  @Post('box-lines/:lineId/append')
+  @ApiOperation({
+    summary: 'Anexar cajas conservando la numeración del renglón',
+  })
+  appendBoxes(
+    @Param('lineId', ParseUUIDPipe) lineId: string,
+    @Body() dto: AppendBoxesDto,
+    @TenantId() tenantId: string,
+  ) {
+    return this.boxes.appendBoxes(lineId, dto.additionalBoxes, tenantId);
   }
 
   @Delete('box-lines/:lineId')

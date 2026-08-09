@@ -114,6 +114,10 @@ export class StoreSettingsService {
       settings.transferConfirmationEnabled = dto.transferConfirmationEnabled;
     if (dto.quickLoanEnabled !== undefined)
       settings.quickLoanEnabled = dto.quickLoanEnabled;
+    if (dto.arPaymentAllocationMode !== undefined)
+      settings.arPaymentAllocationMode = dto.arPaymentAllocationMode;
+    if (dto.showBoxPairSequenceOnLabels !== undefined)
+      settings.showBoxPairSequenceOnLabels = dto.showBoxPairSequenceOnLabels;
     if (dto.leftoverAgeMonths !== undefined)
       settings.leftoverAgeMonths = dto.leftoverAgeMonths;
     if (dto.leftoverMaxSizes !== undefined)

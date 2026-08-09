@@ -133,6 +133,14 @@ export class StockUnit extends TenantAwareEntity {
   @Column({ name: 'parent_unit_id', type: 'uuid', nullable: true })
   parentUnitId: string | null;
 
+  /** Número humano de la caja dentro del renglón (1, 2, 3...). */
+  @Column({ name: 'box_sequence', type: 'int', nullable: true })
+  boxSequence: number | null;
+
+  /** Posición del par dentro de su caja padre (1..unidades de la caja). */
+  @Column({ name: 'pair_sequence', type: 'int', nullable: true })
+  pairSequence: number | null;
+
   @OneToMany(() => StockUnitContent, (content) => content.boxUnit)
   contents: StockUnitContent[];
 

@@ -4,12 +4,15 @@ import { In, Repository } from 'typeorm';
 import PDFDocument from 'pdfkit';
 import { StockUnit, StockUnitKind } from '../entities/stock-unit.entity.js';
 import { buildLabelBatchZpl, LabelData, ZplOptions } from './zpl.util.js';
+import { StoreSettings } from '../../storefront/entities/store-settings.entity.js';
 
 @Injectable()
 export class LabelsService {
   constructor(
     @InjectRepository(StockUnit)
     private readonly unitRepo: Repository<StockUnit>,
+    @InjectRepository(StoreSettings)
+    private readonly settingsRepo: Repository<StoreSettings>,
   ) {}
 
   /**
@@ -29,6 +32,8 @@ export class LabelsService {
     if (units.length === 0) {
       throw new NotFoundException('No se encontraron bultos para etiquetar');
     }
+    const settings = await this.settingsRepo.findOne({ where: { tenantId } });
+    const showSequence = !!settings?.showBoxPairSequenceOnLabels;
 
     // Se respeta el orden en que se pidieron: es el orden en que salen del
     // rollo y en que el operario las va pegando.
@@ -40,12 +45,22 @@ export class LabelsService {
         const detail = [u.color?.name, u.size?.name && `Talla ${u.size.name}`]
           .filter(Boolean)
           .join(' · ');
+        const sequenceLabel =
+          showSequence && u.boxSequence
+            ? u.kind === StockUnitKind.BOX
+              ? `CAJA ${u.boxSequence}`
+              : `CAJA ${u.boxSequence} · PAR ${String(u.pairSequence ?? 0).padStart(2, '0')}`
+            : undefined;
         return {
           barcode: u.barcode,
           productName: u.product?.name ?? 'Producto',
           detail: detail || undefined,
           highlight:
-            u.kind === StockUnitKind.BOX ? `CAJA x${u.quantity}` : undefined,
+            u.kind === StockUnitKind.BOX
+              ? sequenceLabel
+                ? `${sequenceLabel} · x${u.quantity}`
+                : `CAJA x${u.quantity}`
+              : sequenceLabel,
         };
       });
   }

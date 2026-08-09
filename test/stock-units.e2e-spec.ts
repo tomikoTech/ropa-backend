@@ -1048,4 +1048,92 @@ describe('Recepción por cajas y apertura de bultos (e2e)', () => {
       ),
     ).toBe(true);
   });
+
+  it('anexa cajas recibidas, continúa su número y etiqueta caja/par sin cambiar el barcode', async () => {
+    const appended = await Promise.all(
+      [1, 1].map(() =>
+        request(app.getHttpServer())
+          .post(`/api/purchases/box-lines/${boxLineId}/append`)
+          .set(auth())
+          .send({ additionalBoxes: 1 })
+          .expect(201),
+      ),
+    );
+    expect(appended.map((result) => result.body.boxes).sort()).toEqual([4, 5]);
+    expect(appended.every((result) => result.body.boxesReceived === 3)).toBe(
+      true,
+    );
+
+    const partialOrder = await request(app.getHttpServer())
+      .get(`/api/purchases/${orderId}`)
+      .set(auth())
+      .expect(200);
+    expect(partialOrder.body.status).toBe('PARTIAL');
+    expect(Number(partialOrder.body.total)).toBe(500000);
+    if (partialOrder.body.accountsPayable?.[0]) {
+      expect(Number(partialOrder.body.accountsPayable[0].amount)).toBe(500000);
+    }
+
+    const received = await request(app.getHttpServer())
+      .post(`/api/stock-units/receive/${boxLineId}`)
+      .set(auth())
+      .send({ boxes: 2 })
+      .expect(201);
+    expect(
+      received.body.map((box: { boxSequence: number }) => box.boxSequence),
+    ).toEqual([4, 5]);
+
+    const allBeforeSplit = await request(app.getHttpServer())
+      .get(`/api/stock-units?boxLineId=${boxLineId}`)
+      .set(auth())
+      .expect(200);
+    const barcodes = allBeforeSplit.body.map(
+      (unit: { barcode: string }) => unit.barcode,
+    );
+    expect(new Set(barcodes).size).toBe(barcodes.length);
+
+    const split = await request(app.getHttpServer())
+      .post(`/api/stock-units/${received.body[0].id}/split`)
+      .set(auth())
+      .expect(201);
+    expect(
+      split.body.units.map(
+        (unit: { boxSequence: number; pairSequence: number }) => [
+          unit.boxSequence,
+          unit.pairSequence,
+        ],
+      ),
+    ).toEqual([
+      [4, 1],
+      [4, 2],
+      [4, 3],
+      [4, 4],
+    ]);
+
+    try {
+      await request(app.getHttpServer())
+        .patch('/api/store-settings')
+        .set(auth())
+        .send({ showBoxPairSequenceOnLabels: true })
+        .expect(200);
+      const boxLabel = await request(app.getHttpServer())
+        .post('/api/labels/zpl')
+        .set(auth())
+        .send({ ids: [received.body[1].id] })
+        .expect(201);
+      expect(boxLabel.text).toContain('CAJA 5');
+
+      const pairLabel = await request(app.getHttpServer())
+        .post('/api/labels/zpl')
+        .set(auth())
+        .send({ ids: [split.body.units[0].id] })
+        .expect(201);
+      expect(pairLabel.text).toContain('CAJA 4 · PAR 01');
+    } finally {
+      await request(app.getHttpServer())
+        .patch('/api/store-settings')
+        .set(auth())
+        .send({ showBoxPairSequenceOnLabels: false });
+    }
+  });
 });

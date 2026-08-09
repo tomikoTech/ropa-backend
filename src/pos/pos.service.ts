@@ -38,6 +38,7 @@ import { PaymentMethod } from '../common/enums/payment-method.enum.js';
 import { MovementType } from '../common/enums/movement-type.enum.js';
 import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
 import { Promoter } from '../promoters/promoter.entity.js';
+import { randomUUID } from 'node:crypto';
 
 @Injectable()
 export class PosService {
@@ -1517,10 +1518,12 @@ export class PosService {
       const arRepo = manager.getRepository(AccountsReceivable);
       const arPayRepo = manager.getRepository(AccountsReceivablePayment);
 
-      const ar = await arRepo.findOne({
-        where: { id: arId, tenantId },
-        relations: ['payments'],
-      });
+      const ar = await arRepo
+        .createQueryBuilder('ar')
+        .setLock('pessimistic_write')
+        .where('ar.id = :arId', { arId })
+        .andWhere('ar.tenantId = :tenantId', { tenantId })
+        .getOne();
       if (!ar) {
         throw new NotFoundException('Cuenta por cobrar no encontrada');
       }
@@ -1530,17 +1533,19 @@ export class PosService {
         );
       }
 
-      const pending = Number(ar.totalAmount) - Number(ar.paidAmount);
-      if (dto.amount > pending) {
+      const toCents = (value: number) => Math.round(Number(value) * 100);
+      const amountCents = toCents(dto.amount);
+      const pendingCents = toCents(ar.totalAmount) - toCents(ar.paidAmount);
+      if (amountCents > pendingCents) {
         throw new BadRequestException(
-          `El monto ($${dto.amount}) excede el saldo pendiente ($${pending.toFixed(2)})`,
+          `El monto ($${dto.amount}) excede el saldo pendiente ($${(pendingCents / 100).toFixed(2)})`,
         );
       }
 
       // Create payment record
       const payment = arPayRepo.create({
         accountReceivableId: arId,
-        amount: dto.amount,
+        amount: amountCents / 100,
         method: dto.method,
         reference: dto.reference,
         bankId: dto.bankId ?? null,
@@ -1551,8 +1556,9 @@ export class PosService {
       await arPayRepo.save(payment);
 
       // Update totals (use update() to avoid TypeORM cascade issues with loaded relations)
-      const newPaidAmount = Number(ar.paidAmount) + dto.amount;
-      const isFullyPaid = newPaidAmount >= Number(ar.totalAmount);
+      const newPaidAmountCents = toCents(ar.paidAmount) + amountCents;
+      const newPaidAmount = newPaidAmountCents / 100;
+      const isFullyPaid = newPaidAmountCents >= toCents(ar.totalAmount);
       await arRepo.update(
         { id: arId, tenantId },
         {
@@ -1569,6 +1575,140 @@ export class PosService {
         relations: ['sale', 'client', 'payments'],
       });
       return updated!;
+    });
+  }
+
+  /**
+   * Registra un abono al saldo total del cliente y lo aplica FIFO: primero la
+   * venta a crédito más antigua, luego la siguiente y así sucesivamente. Cada
+   * aplicación conserva su propia fila contable y comparte un batch auditable.
+   */
+  async recordClientBalancePayment(
+    clientId: string,
+    dto: RecordArPaymentDto,
+    tenantId: string,
+  ): Promise<{
+    batchId: string;
+    amount: number;
+    allocations: {
+      accountReceivableId: string;
+      saleId: string;
+      saleNumber: string;
+      invoiceNumber: string | null;
+      amount: number;
+      remainingBalance: number;
+      isFullyPaid: boolean;
+    }[];
+  }> {
+    return this.dataSource.transaction(async (manager) => {
+      const settings = await manager.getRepository(StoreSettings).findOne({
+        where: { tenantId },
+      });
+      if (settings?.arPaymentAllocationMode !== 'FIFO') {
+        throw new BadRequestException(
+          'La aplicación automática FIFO no está habilitada para esta tienda.',
+        );
+      }
+
+      const client = await manager.getRepository(Client).findOne({
+        where: { id: clientId, tenantId },
+      });
+      if (!client) throw new NotFoundException('Cliente no encontrado');
+
+      const arRepo = manager.getRepository(AccountsReceivable);
+      const openAccounts = await arRepo
+        .createQueryBuilder('ar')
+        .innerJoinAndSelect('ar.sale', 'sale')
+        .setLock('pessimistic_write', undefined, ['ar'])
+        .where('ar.clientId = :clientId', { clientId })
+        .andWhere('ar.tenantId = :tenantId', { tenantId })
+        .andWhere('ar.isFullyPaid = false')
+        .orderBy('sale.createdAt', 'ASC')
+        .addOrderBy('ar.createdAt', 'ASC')
+        .addOrderBy('ar.id', 'ASC')
+        .getMany();
+
+      const toCents = (value: number) => Math.round(Number(value) * 100);
+      const amountCents = toCents(dto.amount);
+      const totalPendingCents = openAccounts.reduce(
+        (sum, account) =>
+          sum +
+          Math.max(
+            0,
+            toCents(account.totalAmount) - toCents(account.paidAmount),
+          ),
+        0,
+      );
+      if (totalPendingCents <= 0) {
+        throw new BadRequestException('El cliente no tiene saldo pendiente.');
+      }
+      if (amountCents > totalPendingCents) {
+        throw new BadRequestException(
+          `El monto ($${dto.amount}) excede el saldo total pendiente ($${(totalPendingCents / 100).toFixed(2)}).`,
+        );
+      }
+
+      const batchId = randomUUID();
+      const allocations: {
+        accountReceivableId: string;
+        saleId: string;
+        saleNumber: string;
+        invoiceNumber: string | null;
+        amount: number;
+        remainingBalance: number;
+        isFullyPaid: boolean;
+      }[] = [];
+      let unappliedCents = amountCents;
+      const paymentRepo = manager.getRepository(AccountsReceivablePayment);
+
+      for (const account of openAccounts) {
+        if (unappliedCents <= 0) break;
+        const pendingCents = Math.max(
+          0,
+          toCents(account.totalAmount) - toCents(account.paidAmount),
+        );
+        if (pendingCents === 0) continue;
+
+        const appliedCents = Math.min(unappliedCents, pendingCents);
+        const newPaidCents = toCents(account.paidAmount) + appliedCents;
+        const totalCents = toCents(account.totalAmount);
+        const isFullyPaid = newPaidCents >= totalCents;
+
+        await paymentRepo.save(
+          paymentRepo.create({
+            accountReceivableId: account.id,
+            amount: appliedCents / 100,
+            method: dto.method,
+            reference: dto.reference,
+            bankId: dto.bankId ?? null,
+            receiptImageUrl: dto.receiptImageUrl,
+            notes: dto.notes,
+            allocationBatchId: batchId,
+            tenantId,
+          }),
+        );
+        await arRepo.update(
+          { id: account.id, tenantId },
+          {
+            paidAmount: newPaidCents / 100,
+            isFullyPaid,
+            fullyPaidAt: isFullyPaid ? new Date() : null,
+          },
+        );
+
+        allocations.push({
+          accountReceivableId: account.id,
+          saleId: account.saleId,
+          saleNumber: account.sale.saleNumber,
+          invoiceNumber: account.sale.invoiceNumber ?? null,
+          amount: appliedCents / 100,
+          remainingBalance: Math.max(0, totalCents - newPaidCents) / 100,
+          isFullyPaid,
+        });
+        unappliedCents -= appliedCents;
+      }
+
+      return { batchId, amount: amountCents / 100, allocations };
     });
   }
 
