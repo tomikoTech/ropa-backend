@@ -13,6 +13,7 @@ describe('Recepción por cajas y apertura de bultos (e2e)', () => {
   let boxLineId: string;
   let boxIds: string[] = [];
   let warehouseId: string;
+  let returnWarehouseId: string;
   let curveSizeIds: string[] = [];
   let productName: string;
   let orderNumber: string;
@@ -77,6 +78,15 @@ describe('Recepción por cajas y apertura de bultos (e2e)', () => {
         code: `BU-${ts.toString().slice(-5)}`,
       });
     warehouseId = wh.body.id;
+    const returnWh = await request(app.getHttpServer())
+      .post('/api/inventory/warehouses')
+      .set(auth())
+      .send({
+        name: `E2E Retorno WH ${ts}`,
+        code: `RT-${ts.toString().slice(-5)}`,
+      })
+      .expect(201);
+    returnWarehouseId = returnWh.body.id;
 
     const sup = await request(app.getHttpServer())
       .post('/api/suppliers')
@@ -794,6 +804,110 @@ describe('Recepción por cajas y apertura de bultos (e2e)', () => {
     expect(scan.body.unit.status).toBe('IN_STOCK');
     expect(scan.body.returnEligible).toBe(false);
     expect(scan.body.replacementEligible).toBe(true);
+
+    const remitted = await request(app.getHttpServer())
+      .post(`/api/returns/${result.body.id}/remit`)
+      .set(auth())
+      .send({ destinationWarehouseId: returnWarehouseId })
+      .expect(201);
+    expect(remitted.body.remittanceWarehouse.id).toBe(returnWarehouseId);
+    expect(remitted.body.remittedAt).toBeTruthy();
+
+    const afterRemit = await request(app.getHttpServer())
+      .get(`/api/returns/scan/${returned.barcode}`)
+      .set(auth())
+      .expect(200);
+    expect(afterRemit.body.unit.warehouseId).toBe(returnWarehouseId);
+    await request(app.getHttpServer())
+      .post(`/api/returns/${result.body.id}/remit`)
+      .set(auth())
+      .send({ destinationWarehouseId: warehouseId })
+      .expect(400);
+  });
+
+  it('aplica una devolución a la cartera aunque la venta ya tenga un abono', async () => {
+    const list = await request(app.getHttpServer())
+      .get(`/api/stock-units?boxLineId=${boxLineId}`)
+      .set(auth())
+      .expect(200);
+    const unit = list.body.find(
+      (candidate: { kind: string; status: string; warehouseId: string }) =>
+        candidate.kind === 'UNIT' &&
+        candidate.status === 'IN_STOCK' &&
+        candidate.warehouseId === returnWarehouseId,
+    );
+    const client = await request(app.getHttpServer())
+      .post('/api/clients')
+      .set(auth())
+      .send({
+        firstName: `Cliente crédito ${ts}`,
+        lastName: 'B4',
+        documentNumber: `B4-${ts}`,
+        phone: '3000000000',
+      })
+      .expect(201);
+    const scan = await request(app.getHttpServer())
+      .get(`/api/pos/scan/${unit.barcode}`)
+      .set(auth())
+      .expect(200);
+    const sale = await request(app.getHttpServer())
+      .post('/api/pos/sales')
+      .set(auth())
+      .send({
+        clientId: client.body.id,
+        warehouseId: returnWarehouseId,
+        items: [
+          {
+            variantId: scan.body.variantId,
+            stockUnitId: unit.id,
+            quantity: 1,
+            unitPrice: 100000,
+          },
+        ],
+        payments: [{ method: 'CREDITO', amount: 100000 }],
+        creditDueDate: '2026-12-31',
+      })
+      .expect(201);
+    const receivables = await request(app.getHttpServer())
+      .get('/api/pos/accounts-receivable')
+      .set(auth())
+      .expect(200);
+    const receivable = receivables.body.find(
+      (row: { saleId: string }) => row.saleId === sale.body.id,
+    );
+    await request(app.getHttpServer())
+      .post(`/api/pos/accounts-receivable/${receivable.id}/payment`)
+      .set(auth())
+      .send({ amount: 20000, method: 'EFECTIVO' })
+      .expect(201);
+
+    const result = await request(app.getHttpServer())
+      .post('/api/returns')
+      .set(auth())
+      .send({
+        saleId: sale.body.id,
+        reason: 'Devolución sobre venta abonada',
+        destinationWarehouseId: returnWarehouseId,
+        settlementMethod: 'CREDITO',
+        items: [
+          {
+            saleItemId: sale.body.items[0].id,
+            returnedBarcode: unit.barcode,
+          },
+        ],
+      })
+      .expect(201);
+    expect(Number(result.body.priceDifference)).toBe(-100000);
+    expect(Number(result.body.refundAmount)).toBe(20000);
+    expect(result.body.creditNotes[0].isApplied).toBe(true);
+
+    const adjusted = await request(app.getHttpServer())
+      .get(`/api/pos/accounts-receivable/${receivable.id}`)
+      .set(auth())
+      .expect(200);
+    expect(Number(adjusted.body.totalAmount)).toBe(0);
+    expect(Number(adjusted.body.paidAmount)).toBe(20000);
+    expect(adjusted.body.isFullyPaid).toBe(true);
   });
 
   it('genera las etiquetas en ZPL, una por bulto', async () => {

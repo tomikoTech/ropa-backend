@@ -106,6 +106,23 @@ export class Return extends TenantAwareEntity {
   @Column({ name: 'destination_warehouse_id', type: 'uuid', nullable: true })
   destinationWarehouseId: string | null;
 
+  @ManyToOne(() => Warehouse, { nullable: true, onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'remittance_warehouse_id' })
+  remittanceWarehouse: Warehouse | null;
+
+  @Column({ name: 'remittance_warehouse_id', type: 'uuid', nullable: true })
+  remittanceWarehouseId: string | null;
+
+  @ManyToOne(() => User, { nullable: true, onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'remitted_by_id' })
+  remittedBy: User | null;
+
+  @Column({ name: 'remitted_by_id', type: 'uuid', nullable: true })
+  remittedById: string | null;
+
+  @Column({ name: 'remitted_at', type: 'timestamptz', nullable: true })
+  remittedAt: Date | null;
+
   @Column({ type: 'text', nullable: true })
   notes: string | null;
 

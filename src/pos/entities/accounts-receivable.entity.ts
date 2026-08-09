@@ -58,7 +58,7 @@ export class AccountsReceivable extends TenantAwareEntity {
   isFullyPaid: boolean;
 
   @Column({ name: 'fully_paid_at', type: 'timestamptz', nullable: true })
-  fullyPaidAt: Date;
+  fullyPaidAt: Date | null;
 
   @Column({ nullable: true })
   notes: string;

@@ -7,6 +7,9 @@ ALTER TABLE returns
   ADD COLUMN IF NOT EXISTS settlement_reference varchar,
   ADD COLUMN IF NOT EXISTS received_by_id uuid,
   ADD COLUMN IF NOT EXISTS destination_warehouse_id uuid,
+  ADD COLUMN IF NOT EXISTS remittance_warehouse_id uuid,
+  ADD COLUMN IF NOT EXISTS remitted_by_id uuid,
+  ADD COLUMN IF NOT EXISTS remitted_at timestamptz,
   ADD COLUMN IF NOT EXISTS notes text;
 
 ALTER TABLE return_items
@@ -27,6 +30,14 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN
   ALTER TABLE returns ADD CONSTRAINT fk_returns_destination_warehouse
     FOREIGN KEY (destination_warehouse_id) REFERENCES warehouses(id) ON DELETE RESTRICT;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  ALTER TABLE returns ADD CONSTRAINT fk_returns_remittance_warehouse
+    FOREIGN KEY (remittance_warehouse_id) REFERENCES warehouses(id) ON DELETE RESTRICT;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  ALTER TABLE returns ADD CONSTRAINT fk_returns_remitted_by
+    FOREIGN KEY (remitted_by_id) REFERENCES users(id) ON DELETE RESTRICT;
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN
   ALTER TABLE return_items ADD CONSTRAINT fk_return_items_stock_unit

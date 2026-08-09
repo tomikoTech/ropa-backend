@@ -34,6 +34,7 @@ import {
   IncomeCategory,
   IncomeType,
 } from '../common/enums/income-type.enum.js';
+import { AccountsReceivable } from '../pos/entities/accounts-receivable.entity.js';
 
 const money = (value: number) => Math.round(value * 100) / 100;
 
@@ -301,6 +302,39 @@ export class ReturnsService {
           );
         }
 
+        const receivableRepo = manager.getRepository(AccountsReceivable);
+        const receivable = await receivableRepo.findOne({
+          where: { saleId: sale.id, tenantId },
+          lock: { mode: 'pessimistic_write' },
+        });
+        let receivableRefundAmount = 0;
+        if (
+          receivable &&
+          hasPhysicalFlow &&
+          priceDifference !== 0 &&
+          dto.settlementMethod !== PaymentMethod.CREDITO
+        ) {
+          throw new BadRequestException(
+            'La venta tiene cartera: aplica la diferencia como crédito para no mover caja dos veces',
+          );
+        }
+        if (receivable) {
+          receivable.totalAmount = Math.max(
+            0,
+            money(Number(receivable.totalAmount) + priceDifference),
+          );
+          receivable.isFullyPaid =
+            Number(receivable.paidAmount) >= Number(receivable.totalAmount);
+          receivableRefundAmount = Math.max(
+            0,
+            money(
+              Number(receivable.paidAmount) - Number(receivable.totalAmount),
+            ),
+          );
+          receivable.fullyPaidAt = receivable.isFullyPaid ? new Date() : null;
+          await receivableRepo.save(receivable);
+        }
+
         // Create return
         const returnEntity = returnRepo.create({
           returnNumber,
@@ -309,7 +343,9 @@ export class ReturnsService {
           userId,
           reason: dto.reason,
           status: ReturnStatus.COMPLETED,
-          refundAmount: Math.max(-priceDifference, 0),
+          refundAmount: receivable
+            ? receivableRefundAmount
+            : Math.max(-priceDifference, 0),
           priceDifference,
           settlementMethod: dto.settlementMethod ?? null,
           settlementBankId: dto.settlementBankId ?? null,
@@ -325,6 +361,7 @@ export class ReturnsService {
         // positivo entra; uno negativo sale. Crédito no mueve caja/banco.
         if (
           priceDifference !== 0 &&
+          !receivable &&
           dto.settlementMethod &&
           dto.settlementMethod !== PaymentMethod.CREDITO
         ) {
@@ -495,6 +532,7 @@ export class ReturnsService {
           creditNoteNumber: cnNumber,
           returnId: savedReturn.id,
           amount: returnedTotal,
+          isApplied: Boolean(receivable),
           notes: `Nota crédito por devolución ${returnNumber}`,
           tenantId,
         });
@@ -617,6 +655,7 @@ export class ReturnsService {
       .leftJoinAndSelect('items.stockUnit', 'stockUnit')
       .leftJoinAndSelect('sale.client', 'client')
       .leftJoinAndSelect('sale.warehouse', 'warehouse')
+      .leftJoinAndSelect('sale.accountsReceivable', 'accountsReceivable')
       .where('sale.tenant_id = :tenantId', { tenantId })
       .andWhere('sale.status = :status', { status: SaleStatus.COMPLETED })
       .andWhere(
@@ -654,10 +693,159 @@ export class ReturnsService {
     };
   }
 
+  async remit(
+    id: string,
+    destinationWarehouseId: string,
+    userId: string,
+    tenantId: string,
+  ) {
+    await this.dataSource.transaction(async (manager) => {
+      const returnRepo = manager.getRepository(Return);
+      const returnEntity = await returnRepo.findOne({
+        where: { id, tenantId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!returnEntity)
+        throw new NotFoundException('Devolución no encontrada');
+      if (returnEntity.status !== ReturnStatus.COMPLETED) {
+        throw new BadRequestException(
+          'Solo se remiten devoluciones completadas',
+        );
+      }
+      if (returnEntity.remittedAt) {
+        throw new BadRequestException('Esta devolución ya fue remitida');
+      }
+      const destination = await manager.getRepository(Warehouse).findOne({
+        where: { id: destinationWarehouseId, tenantId },
+      });
+      if (!destination)
+        throw new NotFoundException('Bodega destino no encontrada');
+      const physicalItems = await manager.getRepository(ReturnItem).find({
+        where: { returnId: id, tenantId },
+      });
+      const tracked = physicalItems.filter((item) => item.stockUnitId);
+      if (tracked.length === 0) {
+        throw new BadRequestException(
+          'Esta devolución no contiene códigos físicos para remitir',
+        );
+      }
+
+      const stockRepo = manager.getRepository(Stock);
+      const movementRepo = manager.getRepository(StockMovement);
+      const unitRepo = manager.getRepository(StockUnit);
+      const eventRepo = manager.getRepository(StockUnitEvent);
+      for (const item of tracked) {
+        const unit = await unitRepo.findOne({
+          where: { id: item.stockUnitId!, tenantId },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (
+          !unit ||
+          unit.status !== StockUnitStatus.IN_STOCK ||
+          !unit.variantId
+        ) {
+          throw new BadRequestException(
+            `El código devuelto ${unit?.barcode ?? item.stockUnitId} ya no está disponible para remitir`,
+          );
+        }
+        const sourceWarehouseId = unit.warehouseId;
+        if (sourceWarehouseId !== destinationWarehouseId) {
+          const source = await stockRepo.findOne({
+            where: {
+              variantId: unit.variantId,
+              warehouseId: sourceWarehouseId,
+              tenantId,
+            },
+            lock: { mode: 'pessimistic_write' },
+          });
+          if (!source || Number(source.quantity) < unit.quantity) {
+            throw new BadRequestException(
+              `Stock agregado insuficiente para remitir ${unit.barcode}`,
+            );
+          }
+          let target = await stockRepo.findOne({
+            where: {
+              variantId: unit.variantId,
+              warehouseId: destinationWarehouseId,
+              tenantId,
+            },
+            lock: { mode: 'pessimistic_write' },
+          });
+          if (!target) {
+            target = stockRepo.create({
+              variantId: unit.variantId,
+              warehouseId: destinationWarehouseId,
+              quantity: 0,
+              minStock: 0,
+              tenantId,
+            });
+          }
+          source.quantity = Number(source.quantity) - unit.quantity;
+          target.quantity = Number(target.quantity) + unit.quantity;
+          await stockRepo.save([source, target]);
+          await movementRepo.save([
+            movementRepo.create({
+              variantId: unit.variantId,
+              warehouseId: sourceWarehouseId,
+              tenantId,
+              movementType: MovementType.TRANSFER,
+              quantity: -unit.quantity,
+              referenceType: 'RETURN_REMITTANCE',
+              referenceId: returnEntity.id,
+              notes: `Salida de ${returnEntity.returnNumber} hacia ${destination.name}`,
+              createdById: userId,
+            }),
+            movementRepo.create({
+              variantId: unit.variantId,
+              warehouseId: destinationWarehouseId,
+              tenantId,
+              movementType: MovementType.TRANSFER,
+              quantity: unit.quantity,
+              referenceType: 'RETURN_REMITTANCE',
+              referenceId: returnEntity.id,
+              notes: `Entrada de ${returnEntity.returnNumber}`,
+              createdById: userId,
+            }),
+          ]);
+          unit.warehouseId = destinationWarehouseId;
+          await unitRepo.save(unit);
+          await eventRepo.save(
+            eventRepo.create({
+              stockUnitId: unit.id,
+              eventType: StockUnitEventType.TRANSFERRED,
+              fromStatus: StockUnitStatus.IN_STOCK,
+              toStatus: StockUnitStatus.IN_STOCK,
+              referenceType: 'RETURN',
+              referenceId: returnEntity.id,
+              userId,
+              metadata: { sourceWarehouseId, destinationWarehouseId },
+              tenantId,
+            }),
+          );
+        }
+      }
+      returnEntity.remittanceWarehouseId = destinationWarehouseId;
+      returnEntity.remittedById = userId;
+      returnEntity.remittedAt = new Date();
+      await returnRepo.save(returnEntity);
+    });
+    return this.findOne(id, tenantId);
+  }
+
   async findAll(tenantId: string): Promise<Return[]> {
     return this.returnRepository.find({
       where: { tenantId },
-      relations: ['sale', 'client', 'user', 'items', 'creditNotes'],
+      relations: [
+        'sale',
+        'client',
+        'user',
+        'items',
+        'items.stockUnit',
+        'creditNotes',
+        'destinationWarehouse',
+        'remittanceWarehouse',
+        'remittedBy',
+      ],
       order: { createdAt: 'DESC' },
     });
   }
@@ -679,6 +867,8 @@ export class ReturnsService {
         'receivedBy',
         'destinationWarehouse',
         'settlementBank',
+        'remittanceWarehouse',
+        'remittedBy',
       ],
     });
     if (!ret) {

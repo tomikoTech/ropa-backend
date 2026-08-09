@@ -13,6 +13,7 @@ import { Warehouse } from '../inventory/entities/warehouse.entity.js';
 import { User } from '../users/entities/user.entity.js';
 import { Bank } from '../banks/entities/bank.entity.js';
 import { IncomeEntry } from '../incomes/entities/income-entry.entity.js';
+import { AccountsReceivable } from '../pos/entities/accounts-receivable.entity.js';
 import { ReturnsService } from './returns.service.js';
 import { ReturnsController } from './returns.controller.js';
 
@@ -32,6 +33,7 @@ import { ReturnsController } from './returns.controller.js';
       User,
       Bank,
       IncomeEntry,
+      AccountsReceivable,
     ]),
   ],
   controllers: [ReturnsController],
