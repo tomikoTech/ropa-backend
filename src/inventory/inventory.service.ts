@@ -8,6 +8,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { Warehouse } from './entities/warehouse.entity.js';
 import { Stock } from './entities/stock.entity.js';
+import { StockUnit, StockUnitKind, StockUnitStatus } from './entities/stock-unit.entity.js';
 import { StockMovement } from './entities/stock-movement.entity.js';
 import { StockTransfer } from './entities/stock-transfer.entity.js';
 import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
@@ -27,6 +28,8 @@ export class InventoryService {
     private readonly warehouseRepository: Repository<Warehouse>,
     @InjectRepository(Stock)
     private readonly stockRepository: Repository<Stock>,
+    @InjectRepository(StockUnit)
+    private readonly stockUnitRepository: Repository<StockUnit>,
     @InjectRepository(StockMovement)
     private readonly movementRepository: Repository<StockMovement>,
     @InjectRepository(StockTransfer)
@@ -125,33 +128,60 @@ export class InventoryService {
 
   // ─── Stock ───
 
+  /** Añade al inventario la separación visible entre pares sueltos y cajas. */
+  private async withBoxBreakdown(rows: Stock[], tenantId: string) {
+    if (rows.length === 0) return rows;
+    const boxes = await this.stockUnitRepository.find({
+      where: {
+        tenantId,
+        kind: StockUnitKind.BOX,
+        status: StockUnitStatus.IN_STOCK,
+      },
+    });
+    const boxedByKey = new Map<string, number>();
+    for (const box of boxes) {
+      const key = `${box.variantId}|${box.warehouseId}`;
+      boxedByKey.set(key, (boxedByKey.get(key) ?? 0) + Number(box.quantity));
+    }
+    return rows.map((row) => {
+      const boxedQuantity = boxedByKey.get(`${row.variantId}|${row.warehouseId}`) ?? 0;
+      return Object.assign(row, {
+        boxedQuantity,
+        looseQuantity: Math.max(0, Number(row.quantity) - boxedQuantity),
+      });
+    });
+  }
+
   async getStockByWarehouse(
     warehouseId: string,
     tenantId: string,
   ): Promise<Stock[]> {
-    return this.stockRepository.find({
+    const rows = await this.stockRepository.find({
       where: { warehouseId, tenantId },
       relations: ['variant', 'variant.product', 'warehouse'],
       order: { variant: { product: { name: 'ASC' } } },
     });
+    return this.withBoxBreakdown(rows, tenantId);
   }
 
   async getStockByVariant(
     variantId: string,
     tenantId: string,
   ): Promise<Stock[]> {
-    return this.stockRepository.find({
+    const rows = await this.stockRepository.find({
       where: { variantId, tenantId },
       relations: ['variant', 'variant.product', 'warehouse'],
     });
+    return this.withBoxBreakdown(rows, tenantId);
   }
 
   async getAllStock(tenantId: string): Promise<Stock[]> {
-    return this.stockRepository.find({
+    const rows = await this.stockRepository.find({
       where: { tenantId },
       relations: ['variant', 'variant.product', 'warehouse'],
       order: { warehouse: { name: 'ASC' } },
     });
+    return this.withBoxBreakdown(rows, tenantId);
   }
 
   async getLowStock(tenantId: string): Promise<Stock[]> {
