@@ -482,9 +482,7 @@ describe('POS Sales & Accounts Receivable (e2e)', () => {
       .send({ arPaymentAllocationMode: 'MANUAL' })
       .expect(200);
     await request(app.getHttpServer())
-      .post(
-        `/api/pos/accounts-receivable/clients/${clientId}/balance-payment`,
-      )
+      .post(`/api/pos/accounts-receivable/clients/${clientId}/balance-payment`)
       .set('Authorization', `Bearer ${token}`)
       .send({ amount: 100, method: 'EFECTIVO' })
       .expect(400);
@@ -610,5 +608,79 @@ describe('POS Sales & Accounts Receivable (e2e)', () => {
     expect(typeof summary.totalAmount).toBe('number');
     expect(typeof summary.totalItems).toBe('number');
     expect(typeof summary.byPaymentMethod).toBe('object');
+  });
+
+  // ─── ANULAR UNA VENTA A CRÉDITO ───
+
+  describe('anular una venta a crédito', () => {
+    /** Devuelve la venta y el id de su cuenta por cobrar. */
+    const crearVentaACredito = async () => {
+      const vence = new Date();
+      vence.setDate(vence.getDate() + 30);
+      const venta = await request(app.getHttpServer())
+        .post('/api/pos/sales')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          clientId,
+          warehouseId,
+          items: [{ variantId: variant1Id, quantity: 1 }],
+          payments: [{ method: 'CREDITO', amount: 50000 }],
+          creditDueDate: vence.toISOString().split('T')[0],
+        })
+        .expect(201);
+
+      const cartera = await request(app.getHttpServer())
+        .get('/api/pos/accounts-receivable')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      const cuenta = cartera.body.find(
+        (fila: { saleId: string }) => fila.saleId === venta.body.id,
+      );
+      expect(cuenta).toBeDefined();
+      return { venta: venta.body, arId: cuenta.id as string };
+    };
+
+    it('deja la cartera en cero y fuera del listado de deudas', async () => {
+      // Antes la cuenta por cobrar seguía viva: el cliente aparecía debiendo
+      // una factura que ya no existe.
+      const { venta, arId } = await crearVentaACredito();
+
+      await request(app.getHttpServer())
+        .post(`/api/pos/sales/${venta.id}/cancel`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(201);
+
+      const cartera = await request(app.getHttpServer())
+        .get('/api/pos/accounts-receivable?isFullyPaid=false')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      expect(
+        cartera.body.some((fila: { id: string }) => fila.id === arId),
+      ).toBe(false);
+
+      // Y no se puede seguir abonando a una venta anulada.
+      const abono = await request(app.getHttpServer())
+        .post(`/api/pos/accounts-receivable/${arId}/payment`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ amount: 1000, method: 'EFECTIVO' })
+        .expect(400);
+      expect(abono.body.message).toMatch(/anulada|pagada/i);
+    });
+
+    it('se niega a anular si la venta ya tiene abonos', async () => {
+      // La plata existe: hay que decidirla a mano, no borrarle el rastro.
+      const { venta, arId } = await crearVentaACredito();
+      await request(app.getHttpServer())
+        .post(`/api/pos/accounts-receivable/${arId}/payment`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ amount: 10000, method: 'EFECTIVO' })
+        .expect(201);
+
+      const res = await request(app.getHttpServer())
+        .post(`/api/pos/sales/${venta.id}/cancel`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(400);
+      expect(res.body.message).toContain('abonos');
+    });
   });
 });

@@ -4,7 +4,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource, In, ILike } from 'typeorm';
+import { Repository, DataSource, EntityManager, In, ILike, Not } from 'typeorm';
 import { Sale } from './entities/sale.entity.js';
 import { SaleItem } from './entities/sale-item.entity.js';
 import { Payment } from './entities/payment.entity.js';
@@ -787,6 +787,23 @@ export class PosService {
     return sale;
   }
 
+  /**
+   * Serializa a quienes tocan la misma venta (editar y anular mueven el mismo
+   * inventario). Se bloquea solo la fila de `sales`: hacerlo con las relaciones
+   * cargadas obligaría a PostgreSQL a bloquear el lado nullable de un LEFT JOIN,
+   * que es un error.
+   */
+  private async lockSaleRow(
+    manager: EntityManager,
+    saleId: string,
+    tenantId: string,
+  ): Promise<void> {
+    await manager.query(
+      'SELECT id FROM sales WHERE id = $1 AND tenant_id = $2 FOR UPDATE',
+      [saleId, tenantId],
+    );
+  }
+
   // Edita una venta y mantiene alineados sus snapshots monetarios, pagos y
   // cartera. El precio de una línea es histórico: nunca modifica el catálogo.
   async updateSale(
@@ -797,6 +814,7 @@ export class PosService {
   ): Promise<Sale> {
     await this.dataSource.transaction(async (manager) => {
       const saleRepo = manager.getRepository(Sale);
+      await this.lockSaleRow(manager, id, tenantId);
       const sale = await saleRepo.findOne({
         where: { id, tenantId },
         relations: [
@@ -960,6 +978,29 @@ export class PosService {
             );
           }
         } else {
+          // Cambiar los productos obliga a recrear las líneas, y una devolución
+          // apunta a la línea original: se rechaza en vez de dejar la
+          // devolución colgando de una fila que ya no existe.
+          if (sale.items.length > 0) {
+            const devueltas: { id: string }[] = await manager.query(
+              'SELECT ri.id FROM return_items ri WHERE ri.sale_item_id = ANY($1::uuid[]) LIMIT 1',
+              [sale.items.map((item) => item.id)],
+            );
+            if (devueltas.length > 0) {
+              throw new BadRequestException(
+                'Esta venta tiene devoluciones registradas: no se pueden cambiar sus productos ni cantidades. ' +
+                  'Anula la devolución primero, o corrige solo los precios.',
+              );
+            }
+          }
+
+          // Códigos físicos que la venta tenía antes; los que no sobrevivan a
+          // la edición vuelven a estar disponibles al final del bloque.
+          const previousUnitIds = sale.items
+            .map((item) => item.stockUnitId)
+            .filter((unitId): unitId is string => !!unitId);
+          const unitsStillSold = new Set<string>();
+
           // 1) Revertir inventario solo si cambiaron productos/cantidades.
           const prevMovs = await movementRepo.find({
             where: { referenceType: 'SALE', referenceId: sale.id, tenantId },
@@ -1021,10 +1062,21 @@ export class PosService {
               Number(variant.product.minimumSalePrice) || 0,
             );
 
+            // Se consume el snapshot: si la venta traía dos líneas de la misma
+            // variante, la segunda no puede heredar el mismo código físico.
             const previous = previousByVariant.get(variant.id);
+            if (previous) previousByVariant.delete(variant.id);
             const taxRate = previous
               ? Number(previous.taxRate)
               : fallbackTaxRate;
+            // El código físico sigue siendo el mismo par o la misma caja: sin
+            // esto la venta pierde el vínculo y ese código ya no se puede
+            // devolver escaneándolo.
+            const keptStockUnitId =
+              previous && Number(previous.quantity) === item.quantity
+                ? previous.stockUnitId
+                : null;
+            if (keptStockUnitId) unitsStillSold.add(keptStockUnitId);
 
             const editedItem = await saleItemRepo.save(
               saleItemRepo.create({
@@ -1042,6 +1094,7 @@ export class PosService {
                   previous !== undefined
                     ? Number(previous.unitCost)
                     : Number(variant.product.costPrice) || 0,
+                stockUnitId: keptStockUnitId,
                 promoterId: previous?.promoterId ?? null,
                 promoterName: previous?.promoterName ?? null,
                 discountPercent:
@@ -1120,6 +1173,37 @@ export class PosService {
                 );
               }
             }
+          }
+
+          // Un código que salió de la venta vuelve a estar disponible: el
+          // inventario agregado ya se revirtió arriba, y dejarlo VENDIDO haría
+          // imposible volver a venderlo.
+          for (const unitId of previousUnitIds) {
+            if (unitsStillSold.has(unitId)) continue;
+            const unitRepo = manager.getRepository(StockUnit);
+            const unit = await unitRepo.findOne({
+              where: { id: unitId, tenantId },
+              lock: { mode: 'pessimistic_write' },
+            });
+            if (!unit || unit.status !== StockUnitStatus.SOLD) continue;
+            unit.status = StockUnitStatus.IN_STOCK;
+            await unitRepo.save(unit);
+            await manager.getRepository(StockUnitEvent).save(
+              manager.getRepository(StockUnitEvent).create({
+                stockUnitId: unit.id,
+                eventType: StockUnitEventType.RETURNED,
+                fromStatus: StockUnitStatus.SOLD,
+                toStatus: StockUnitStatus.IN_STOCK,
+                referenceType: 'SALE_EDIT',
+                referenceId: sale.id,
+                userId,
+                metadata: {
+                  saleNumber: sale.saleNumber,
+                  reason: 'REMOVED_FROM_SALE',
+                },
+                tenantId,
+              }),
+            );
           }
         }
 
@@ -1364,9 +1448,13 @@ export class PosService {
       const stockRepo = manager.getRepository(Stock);
       const movementRepo = manager.getRepository(StockMovement);
 
+      // Se bloquea la fila madre con SQL directo: pedir FOR UPDATE por TypeORM
+      // junto con las relaciones intentaría bloquear el lado nullable de los
+      // LEFT JOIN y PostgreSQL lo rechaza.
+      await this.lockSaleRow(manager, id, tenantId);
       const sale = await saleRepo.findOne({
         where: { id, tenantId },
-        relations: ['items'],
+        relations: ['items', 'accountsReceivable'],
       });
 
       if (!sale) {
@@ -1375,6 +1463,21 @@ export class PosService {
       if (sale.status !== SaleStatus.COMPLETED) {
         throw new BadRequestException(
           'Solo se pueden cancelar ventas completadas',
+        );
+      }
+
+      // Cartera: una venta anulada no puede seguir cobrándose. Si ya recibió
+      // abonos, la plata existe y hay que decidirla a mano (devolverla o
+      // trasladarla), así que se rechaza en vez de borrar el rastro.
+      const receivables = sale.accountsReceivable ?? [];
+      const abonada = receivables.find(
+        (account) => Number(account.paidAmount) > 0,
+      );
+      if (abonada) {
+        throw new BadRequestException(
+          `Esta venta a crédito ya tiene abonos por $${Number(
+            abonada.paidAmount,
+          ).toLocaleString('es-CO')}. Reversa los abonos antes de anularla.`,
         );
       }
 
@@ -1412,6 +1515,55 @@ export class PosService {
           tenantId,
         });
         await movementRepo.save(reversal);
+      }
+
+      // Los códigos físicos vuelven a estar disponibles. Sin esto el bulto
+      // queda VENDIDO para siempre: el inventario agregado cuadra, pero esa
+      // caja o ese par no se puede volver a vender ni a escanear.
+      const unitRepo = manager.getRepository(StockUnit);
+      const eventRepo = manager.getRepository(StockUnitEvent);
+      for (const item of sale.items) {
+        if (!item.stockUnitId) continue;
+        const unit = await unitRepo.findOne({
+          where: { id: item.stockUnitId, tenantId },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!unit || unit.status !== StockUnitStatus.SOLD) continue;
+        unit.status = StockUnitStatus.IN_STOCK;
+        await unitRepo.save(unit);
+        await eventRepo.save(
+          eventRepo.create({
+            stockUnitId: unit.id,
+            eventType: StockUnitEventType.RETURNED,
+            fromStatus: StockUnitStatus.SOLD,
+            toStatus: StockUnitStatus.IN_STOCK,
+            referenceType: 'SALE_CANCEL',
+            referenceId: sale.id,
+            userId,
+            metadata: {
+              saleNumber: sale.saleNumber,
+              saleItemId: item.id,
+              reason: 'SALE_CANCELLED',
+            },
+            tenantId,
+          }),
+        );
+      }
+
+      // Cartera sin abonos: se salda en cero para que no siga apareciendo como
+      // deuda del cliente (la fila queda, con su nota, para la auditoría).
+      const arRepo = manager.getRepository(AccountsReceivable);
+      for (const account of receivables) {
+        account.totalAmount = 0;
+        account.isFullyPaid = true;
+        account.fullyPaidAt = new Date();
+        account.notes = [
+          account.notes,
+          `Anulada con la venta ${sale.saleNumber}`,
+        ]
+          .filter(Boolean)
+          .join(' · ');
+        await arRepo.save(account);
       }
 
       sale.status = SaleStatus.CANCELLED;
@@ -1483,7 +1635,11 @@ export class PosService {
       | undefined,
     tenantId: string,
   ): Promise<AccountsReceivable[]> {
-    const where: Record<string, unknown> = { tenantId };
+    const where: Record<string, unknown> = {
+      tenantId,
+      // Una venta anulada no debe seguir figurando en cartera.
+      sale: { status: Not(SaleStatus.CANCELLED) },
+    };
     if (filters?.isFullyPaid !== undefined)
       where.isFullyPaid = filters.isFullyPaid;
     if (filters?.clientId) where.clientId = filters.clientId;
@@ -1530,6 +1686,14 @@ export class PosService {
       if (ar.isFullyPaid) {
         throw new BadRequestException(
           'Esta cuenta ya está completamente pagada',
+        );
+      }
+      const sale = await manager.getRepository(Sale).findOne({
+        where: { id: ar.saleId, tenantId },
+      });
+      if (sale?.status === SaleStatus.CANCELLED) {
+        throw new BadRequestException(
+          `La venta ${sale.saleNumber} está anulada: su cartera ya no se cobra.`,
         );
       }
 
@@ -1623,6 +1787,10 @@ export class PosService {
         .where('ar.clientId = :clientId', { clientId })
         .andWhere('ar.tenantId = :tenantId', { tenantId })
         .andWhere('ar.isFullyPaid = false')
+        // Nunca abonar a la cartera de una venta anulada.
+        .andWhere('sale.status <> :cancelled', {
+          cancelled: SaleStatus.CANCELLED,
+        })
         .orderBy('sale.createdAt', 'ASC')
         .addOrderBy('ar.createdAt', 'ASC')
         .addOrderBy('ar.id', 'ASC')
@@ -1750,7 +1918,13 @@ export class PosService {
    */
   async getClientStatement(clientId: string, tenantId: string) {
     const accounts = await this.arRepository.find({
-      where: { clientId, tenantId },
+      // Sin las ventas anuladas: su cartera se saldó al anularlas y mostrarla
+      // aquí inflaría la deuda histórica del cliente.
+      where: {
+        clientId,
+        tenantId,
+        sale: { status: Not(SaleStatus.CANCELLED) },
+      },
       relations: ['sale', 'sale.items', 'client', 'payments'],
       order: { createdAt: 'DESC' },
     });

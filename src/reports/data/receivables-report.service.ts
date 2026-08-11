@@ -100,6 +100,8 @@ export class ReceivablesReportService {
       .innerJoin('ar.client', 'cl')
       .leftJoin('ar.sale', 's')
       .where('ar.tenant_id = :tenantId', { tenantId })
+      // La cartera de una venta anulada no se cobra: no es cartera.
+      .andWhere("(s.status IS NULL OR s.status <> 'CANCELLED')")
       .andWhere(timestampRangeSql('ar.created_at'), {
         from: query.from,
         to: query.to,

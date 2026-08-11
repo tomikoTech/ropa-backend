@@ -1136,4 +1136,104 @@ describe('Recepción por cajas y apertura de bultos (e2e)', () => {
         .send({ showBoxPairSequenceOnLabels: false });
     }
   });
+
+  it('editar el precio de la venta no le quita el código físico', async () => {
+    // Al recrear las líneas se perdía el `stockUnitId`: el código quedaba
+    // vendido pero sin venta que lo respaldara, y ya no se podía devolver
+    // escaneándolo.
+    const { unit, sale } = await sellAvailableUnit();
+
+    const editada = await request(app.getHttpServer())
+      .patch(`/api/pos/sales/${sale.id}`)
+      .set(auth())
+      .send({
+        items: [
+          {
+            variantId: sale.items[0].variantId,
+            quantity: 1,
+            unitPrice: 120000,
+          },
+        ],
+      })
+      .expect(200);
+    expect(editada.body.items[0].stockUnitId).toBe(unit.id);
+
+    // Y sigue siendo devolvible por su código.
+    const scan = await request(app.getHttpServer())
+      .get(`/api/returns/scan/${unit.barcode}`)
+      .set(auth())
+      .expect(200);
+    expect(scan.body.returnEligible).toBe(true);
+    expect(scan.body.saleItem.id).toBe(editada.body.items[0].id);
+
+    // Y una vez que la venta tiene devolución, ya no se le pueden cambiar los
+    // productos: la devolución apunta a esa línea y recrearla la dejaría
+    // colgando de una fila que ya no existe.
+    await request(app.getHttpServer())
+      .post('/api/returns')
+      .set(auth())
+      .send({
+        saleId: sale.id,
+        reason: 'Cambio de talla',
+        destinationWarehouseId: warehouseId,
+        settlementMethod: 'EFECTIVO',
+        items: [
+          { saleItemId: sale.items[0].id, returnedBarcode: unit.barcode },
+        ],
+      })
+      .expect(201);
+
+    const rechazo = await request(app.getHttpServer())
+      .patch(`/api/pos/sales/${sale.id}`)
+      .set(auth())
+      .send({
+        items: [
+          { variantId: sale.items[0].variantId, quantity: 2, unitPrice: 90000 },
+        ],
+      })
+      .expect(400);
+    expect(String(rechazo.body.message)).toMatch(/devoluciones/i);
+  });
+
+  it('anular la venta devuelve el código a disponible', async () => {
+    // El inventario agregado ya se revertía; el código físico no. Quedaba
+    // VENDIDO para siempre: no se podía volver a vender ni a escanear.
+    const { unit, sale } = await sellAvailableUnit();
+
+    const vendido = await request(app.getHttpServer())
+      .get(`/api/stock-units/by-barcode/${unit.barcode}`)
+      .set(auth())
+      .expect(200);
+    expect(vendido.body.status).toBe('SOLD');
+
+    await request(app.getHttpServer())
+      .post(`/api/pos/sales/${sale.id}/cancel`)
+      .set(auth())
+      .expect(201);
+
+    const despues = await request(app.getHttpServer())
+      .get(`/api/stock-units/by-barcode/${unit.barcode}`)
+      .set(auth())
+      .expect(200);
+    expect(despues.body.status).toBe('IN_STOCK');
+
+    // Y queda el rastro de por qué volvió.
+    const trace = await request(app.getHttpServer())
+      .get(`/api/stock-units/trace/${unit.barcode}`)
+      .set(auth())
+      .expect(200);
+    expect(
+      trace.body.events.some(
+        (event: { referenceType: string }) =>
+          event.referenceType === 'SALE_CANCEL',
+      ),
+    ).toBe(true);
+
+    // Se puede volver a vender, que es la prueba de que quedó libre de verdad.
+    const scan = await request(app.getHttpServer())
+      .get(`/api/pos/scan/${unit.barcode}`)
+      .set(auth())
+      .expect(200);
+    expect(scan.body.stockUnitId).toBe(unit.id);
+  });
 });
