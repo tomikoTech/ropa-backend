@@ -7,7 +7,13 @@ import {
   ParseUUIDPipe,
   Query,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiQuery,
+} from '@nestjs/swagger';
+import { parsePositiveInt } from '../common/utils/query-number.util.js';
 import { ReturnsService } from './returns.service.js';
 import { CreateReturnDto } from './dto/create-return.dto.js';
 import { RemitReturnDto } from './dto/remit-return.dto.js';
@@ -15,6 +21,9 @@ import { CurrentUser } from '../common/decorators/current-user.decorator.js';
 import { TenantId } from '../common/decorators/tenant-id.decorator.js';
 import { Roles } from '../common/decorators/roles.decorator.js';
 import { Role } from '../common/enums/role.enum.js';
+
+/** Tope de filas por página. */
+const MAX_PAGE_SIZE = 200;
 
 @ApiTags('Devoluciones')
 @ApiBearerAuth()
@@ -34,15 +43,41 @@ export class ReturnsController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'Listar devoluciones' })
-  findAll(@TenantId() tenantId: string) {
-    return this.returnsService.findAll(tenantId);
+  @ApiOperation({
+    summary:
+      'Listar devoluciones (las más recientes primero). Con page/limit ' +
+      'devuelve { data, total, page, limit, totalPages }; sin ellos, el arreglo completo',
+  })
+  @ApiQuery({ name: 'page', required: false })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    description: 'Filas por página (por defecto 20, máximo 200)',
+  })
+  findAll(
+    @TenantId() tenantId: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.returnsService.findAll(tenantId, {
+      page: parsePositiveInt(page),
+      limit: parsePositiveInt(limit, { max: MAX_PAGE_SIZE }),
+    });
   }
 
   @Get('credit-notes')
   @ApiOperation({ summary: 'Listar notas crédito' })
-  findCreditNotes(@TenantId() tenantId: string) {
-    return this.returnsService.findCreditNotes(tenantId);
+  @ApiQuery({ name: 'page', required: false })
+  @ApiQuery({ name: 'limit', required: false })
+  findCreditNotes(
+    @TenantId() tenantId: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.returnsService.findCreditNotes(tenantId, {
+      page: parsePositiveInt(page),
+      limit: parsePositiveInt(limit, { max: MAX_PAGE_SIZE }),
+    });
   }
 
   @Get('sales/search')

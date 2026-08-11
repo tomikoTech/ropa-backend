@@ -489,6 +489,11 @@ export class InventoryCountsService {
         missingCodes: physical.missing.length,
         surplusCodes: physical.surplus.length,
         exceptions: physical.exceptions.length,
+        // Referencias con existencia en el sistema que nadie ha contado: si se
+        // cierra ajustando, quedan en cero. La pantalla lo advierte antes.
+        zeroedReferences: lines.filter(
+          (line) => line.expectedQuantity > 0 && line.countedQuantity === 0,
+        ).length,
       },
       recentScans: scans,
     };
@@ -505,6 +510,7 @@ export class InventoryCountsService {
     count: InventoryCount;
     adjusted: number;
     writtenOffCodes: number;
+    zeroedReferences: number;
   }> {
     return this.dataSource.transaction(async (manager) => {
       const count = await this.lockOpen(manager, countId, tenantId);
@@ -538,6 +544,19 @@ export class InventoryCountsService {
       const differences = lines.filter(
         (line) => line.countedQuantity !== line.expectedQuantity,
       );
+      // Referencias que existían en la bodega y nadie escaneó: ajustar las deja
+      // en cero. Es lo correcto en un conteo completo y catastrófico en uno que
+      // quedó a medias, así que se nombra antes de hacerlo.
+      const zeroedReferences = lines.filter(
+        (line) => line.expectedQuantity > 0 && line.countedQuantity === 0,
+      ).length;
+      if (adjust && zeroedReferences > 0 && !acknowledgeExceptions) {
+        throw new BadRequestException(
+          `${zeroedReferences} referencia(s) del sistema no se contaron y el ajuste las dejaría en 0. ` +
+            `Si el conteo quedó a medias, ciérralo sin ajustar. Si de verdad no había nada de esas referencias, ` +
+            `confirma para continuar.`,
+        );
+      }
       let writtenOffCodes = 0;
 
       if (adjust) {
@@ -559,9 +578,14 @@ export class InventoryCountsService {
               tenantId,
             });
           }
+          // El movimiento se calcula contra la existencia **de este momento**,
+          // no contra la foto de apertura: si hubo ventas mientras se contaba,
+          // usar la foto dejaría el kardex descuadrado contra el stock real.
+          const actual = Number(stock.quantity);
+          const difference = line.countedQuantity - actual;
+          if (difference === 0) continue;
           stock.quantity = line.countedQuantity;
           await stockRepo.save(stock);
-          const difference = line.countedQuantity - line.expectedQuantity;
           await manager.getRepository(StockMovement).save(
             manager.getRepository(StockMovement).create({
               variantId: line.variantId,
@@ -569,7 +593,12 @@ export class InventoryCountsService {
               movementType: difference > 0 ? MovementType.IN : MovementType.OUT,
               quantity: Math.abs(difference),
               createdById: userId,
-              notes: `Ajuste por conteo ${count.countNumber}: sistema ${line.expectedQuantity}, contado ${line.countedQuantity}`,
+              notes:
+                `Ajuste por conteo ${count.countNumber}: sistema ${actual}, ` +
+                `contado ${line.countedQuantity}` +
+                (actual !== line.expectedQuantity
+                  ? ` (al abrir el conteo había ${line.expectedQuantity})`
+                  : ''),
               tenantId,
             }),
           );
@@ -630,6 +659,7 @@ export class InventoryCountsService {
         count,
         adjusted: adjust ? differences.length : 0,
         writtenOffCodes,
+        zeroedReferences: adjust ? zeroedReferences : 0,
       };
     });
   }

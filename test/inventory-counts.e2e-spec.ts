@@ -352,4 +352,92 @@ describe('Conteo físico de inventario (e2e)', () => {
     const missingUnit = await unitRepo.findOneByOrFail({ id: units[1].id });
     expect(missingUnit.status).toBe(StockUnitStatus.WRITTEN_OFF);
   }, 30000);
+
+  it('avisa cuántas referencias quedarían en cero antes de ajustar', async () => {
+    // Un conteo a medias cerrado con ajuste pone en 0 todo lo que nadie
+    // escaneó. Es correcto en un conteo completo y catastrófico en uno
+    // interrumpido, así que hay que decirlo con el número en la mano.
+    const wh = await request(app.getHttpServer())
+      .post('/api/inventory/warehouses')
+      .set(auth())
+      .send({ name: `E2E Conteo parcial ${ts}`, code: `CPA-${ts}` })
+      .expect(201);
+    const bodega = wh.body.id;
+
+    const producto = await request(app.getHttpServer())
+      .post('/api/products')
+      .set(auth())
+      .send({
+        name: `E2E Conteo parcial ${ts}`,
+        basePrice: 10000,
+        costPrice: 5000,
+        taxRate: 0,
+        variants: [
+          { size: '38', color: 'Contada' },
+          { size: '39', color: 'Sin contar' },
+        ],
+      })
+      .expect(201);
+    const [contada, sinContar] = producto.body.variants;
+
+    for (const variante of [contada, sinContar]) {
+      await request(app.getHttpServer())
+        .post('/api/inventory/adjust')
+        .set(auth())
+        .send({
+          variantId: variante.id,
+          warehouseId: bodega,
+          quantity: 4,
+          movementType: 'IN',
+          notes: 'stock para el conteo parcial',
+        })
+        .expect(201);
+    }
+
+    const conteo = await request(app.getHttpServer())
+      .post('/api/inventory-counts')
+      .set(auth())
+      .send({ warehouseId: bodega })
+      .expect(201);
+
+    // Solo se cuenta una de las dos referencias.
+    await request(app.getHttpServer())
+      .post(`/api/inventory-counts/${conteo.body.id}/lines`)
+      .set(auth())
+      .send({ variantId: contada.id, quantity: 4 })
+      .expect(201);
+
+    const sesion = await request(app.getHttpServer())
+      .get(`/api/inventory-counts/${conteo.body.id}/session`)
+      .set(auth())
+      .expect(200);
+    expect(sesion.body.summary.zeroedReferences).toBe(1);
+
+    // Ajustar sin confirmar se rechaza, con el número por delante.
+    const rechazo = await request(app.getHttpServer())
+      .post(`/api/inventory-counts/${conteo.body.id}/close`)
+      .set(auth())
+      .send({ adjust: true, confirmation: conteo.body.countNumber })
+      .expect(400);
+    expect(String(rechazo.body.message)).toMatch(
+      /quedar|dejaría en 0|no se contaron/i,
+    );
+
+    // Cerrar SIN ajustar no toca el inventario.
+    await request(app.getHttpServer())
+      .post(`/api/inventory-counts/${conteo.body.id}/close`)
+      .set(auth())
+      .send({ adjust: false, confirmation: conteo.body.countNumber })
+      .expect(201);
+
+    const stock = await request(app.getHttpServer())
+      .get('/api/inventory/stock')
+      .set(auth())
+      .expect(200);
+    const fila = (stock.body.items ?? stock.body).find(
+      (s: { variantId: string; warehouseId: string }) =>
+        s.variantId === sinContar.id && s.warehouseId === bodega,
+    );
+    expect(fila.quantity).toBe(4);
+  }, 30000);
 });

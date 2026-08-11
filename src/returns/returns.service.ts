@@ -12,6 +12,7 @@ import { Sale } from '../pos/entities/sale.entity.js';
 import { SaleItem } from '../pos/entities/sale-item.entity.js';
 import { Stock } from '../inventory/entities/stock.entity.js';
 import { StockMovement } from '../inventory/entities/stock-movement.entity.js';
+import type { Paginated } from '../common/types/paginated.js';
 import { CreateReturnDto } from './dto/create-return.dto.js';
 import { ReturnStatus } from '../common/enums/return-status.enum.js';
 import { SaleStatus } from '../common/enums/sale-status.enum.js';
@@ -667,6 +668,13 @@ export class ReturnsService {
     const sale = await qb.getOne();
     if (!sale) throw new NotFoundException('Venta completada no encontrada');
 
+    // Las facturas históricas importadas no tienen líneas de venta. Sin esta
+    // salida, el `IN (:...itemIds)` de abajo se arma vacío y PostgreSQL
+    // rechaza la consulta: buscar esa factura respondía 500.
+    if (sale.items.length === 0) {
+      return { ...sale, items: [] };
+    }
+
     const returnedRows = await this.dataSource
       .getRepository(ReturnItem)
       .createQueryBuilder('item')
@@ -832,22 +840,55 @@ export class ReturnsService {
     return this.findOne(id, tenantId);
   }
 
-  async findAll(tenantId: string): Promise<Return[]> {
-    return this.returnRepository.find({
+  private static readonly LIST_RELATIONS = [
+    'sale',
+    'client',
+    'user',
+    'items',
+    'items.stockUnit',
+    'creditNotes',
+    'destinationWarehouse',
+    'remittanceWarehouse',
+    'remittedBy',
+  ];
+
+  /**
+   * Las devoluciones, de la más reciente a la más vieja.
+   *
+   * Con `page`/`limit` pagina **en el servidor** y devuelve el total, que es lo
+   * que necesita la pantalla para dibujar "3 / 12" sin traerse la tabla entera
+   * (cada fila arrastra diez relaciones). Sin esos parámetros responde el
+   * arreglo completo, como siempre: recortar en silencio sería peor que no
+   * paginar, porque nadie se entera de lo que dejó de ver.
+   */
+  async findAll(
+    tenantId: string,
+    options: { page?: number; limit?: number } = {},
+  ): Promise<Return[] | Paginated<Return>> {
+    if (options.page === undefined && options.limit === undefined) {
+      return this.returnRepository.find({
+        where: { tenantId },
+        relations: ReturnsService.LIST_RELATIONS,
+        order: { createdAt: 'DESC' },
+      });
+    }
+
+    const page = Math.max(1, options.page ?? 1);
+    const limit = Math.min(200, Math.max(1, options.limit ?? 20));
+    const [data, total] = await this.returnRepository.findAndCount({
       where: { tenantId },
-      relations: [
-        'sale',
-        'client',
-        'user',
-        'items',
-        'items.stockUnit',
-        'creditNotes',
-        'destinationWarehouse',
-        'remittanceWarehouse',
-        'remittedBy',
-      ],
+      relations: ReturnsService.LIST_RELATIONS,
       order: { createdAt: 'DESC' },
+      take: limit,
+      skip: (page - 1) * limit,
     });
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+    };
   }
 
   async findOne(id: string, tenantId: string): Promise<Return> {
@@ -877,11 +918,35 @@ export class ReturnsService {
     return ret;
   }
 
-  async findCreditNotes(tenantId: string): Promise<CreditNote[]> {
-    return this.creditNoteRepository.find({
+  /** Mismo trato que las devoluciones: paginado solo si lo piden. */
+  async findCreditNotes(
+    tenantId: string,
+    options: { page?: number; limit?: number } = {},
+  ): Promise<CreditNote[] | Paginated<CreditNote>> {
+    const relations = ['return', 'return.sale', 'return.client'];
+    if (options.page === undefined && options.limit === undefined) {
+      return this.creditNoteRepository.find({
+        where: { tenantId },
+        relations,
+        order: { createdAt: 'DESC' },
+      });
+    }
+
+    const page = Math.max(1, options.page ?? 1);
+    const limit = Math.min(200, Math.max(1, options.limit ?? 20));
+    const [data, total] = await this.creditNoteRepository.findAndCount({
       where: { tenantId },
-      relations: ['return', 'return.sale', 'return.client'],
+      relations,
       order: { createdAt: 'DESC' },
+      take: limit,
+      skip: (page - 1) * limit,
     });
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+    };
   }
 }

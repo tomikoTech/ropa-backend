@@ -15,10 +15,17 @@ import {
   ApiOperation,
   ApiQuery,
 } from '@nestjs/swagger';
+import {
+  parseNonNegativeInt,
+  parsePositiveInt,
+} from '../common/utils/query-number.util.js';
 import { ProductsService } from './products.service.js';
 import { CreateProductDto } from './dto/create-product.dto.js';
 import { UpdateProductDto } from './dto/update-product.dto.js';
 import { TenantId } from '../common/decorators/tenant-id.decorator.js';
+
+/** Tope de filas por página: ninguna consulta de catálogo puede pedir más. */
+const MAX_PAGE_SIZE = 200;
 
 @ApiTags('Productos')
 @ApiBearerAuth()
@@ -75,8 +82,9 @@ export class ProductsController {
       return this.productsService.findAll(tenantId);
     }
     return this.productsService.findPaginated(tenantId, {
-      page: page ? Number(page) : 1,
-      limit: limit ? Number(limit) : 30,
+      // `?page=abc` o `?limit=99999` no pueden decidir cuánta base se lee.
+      page: parsePositiveInt(page) ?? 1,
+      limit: parsePositiveInt(limit, { max: MAX_PAGE_SIZE }) ?? 30,
       search,
       categoryIds: categoryIds
         ? categoryIds
@@ -115,8 +123,8 @@ export class ProductsController {
     // `CostVisibilityInterceptor`: si quien pregunta no puede ver Productos, el
     // costo no sale — aquí ni en ningún otro endpoint.
     return this.productsService.searchVariants(query, tenantId, {
-      limit: limit ? Number(limit) : undefined,
-      offset: offset ? Number(offset) : undefined,
+      limit: parsePositiveInt(limit, { max: MAX_PAGE_SIZE }),
+      offset: parseNonNegativeInt(offset),
       type: type || undefined,
       sort,
       warehouseId,
@@ -144,8 +152,8 @@ export class ProductsController {
     @Query('warehouseId') warehouseId?: string,
   ) {
     return this.productsService.searchPosCatalog(query ?? '', tenantId, {
-      limit: limit ? Number(limit) : undefined,
-      offset: offset ? Number(offset) : undefined,
+      limit: parsePositiveInt(limit, { max: MAX_PAGE_SIZE }),
+      offset: parseNonNegativeInt(offset),
       type: type || undefined,
       sort,
       warehouseId,

@@ -1,5 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
+import { DataSource } from 'typeorm';
 import { setupTestApp, loginAsAdmin, teardownTestApp } from './helpers/setup';
 
 describe('Returns (e2e)', () => {
@@ -185,6 +186,30 @@ describe('Returns (e2e)', () => {
     expect(found.status).toBe('COMPLETED');
   });
 
+  it('GET /api/returns?page= → pagina en el servidor y dice el total', async () => {
+    // Sin parámetros sigue devolviendo el arreglo completo (compatibilidad);
+    // con `page`/`limit` devuelve la página y el total, que es lo que necesita
+    // la pantalla para no traerse la tabla entera.
+    const res = await request(app.getHttpServer())
+      .get('/api/returns?page=1&limit=1')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    expect(Array.isArray(res.body.data)).toBe(true);
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.page).toBe(1);
+    expect(res.body.limit).toBe(1);
+    expect(res.body.total).toBeGreaterThanOrEqual(1);
+    expect(res.body.totalPages).toBe(res.body.total);
+
+    // Un limit absurdo se recorta al tope en vez de leerse la base entera.
+    const tope = await request(app.getHttpServer())
+      .get('/api/returns?page=1&limit=99999')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(tope.body.limit).toBe(200);
+  });
+
   // ─── RETURN DETAIL ───
 
   it('GET /api/returns/:id → returns full return detail with items', async () => {
@@ -313,5 +338,34 @@ describe('Returns (e2e)', () => {
       .get('/api/returns/00000000-0000-0000-0000-000000000000')
       .set('Authorization', `Bearer ${token}`)
       .expect(404);
+  });
+
+  it('buscar una factura histórica sin líneas responde, no revienta', async () => {
+    // Las facturas importadas de la contabilidad vieja no tienen líneas de
+    // venta. La búsqueda armaba un `IN ()` vacío y PostgreSQL la rechazaba:
+    // buscar esa factura respondía 500.
+    const venta = await request(app.getHttpServer())
+      .post('/api/pos/sales')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        clientId,
+        warehouseId,
+        items: [{ variantId, quantity: 1 }],
+        payments: [{ method: 'EFECTIVO', amount: 35700 }],
+      })
+      .expect(201);
+
+    // Se le quitan las líneas para dejarla como las importadas.
+    const dataSource = app.get(DataSource);
+    await dataSource.query('DELETE FROM sale_items WHERE sale_id = $1', [
+      venta.body.id,
+    ]);
+
+    const res = await request(app.getHttpServer())
+      .get(`/api/returns/sales/search?q=${venta.body.saleNumber}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(res.body.id).toBe(venta.body.id);
+    expect(res.body.items).toEqual([]);
   });
 });
