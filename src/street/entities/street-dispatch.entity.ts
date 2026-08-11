@@ -84,6 +84,22 @@ export class StreetDispatch extends TenantAwareEntity {
   @Column({ name: 'sale_id', type: 'uuid', nullable: true })
   saleId: string | null;
 
+  /**
+   * Plata que entregó el patinador al cuadrar.
+   *
+   * Se guarda aparte de la venta porque puede ser **menor** que lo vendido: esa
+   * diferencia es plata que el patinador quedó debiendo, y sin este campo
+   * desaparecía del sistema (la venta quedaba marcada como pagada completa).
+   */
+  @Column({
+    name: 'collected_amount',
+    type: 'decimal',
+    precision: 14,
+    scale: 2,
+    nullable: true,
+  })
+  collectedAmount: number | null;
+
   @Column({ type: 'text', nullable: true })
   notes: string | null;
 

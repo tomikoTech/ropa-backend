@@ -184,6 +184,18 @@ export const ENTITY_WAREHOUSE_SOURCES: Record<string, EntityWarehouseSource> = {
     sql: 'SELECT warehouse_id FROM sales WHERE id = $1',
     action: 'marcar como pagada esta venta',
   },
+  // Calle: cuadrar devuelve mercancía a la bodega del despacho y anular la
+  // devuelve completa. La bodega no viaja en el cuerpo, hay que ir por ella.
+  'POST street/dispatches/:id/settle': {
+    param: 'id',
+    sql: 'SELECT warehouse_id FROM street_dispatches WHERE id = $1',
+    action: 'cuadrar esta remisión',
+  },
+  'POST street/dispatches/:id/cancel': {
+    param: 'id',
+    sql: 'SELECT warehouse_id FROM street_dispatches WHERE id = $1',
+    action: 'anular esta remisión',
+  },
   // Devoluciones: el inventario vuelve a la bodega de la venta original.
   'POST returns/:id/approve': {
     param: 'id',

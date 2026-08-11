@@ -248,6 +248,74 @@ describe('Patinadores y remisión rápida (e2e)', () => {
     expect(venta.body.payments).toHaveLength(1);
   });
 
+  it('si entregó menos plata de la que vendió, la venta queda pendiente de pago', async () => {
+    // El faltante de plata tiene que quedar escrito en alguna parte. Antes la
+    // venta se marcaba pagada completa aunque el patinador entregara menos, y
+    // esa diferencia no aparecía en ningún lado.
+    const seller = await request(app.getHttpServer())
+      .post('/api/street/sellers')
+      .set(auth())
+      .send({ name: `Patinador deudor ${suffix}` })
+      .expect(201);
+
+    // Producto aparte: así este caso no mueve el stock que verifican los demás.
+    const producto = await request(app.getHttpServer())
+      .post('/api/products')
+      .set(auth())
+      .send({
+        name: `E2E Calle Deuda ${suffix}`,
+        basePrice: PRICE,
+        costPrice: COST,
+        taxRate: 0,
+        variants: [{ size: '43', color: 'Verde deuda' }],
+      })
+      .expect(201);
+    const varianteDeuda = producto.body.variants[0].id;
+    await request(app.getHttpServer())
+      .post('/api/inventory/adjust')
+      .set(auth())
+      .send({
+        variantId: varianteDeuda,
+        warehouseId,
+        quantity: 5,
+        movementType: 'IN',
+        notes: 'stock para la deuda',
+      })
+      .expect(201);
+
+    const despacho = await request(app.getHttpServer())
+      .post('/api/street/dispatches')
+      .set(auth())
+      .send({
+        streetSellerId: seller.body.id,
+        warehouseId,
+        items: [{ variantId: varianteDeuda, quantity: 2 }],
+      })
+      .expect(201);
+    const itemId = despacho.body.items[0].id;
+
+    const cuadrada = await request(app.getHttpServer())
+      .post(`/api/street/dispatches/${despacho.body.id}/settle`)
+      .set(auth())
+      .send({
+        // Vendió los dos, pero solo entregó la plata de uno.
+        items: [{ itemId, sold: 2, returned: 0 }],
+        payments: [{ method: 'EFECTIVO', amount: PRICE }],
+      })
+      .expect(201);
+
+    expect(Number(cuadrada.body.collectedAmount)).toBe(PRICE);
+    expect(cuadrada.body.summary.pendingCash).toBe(PRICE);
+
+    const venta = await request(app.getHttpServer())
+      .get(`/api/pos/sales/${cuadrada.body.saleId}`)
+      .set(auth())
+      .expect(200);
+    expect(Number(venta.body.total)).toBe(2 * PRICE);
+    expect(venta.body.isPaid).toBe(false);
+    expect(venta.body.notes).toContain('Pendiente de cobro');
+  });
+
   it('la venta de la calle NO descuenta inventario otra vez', async () => {
     // Es el error que dejaría el stock en negativo sin que nadie lo note hasta
     // el conteo físico: la mercancía ya salió al despachar.

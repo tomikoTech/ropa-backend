@@ -23,6 +23,8 @@ import {
   StockUnitEvent,
   StockUnitEventType,
 } from '../inventory/entities/stock-unit-event.entity.js';
+import { Client } from '../clients/entities/client.entity.js';
+import { Bank } from '../banks/entities/bank.entity.js';
 import { Sale } from '../pos/entities/sale.entity.js';
 import { SaleItem } from '../pos/entities/sale-item.entity.js';
 import { Payment } from '../pos/entities/payment.entity.js';
@@ -47,6 +49,9 @@ import type {
 
 /** Marca de los movimientos de inventario que genera la calle. */
 const REF_DISPATCH = 'STREET_DISPATCH';
+
+/** Estados que aún permiten operar sobre una remisión. */
+const OPERABLE = StreetDispatchStatus.OPEN;
 
 @Injectable()
 export class StreetService {
@@ -163,6 +168,48 @@ export class StreetService {
     return seller;
   }
 
+  // ── Utilidades ───────────────────────────────────────────────────────────
+
+  /**
+   * Bloquea la remisión y confirma, ya dentro de la transacción, que sigue
+   * abierta. Leer el estado antes de abrir la transacción no sirve: dos
+   * peticiones simultáneas ven las dos `OPEN` y las dos siguen adelante.
+   */
+  private async lockDispatch(
+    manager: EntityManager,
+    id: string,
+    tenantId: string,
+  ): Promise<void> {
+    const rows: { status: StreetDispatchStatus }[] = await manager.query(
+      'SELECT status FROM street_dispatches WHERE id = $1 AND tenant_id = $2 FOR UPDATE',
+      [id, tenantId],
+    );
+    if (!rows.length) throw new NotFoundException('La remisión no existe');
+    if (rows[0].status !== OPERABLE) {
+      throw new ConflictException(
+        `Otra persona acaba de ${
+          rows[0].status === StreetDispatchStatus.SETTLED ? 'cuadrar' : 'anular'
+        } esta remisión. Recarga la pantalla para ver cómo quedó.`,
+      );
+    }
+  }
+
+  /** El cliente al que se factura tiene que ser de esta tienda. */
+  private async assertClient(clientId: string, tenantId: string) {
+    const exists = await this.dataSource
+      .getRepository(Client)
+      .findOne({ where: { id: clientId, tenantId }, select: { id: true } });
+    if (!exists) throw new NotFoundException('El cliente no existe');
+  }
+
+  /** El banco del recaudo también. */
+  private async assertBank(bankId: string, tenantId: string) {
+    const exists = await this.dataSource
+      .getRepository(Bank)
+      .findOne({ where: { id: bankId, tenantId }, select: { id: true } });
+    if (!exists) throw new NotFoundException('El banco no existe');
+  }
+
   // ── Despachar ────────────────────────────────────────────────────────────
 
   private async nextDispatchNumber(
@@ -234,12 +281,15 @@ export class StreetService {
             );
           }
 
+          // Con lock: sin él, dos despachos simultáneos de la misma referencia
+          // leen el mismo disponible y el inventario queda en negativo.
           const stock = await manager.getRepository(Stock).findOne({
             where: {
               variantId: line.variantId,
               warehouseId: dto.warehouseId,
               tenantId,
             },
+            lock: { mode: 'pessimistic_write' },
           });
           const disponible = Number(stock?.quantity ?? 0);
           if (disponible < line.quantity) {
@@ -374,21 +424,36 @@ export class StreetService {
 
   /** La remisión con su cuadratura, que es lo que se mira siempre. */
   private withSummary(dispatch: StreetDispatch) {
+    const cobrado =
+      dispatch.collectedAmount === null ||
+      dispatch.collectedAmount === undefined
+        ? null
+        : Number(dispatch.collectedAmount);
+    const summary = settlementSummary(
+      (dispatch.items ?? []).map((i) => ({
+        id: i.id,
+        productName: i.productName,
+        variantSize: i.variantSize,
+        variantColor: i.variantColor,
+        quantity: i.quantity,
+        unitPrice: Number(i.unitPrice),
+        unitCost: Number(i.unitCost),
+        quantitySold: i.quantitySold,
+        quantityReturned: i.quantityReturned,
+      })),
+    );
     return {
       ...dispatch,
-      summary: settlementSummary(
-        (dispatch.items ?? []).map((i) => ({
-          id: i.id,
-          productName: i.productName,
-          variantSize: i.variantSize,
-          variantColor: i.variantColor,
-          quantity: i.quantity,
-          unitPrice: Number(i.unitPrice),
-          unitCost: Number(i.unitCost),
-          quantitySold: i.quantitySold,
-          quantityReturned: i.quantityReturned,
-        })),
-      ),
+      summary: {
+        ...summary,
+        /** Plata que entregó (null mientras la remisión siga abierta). */
+        collected: cobrado,
+        /** Plata que quedó debiendo por lo que sí vendió. */
+        pendingCash:
+          cobrado === null
+            ? 0
+            : Math.max(0, Math.round((summary.revenue - cobrado) * 100) / 100),
+      },
     };
   }
 
@@ -419,6 +484,10 @@ export class StreetService {
           `${dispatch.status === StreetDispatchStatus.SETTLED ? 'cuadrada' : 'anulada'}.`,
       );
     }
+    if (dto.clientId) await this.assertClient(dto.clientId, tenantId);
+    for (const payment of dto.payments ?? []) {
+      if (payment.bankId) await this.assertBank(payment.bankId, tenantId);
+    }
 
     const items = dispatch.items.map((i) => ({
       id: i.id,
@@ -443,7 +512,11 @@ export class StreetService {
     // El pago no puede ser mayor de lo que se vendió: es el defecto del sistema
     // anterior (aceptaba un abono de $5.000 sobre una venta de $1.000) y aquí se
     // valida en el servidor.
-    const cobrado = (dto.payments ?? []).reduce((s, p) => s + p.amount, 0);
+    // Sin formas de pago se asume que entregó todo en efectivo (es el atajo de
+    // la pantalla); con formas de pago, manda lo que se registró.
+    const cobrado = dto.payments?.length
+      ? dto.payments.reduce((s, p) => s + p.amount, 0)
+      : summary.revenue;
     if (cobrado > summary.revenue + 0.01) {
       throw new BadRequestException(
         `Se está registrando un cobro de $${cobrado.toLocaleString('es-CO')} ` +
@@ -457,6 +530,11 @@ export class StreetService {
     // remisión fallaría con un conflicto justo en la hora de más movimiento.
     await retryOnUniqueViolation(async () =>
       this.dataSource.transaction(async (manager) => {
+        // El estado se vuelve a leer **dentro** de la transacción y con la fila
+        // bloqueada: dos clics seguidos en "Cuadrar" creaban dos ventas y
+        // devolvían la mercancía dos veces al inventario.
+        await this.lockDispatch(manager, dispatch.id, tenantId);
+
         const byId = new Map(lines.map((l) => [l.itemId, l]));
 
         for (const item of dispatch.items) {
@@ -476,6 +554,7 @@ export class StreetService {
                 warehouseId: dispatch.warehouseId,
                 tenantId,
               },
+              lock: { mode: 'pessimistic_write' },
             });
             if (!stock) {
               stock = stockRepo.create({
@@ -553,6 +632,7 @@ export class StreetService {
             lines,
             dto,
             summary.revenue,
+            cobrado,
             userId,
             tenantId,
           );
@@ -565,6 +645,7 @@ export class StreetService {
             settledAt: new Date(),
             settledById: userId,
             saleId,
+            collectedAmount: summary.sold > 0 ? cobrado : 0,
           },
         );
       }),
@@ -588,11 +669,19 @@ export class StreetService {
     lines: SettlementLine[],
     dto: SettleDispatchDto,
     revenue: number,
+    collected: number,
     userId: string,
     tenantId: string,
   ): Promise<string> {
     const byId = new Map(items.map((i) => [i.id, i]));
     const dispatchItems = new Map(dispatch.items.map((i) => [i.id, i]));
+    // Lo que el patinador quedó debiendo. La venta no puede darse por pagada
+    // mientras exista: así aparece en "pendientes de pago" y la caja cuadra
+    // con la plata que de verdad entró.
+    const pendiente = Math.max(
+      0,
+      Math.round((revenue - collected) * 100) / 100,
+    );
 
     const sale = await manager.getRepository(Sale).save(
       manager.getRepository(Sale).create({
@@ -611,10 +700,13 @@ export class StreetService {
         total: revenue,
         status: SaleStatus.COMPLETED,
         saleChannel: SaleChannel.CALLE,
-        isPaid: true,
+        isPaid: pendiente <= 0.01,
         notes:
           `Venta de calle — remisión ${dispatch.dispatchNumber} ` +
-          `(${dispatch.seller.name})`,
+          `(${dispatch.seller.name})` +
+          (pendiente > 0.01
+            ? ` · Pendiente de cobro: $${pendiente.toLocaleString('es-CO')}`
+            : ''),
         tenantId,
       }),
     );
@@ -681,6 +773,9 @@ export class StreetService {
     }
 
     await this.dataSource.transaction(async (manager) => {
+      // Igual que al cuadrar: el estado manda dentro de la transacción.
+      await this.lockDispatch(manager, dispatch.id, tenantId);
+
       for (const item of dispatch.items) {
         const stockRepo = manager.getRepository(Stock);
         let stock = await stockRepo.findOne({
@@ -689,6 +784,7 @@ export class StreetService {
             warehouseId: dispatch.warehouseId,
             tenantId,
           },
+          lock: { mode: 'pessimistic_write' },
         });
         if (!stock) {
           stock = stockRepo.create({
