@@ -12,19 +12,30 @@
 --
 -- Comprobación previa OBLIGATORIA: no debe quedar ninguna variante con texto
 -- pero sin FK, o se perdería información al soltar las columnas.
+--
+-- La comprobación se salta sola si las columnas ya no están (o sea, si esto ya
+-- se corrió): sin ese `IF`, volver a ejecutarlo fallaba con "column size does
+-- not exist", y eso tumbaría el arranque al correr las migraciones.
 DO $$
 DECLARE
   huerfanas integer;
 BEGIN
-  SELECT COUNT(*) INTO huerfanas
-    FROM product_variants
-   WHERE (COALESCE(TRIM(size), '')  <> '' AND size_id  IS NULL)
-      OR (COALESCE(TRIM(color), '') <> '' AND color_id IS NULL);
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_name = 'product_variants' AND column_name IN ('size', 'color')
+  ) THEN
+    EXECUTE $q$
+      SELECT COUNT(*)
+        FROM product_variants
+       WHERE (COALESCE(TRIM(size), '')  <> '' AND size_id  IS NULL)
+          OR (COALESCE(TRIM(color), '') <> '' AND color_id IS NULL)
+    $q$ INTO huerfanas;
 
-  IF huerfanas > 0 THEN
-    RAISE EXCEPTION
-      'Hay % variante(s) con talla/color en texto pero sin FK. Corre backfill-catalogs antes de soltar las columnas.',
-      huerfanas;
+    IF huerfanas > 0 THEN
+      RAISE EXCEPTION
+        'Hay % variante(s) con talla/color en texto pero sin FK. Corre backfill-catalogs antes de soltar las columnas.',
+        huerfanas;
+    END IF;
   END IF;
 END $$;
 

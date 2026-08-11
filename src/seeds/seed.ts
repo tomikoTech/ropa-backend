@@ -1,38 +1,16 @@
 import { DataSource } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { User } from '../users/entities/user.entity.js';
-import { RefreshToken } from '../auth/entities/refresh-token.entity.js';
 import { Category } from '../categories/entities/category.entity.js';
 import { Product } from '../products/entities/product.entity.js';
 import { ProductVariant } from '../products/entities/product-variant.entity.js';
-import { Size } from '../catalogs/entities/size.entity.js';
-import { Color } from '../catalogs/entities/color.entity.js';
 import { CatalogCache } from './catalog-cache.js';
 import { Warehouse } from '../inventory/entities/warehouse.entity.js';
 import { Stock } from '../inventory/entities/stock.entity.js';
 import { StockMovement } from '../inventory/entities/stock-movement.entity.js';
 import { Client } from '../clients/entities/client.entity.js';
-import { Sale } from '../pos/entities/sale.entity.js';
-import { SaleItem } from '../pos/entities/sale-item.entity.js';
-import { Payment } from '../pos/entities/payment.entity.js';
-import { AccountsReceivable } from '../pos/entities/accounts-receivable.entity.js';
-import { AccountsReceivablePayment } from '../pos/entities/accounts-receivable-payment.entity.js';
-import { Supplier } from '../suppliers/entities/supplier.entity.js';
-import { PurchaseOrder } from '../purchases/entities/purchase-order.entity.js';
-import { PurchaseOrderItem } from '../purchases/entities/purchase-order-item.entity.js';
-import { AccountsPayable } from '../purchases/entities/accounts-payable.entity.js';
-import { AccountsPayablePayment } from '../purchases/entities/accounts-payable-payment.entity.js';
-import { Promotion } from '../promotions/entities/promotion.entity.js';
-import { Return } from '../returns/entities/return.entity.js';
-import { ReturnItem } from '../returns/entities/return-item.entity.js';
-import { CreditNote } from '../returns/entities/credit-note.entity.js';
-import { AuditLog } from '../audit/entities/audit-log.entity.js';
 import { Tenant } from '../tenants/entities/tenant.entity.js';
 import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
-import { EcommerceOrder } from '../storefront/entities/ecommerce-order.entity.js';
-import { EcommerceOrderItem } from '../storefront/entities/ecommerce-order-item.entity.js';
-import { EcommerceCustomer } from '../storefront/entities/ecommerce-customer.entity.js';
-import { Promoter } from '../promoters/promoter.entity.js';
 import { Role } from '../common/enums/role.enum.js';
 import { Gender } from '../common/enums/gender.enum.js';
 import { MovementType } from '../common/enums/movement-type.enum.js';
@@ -48,40 +26,15 @@ const dataSource = new DataSource({
   username: process.env.DB_USERNAME || 'dylanbc1',
   password: process.env.DB_PASSWORD || '',
   database: process.env.DB_DATABASE || 'ropa_pos',
-  entities: [
-    Tenant,
-    User,
-    RefreshToken,
-    Category,
-    Size,
-    Color,
-    Product,
-    ProductVariant,
-    Warehouse,
-    Stock,
-    StockMovement,
-    Client,
-    Sale,
-    SaleItem,
-    Promoter,
-    Payment,
-    AccountsReceivable,
-    AccountsReceivablePayment,
-    Supplier,
-    PurchaseOrder,
-    PurchaseOrderItem,
-    AccountsPayable,
-    AccountsPayablePayment,
-    Promotion,
-    Return,
-    ReturnItem,
-    CreditNote,
-    AuditLog,
-    StoreSettings,
-    EcommerceOrder,
-    EcommerceOrderItem,
-    EcommerceCustomer,
-  ],
+  // Todas las entidades, por patrón y no a mano.
+  //
+  // La lista escrita a mano se quedaba corta cada vez que nacía una entidad
+  // nueva, y el seed moría con "Entity metadata for SaleItem#stockUnit was not
+  // found": una relación apuntaba a algo que no estaba en la lista. Como el
+  // seed es lo que levanta una base de desarrollo o de pruebas desde cero, eso
+  // dejaba el proyecto sin forma de arrancar limpio. Con el patrón, una entidad
+  // nueva entra sola.
+  entities: [__dirname + '/../**/*.entity.{js,ts}'],
   synchronize: true,
 });
 

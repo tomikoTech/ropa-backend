@@ -7,8 +7,17 @@ import { DataSource } from 'typeorm';
 const host = process.env.DB_HOST || 'localhost';
 const databaseUrl =
   process.env.DATABASE_PUBLIC_URL || process.env.DATABASE_URL || undefined;
-const isLocal = !databaseUrl && (host === 'localhost' || host === '127.0.0.1');
-const sslEnabled = process.env.DB_SSL === 'true' || !isLocal;
+// Un socket de Unix (`/tmp`) también es local: es como se conecta Postgres en
+// una Mac de desarrollo.
+const isLocal =
+  !databaseUrl &&
+  (host === 'localhost' || host === '127.0.0.1' || host.startsWith('/'));
+// `DB_SSL=false` manda: sin esto no había forma de apagar SSL a mano, y contra
+// un Postgres local sin TLS la conexión moría con "server does not support SSL".
+const sslEnabled =
+  process.env.DB_SSL === 'false'
+    ? false
+    : process.env.DB_SSL === 'true' || !isLocal;
 
 export const AppDataSource = new DataSource({
   type: 'postgres',
