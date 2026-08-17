@@ -6,7 +6,7 @@ import { Product } from '../products/entities/product.entity.js';
 import { Category } from '../categories/entities/category.entity.js';
 import { ProductsService } from '../products/products.service.js';
 import { CategoriesService } from '../categories/categories.service.js';
-import { SupabaseStorageService } from '../common/services/supabase-storage.service.js';
+import { R2Service } from '../uploads/r2.service.js';
 import { Gender } from '../common/enums/gender.enum.js';
 import { CreateAdminProductDto } from './dto/create-admin-product.dto.js';
 
@@ -21,7 +21,7 @@ export class AdminProductsService {
     private readonly categoryRepo: Repository<Category>,
     private readonly productsService: ProductsService,
     private readonly categoriesService: CategoriesService,
-    private readonly storage: SupabaseStorageService,
+    private readonly storage: R2Service,
   ) {}
 
   private async resolveTenantId(tenantSlug: string): Promise<string> {

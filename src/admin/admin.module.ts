@@ -5,7 +5,7 @@ import { Product } from '../products/entities/product.entity.js';
 import { Category } from '../categories/entities/category.entity.js';
 import { ProductsModule } from '../products/products.module.js';
 import { CategoriesModule } from '../categories/categories.module.js';
-import { SupabaseStorageService } from '../common/services/supabase-storage.service.js';
+import { UploadsModule } from '../uploads/uploads.module.js';
 import { AdminProductsController } from './admin-products.controller.js';
 import { AdminProductsService } from './admin-products.service.js';
 
@@ -14,8 +14,9 @@ import { AdminProductsService } from './admin-products.service.js';
     TypeOrmModule.forFeature([StoreSettings, Product, Category]),
     ProductsModule,
     CategoriesModule,
+    UploadsModule,
   ],
   controllers: [AdminProductsController],
-  providers: [AdminProductsService, SupabaseStorageService],
+  providers: [AdminProductsService],
 })
 export class AdminModule {}

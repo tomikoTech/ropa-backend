@@ -1,10 +1,33 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  InternalServerErrorException,
+} from '@nestjs/common';
 import {
   S3Client,
   PutObjectCommand,
   DeleteObjectCommand,
 } from '@aws-sdk/client-s3';
 import { randomBytes } from 'crypto';
+
+/**
+ * Extensión por MIME permitido (imágenes + videos cortos de producto).
+ *
+ * Vive acá y no en el controller porque la subida por base64 (el agente de
+ * WhatsApp) tiene que aceptar exactamente los mismos tipos que la subida por
+ * formulario.
+ */
+export const EXT_BY_MIME: Record<string, string> = {
+  'image/webp': 'webp',
+  'image/jpeg': 'jpg',
+  'image/jpg': 'jpg',
+  'image/png': 'png',
+  'image/gif': 'gif',
+  'image/avif': 'avif',
+  'video/mp4': 'mp4',
+  'video/webm': 'webm',
+  'video/quicktime': 'mov',
+};
 
 /**
  * Almacenamiento de archivos en Cloudflare R2 (compatible con S3).
@@ -65,6 +88,35 @@ export class R2Service {
       }),
     );
     return `${this.publicUrl}/${key}`;
+  }
+
+  /**
+   * Sube una imagen codificada en base64 y devuelve su URL pública.
+   *
+   * Acepta base64 puro o data URL (`data:image/png;base64,...`). Lo usa el
+   * agente de WhatsApp, que manda las fotos dentro del JSON en vez de como
+   * archivo.
+   */
+  async uploadBase64Image(
+    data: string,
+    mime = 'image/jpeg',
+    folder = 'products',
+  ): Promise<string> {
+    const normalizedMime = mime.toLowerCase();
+    const ext = EXT_BY_MIME[normalizedMime];
+    if (!ext) {
+      throw new InternalServerErrorException(
+        `Tipo de imagen no permitido: ${mime}`,
+      );
+    }
+
+    const base64 = data.includes(',') ? data.split(',').pop()! : data;
+    const buffer = Buffer.from(base64, 'base64');
+    if (buffer.length === 0) {
+      throw new InternalServerErrorException('Imagen base64 vacía');
+    }
+
+    return this.upload(folder, buffer, normalizedMime, ext);
   }
 
   /** Elimina un objeto a partir de su URL pública. No-op si la URL no es nuestra. */

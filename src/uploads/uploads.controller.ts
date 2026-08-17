@@ -11,24 +11,11 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiConsumes, ApiTags } from '@nestjs/swagger';
-import { R2Service } from './r2.service.js';
+import { EXT_BY_MIME, R2Service } from './r2.service.js';
 
 // Carpeta destino: un solo segmento seguro (sin slashes ni traversal).
 const FOLDER_RE = /^[a-z0-9-]{1,32}$/;
 const MAX_SIZE = 15 * 1024 * 1024; // 15 MB (cubre imágenes y videos cortos)
-
-// Extensión por MIME permitido (imágenes + videos cortos de producto).
-const EXT_BY_MIME: Record<string, string> = {
-  'image/webp': 'webp',
-  'image/jpeg': 'jpg',
-  'image/jpg': 'jpg',
-  'image/png': 'png',
-  'image/gif': 'gif',
-  'image/avif': 'avif',
-  'video/mp4': 'mp4',
-  'video/webm': 'webm',
-  'video/quicktime': 'mov',
-};
 
 @ApiTags('uploads')
 @Controller('uploads')
