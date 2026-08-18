@@ -5,7 +5,7 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, In } from 'typeorm';
 import { Warehouse } from './entities/warehouse.entity.js';
 import { Stock } from './entities/stock.entity.js';
 import { StockUnit, StockUnitKind, StockUnitStatus } from './entities/stock-unit.entity.js';
@@ -18,6 +18,8 @@ import { AdjustStockDto } from './dto/adjust-stock.dto.js';
 import { TransferStockDto } from './dto/transfer-stock.dto.js';
 import { MovementType } from '../common/enums/movement-type.enum.js';
 import { ProductVariant } from '../products/entities/product-variant.entity.js';
+import { Product } from '../products/entities/product.entity.js';
+import { movementDelta } from './movement-delta.js';
 import { RecipeService } from '../products/services/recipe.service.js';
 import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
 
@@ -995,6 +997,104 @@ export class InventoryService {
       order: { createdAt: 'DESC' },
       take: filters?.limit || 100,
     });
+  }
+
+  /**
+   * Todo lo que le pasó a un producto, de lo más viejo a lo más nuevo.
+   *
+   * Lo pidió una tienda con estas palabras: «quiero saber en qué momento se
+   * ingresó, si se modificó, si se le movió algo». `getMovements` no alcanzaba:
+   * filtra por *variante* —y un producto tiene varias—, devuelve lo más nuevo
+   * primero y entrega la cantidad con el signo crudo de la base, que no es
+   * comparable entre una venta y un ajuste (ver `movement-delta.ts`).
+   *
+   * Acá se reúnen las variantes del producto, se normaliza el signo y se
+   * reconstruye el saldo después de cada movimiento, que es lo que permite
+   * mirar una fila y entender por qué el inventario quedó donde quedó.
+   */
+  async getProductHistory(
+    productId: string,
+    tenantId: string,
+    filters?: { warehouseId?: string; limit?: number },
+  ) {
+    const product = await this.dataSource
+      .getRepository(Product)
+      .findOne({ where: { id: productId, tenantId } });
+    if (!product) throw new NotFoundException('Producto no encontrado');
+
+    const variants = await this.dataSource
+      .getRepository(ProductVariant)
+      .find({ where: { productId, tenantId } });
+    if (variants.length === 0) {
+      return { product, movements: [], currentStock: 0, variants: [] };
+    }
+    const variantIds = variants.map((v) => v.id);
+
+    const where: Record<string, unknown> = {
+      tenantId,
+      variantId: In(variantIds),
+    };
+    if (filters?.warehouseId) where.warehouseId = filters.warehouseId;
+
+    const movimientos = await this.movementRepository.find({
+      where,
+      relations: ['variant', 'warehouse', 'createdBy'],
+      // Ascendente: el saldo se acumula hacia adelante. Un ADJUSTMENT fija el
+      // valor y borra lo anterior, así que hacia atrás no se puede calcular.
+      order: { createdAt: 'ASC' },
+      take: filters?.limit ?? 500,
+    });
+
+    const stockRows = await this.stockRepository.find({
+      where: filters?.warehouseId
+        ? { variantId: In(variantIds), tenantId, warehouseId: filters.warehouseId }
+        : { variantId: In(variantIds), tenantId },
+    });
+    const currentStock = stockRows.reduce((t, s) => t + Number(s.quantity), 0);
+
+    // El saldo se lleva por variante y bodega: mezclarlas daría una columna
+    // que no corresponde a ninguna existencia real.
+    const saldos = new Map<string, number>();
+    const movements = movimientos.map((m) => {
+      const clave = `${m.variantId}:${m.warehouseId}`;
+      const delta = movementDelta(m.movementType, m.quantity);
+      const previo = saldos.get(clave) ?? 0;
+      const saldo = delta === null ? Math.abs(m.quantity) : previo + delta;
+      saldos.set(clave, saldo);
+
+      return {
+        id: m.id,
+        date: m.createdAt,
+        movementType: m.movementType,
+        delta,
+        balance: saldo,
+        quantity: m.quantity,
+        variantId: m.variantId,
+        variantLabel: [m.variant?.size, m.variant?.color]
+          .filter(Boolean)
+          .join(' / '),
+        warehouseId: m.warehouseId,
+        warehouseName: m.warehouse?.name ?? '',
+        referenceType: m.referenceType ?? null,
+        referenceId: m.referenceId ?? null,
+        notes: m.notes ?? null,
+        userEmail: m.createdBy?.email ?? null,
+      };
+    });
+
+    // Se devuelve al derecho para la pantalla (lo último primero), pero el
+    // saldo ya viene calculado en el orden correcto.
+    movements.reverse();
+
+    return {
+      product: { id: product.id, name: product.name, skuPrefix: product.skuPrefix },
+      variants: variants.map((v) => ({
+        id: v.id,
+        label: [v.size, v.color].filter(Boolean).join(' / '),
+      })),
+      currentStock,
+      movements,
+    };
   }
 
   // ─── Set min stock ───

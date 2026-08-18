@@ -257,6 +257,26 @@ export class InventoryController {
     });
   }
 
+  /**
+   * Historial completo de un producto: cuándo entró, qué se le movió y cómo
+   * quedó el saldo después de cada movimiento.
+   */
+  @Get('products/:productId/history')
+  @ApiOperation({ summary: 'Trazabilidad de un producto' })
+  @ApiQuery({ name: 'warehouseId', required: false })
+  @ApiQuery({ name: 'limit', required: false })
+  getProductHistory(
+    @Param('productId') productId: string,
+    @TenantId() tenantId: string,
+    @Query('warehouseId') warehouseId?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.inventoryService.getProductHistory(productId, tenantId, {
+      warehouseId,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
+  }
+
   // ─── Min Stock ───
 
   @Patch('stock/min/:variantId/:warehouseId')
