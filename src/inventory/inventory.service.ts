@@ -1144,10 +1144,25 @@ export class InventoryService {
         warehouseName: m.warehouse?.name ?? '',
         referenceType: m.referenceType ?? null,
         referenceId: m.referenceId ?? null,
+        // Los llena `agregarContraparte`; van declarados acá para que el
+        // contrato de la respuesta no dependa de si esa consulta encontró algo.
+        referenceLabel: null as string | null,
+        counterparty: null as string | null,
         notes: m.notes ?? null,
         userEmail: m.createdBy?.email ?? null,
+        // El nombre y no el correo: la tienda pregunta «¿quién sacó esto?» y
+        // «bodega@…» no responde eso —detrás de esa cuenta hay una persona—.
+        userName:
+          [m.createdBy?.firstName, m.createdBy?.lastName]
+            .filter(Boolean)
+            .join(' ') || null,
       };
     });
+
+    // A quién se le vendió, a quién se le compró. Sin esto, una salida solo
+    // dice «Venta VTA-20260813-0001» y hay que ir a buscarla a otra pantalla
+    // para saber de quién se trata.
+    await this.agregarContraparte(movements, tenantId);
 
     movements.reverse();
 
@@ -1160,6 +1175,80 @@ export class InventoryService {
       totalPages: Math.ceil(total / limit),
       movements,
     };
+  }
+
+  /**
+   * Le pone nombre a la referencia de cada movimiento.
+   *
+   * En la base solo queda el id interno de la venta o la compra. La pantalla
+   * necesita el número («VTA-20260813-0001») y, sobre todo, con quién fue: el
+   * cliente que se llevó la mercancía o el proveedor que la trajo.
+   */
+  private async agregarContraparte(
+    movements: {
+      referenceType: string | null;
+      referenceId: string | null;
+      referenceLabel?: string | null;
+      counterparty?: string | null;
+    }[],
+    tenantId: string,
+  ): Promise<void> {
+    const idsDeVenta = new Set<string>();
+    const idsDeCompra = new Set<string>();
+    for (const m of movements) {
+      if (!m.referenceId) continue;
+      if (m.referenceType === 'SALE' || m.referenceType === 'SALE_CANCEL') {
+        idsDeVenta.add(m.referenceId);
+      } else if (m.referenceType === 'PURCHASE') {
+        idsDeCompra.add(m.referenceId);
+      }
+    }
+    if (idsDeVenta.size === 0 && idsDeCompra.size === 0) return;
+
+    const ventas = idsDeVenta.size
+      ? await this.dataSource.query<
+          { id: string; numero: string; contraparte: string | null }[]
+        >(
+          `SELECT s.id,
+                  s.sale_number AS numero,
+                  NULLIF(TRIM(CONCAT_WS(' ', c.first_name, c.last_name)), '') AS contraparte
+             FROM sales s
+             LEFT JOIN clients c ON c.id = s.client_id
+            WHERE s.tenant_id = $1 AND s.id = ANY($2::uuid[])`,
+          [tenantId, [...idsDeVenta]],
+        )
+      : [];
+
+    const compras = idsDeCompra.size
+      ? await this.dataSource.query<
+          { id: string; numero: string; contraparte: string | null }[]
+        >(
+          `SELECT po.id,
+                  po.order_number AS numero,
+                  sup.name AS contraparte
+             FROM purchase_orders po
+             LEFT JOIN suppliers sup ON sup.id = po.supplier_id
+            WHERE po.tenant_id = $1 AND po.id = ANY($2::uuid[])`,
+          [tenantId, [...idsDeCompra]],
+        )
+      : [];
+
+    const porId = new Map(
+      [...ventas, ...compras].map((r) => [
+        r.id,
+        { numero: r.numero, contraparte: r.contraparte },
+      ]),
+    );
+
+    for (const m of movements) {
+      const datos = m.referenceId ? porId.get(m.referenceId) : undefined;
+      if (!datos) continue;
+      m.referenceLabel = datos.numero;
+      // Una venta sin cliente registrado es una venta de mostrador.
+      m.counterparty =
+        datos.contraparte ??
+        (m.referenceType === 'PURCHASE' ? null : 'Consumidor Final');
+    }
   }
 
   /**
