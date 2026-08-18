@@ -264,16 +264,25 @@ export class InventoryController {
   @Get('products/:productId/history')
   @ApiOperation({ summary: 'Trazabilidad de un producto' })
   @ApiQuery({ name: 'warehouseId', required: false })
-  @ApiQuery({ name: 'limit', required: false })
+  @ApiQuery({ name: 'page', required: false })
+  @ApiQuery({ name: 'limit', required: false, description: 'Máximo 500' })
+  @ApiQuery({ name: 'from', required: false, description: 'YYYY-MM-DD' })
+  @ApiQuery({ name: 'to', required: false, description: 'YYYY-MM-DD' })
   getProductHistory(
     @Param('productId') productId: string,
     @TenantId() tenantId: string,
     @Query('warehouseId') warehouseId?: string,
+    @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
   ) {
     return this.inventoryService.getProductHistory(productId, tenantId, {
       warehouseId,
+      page: page ? parseInt(page, 10) : undefined,
       limit: limit ? parseInt(limit, 10) : undefined,
+      from,
+      to,
     });
   }
 

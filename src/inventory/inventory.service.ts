@@ -5,7 +5,14 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource, In } from 'typeorm';
+import {
+  Repository,
+  DataSource,
+  In,
+  Between,
+  MoreThanOrEqual,
+  LessThanOrEqual,
+} from 'typeorm';
 import { Warehouse } from './entities/warehouse.entity.js';
 import { Stock } from './entities/stock.entity.js';
 import { StockUnit, StockUnitKind, StockUnitStatus } from './entities/stock-unit.entity.js';
@@ -19,7 +26,11 @@ import { TransferStockDto } from './dto/transfer-stock.dto.js';
 import { MovementType } from '../common/enums/movement-type.enum.js';
 import { ProductVariant } from '../products/entities/product-variant.entity.js';
 import { Product } from '../products/entities/product.entity.js';
-import { movementDelta } from './movement-delta.js';
+import {
+  desdeInicioDelDia,
+  hastaFinDelDia,
+  movementDelta,
+} from './movement-delta.js';
 import { RecipeService } from '../products/services/recipe.service.js';
 import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
 
@@ -1015,7 +1026,13 @@ export class InventoryService {
   async getProductHistory(
     productId: string,
     tenantId: string,
-    filters?: { warehouseId?: string; limit?: number },
+    filters?: {
+      warehouseId?: string;
+      page?: number;
+      limit?: number;
+      from?: string;
+      to?: string;
+    },
   ) {
     const product = await this.dataSource
       .getRepository(Product)
@@ -1025,24 +1042,59 @@ export class InventoryService {
     const variants = await this.dataSource
       .getRepository(ProductVariant)
       .find({ where: { productId, tenantId } });
+
+    const ficha = {
+      product: {
+        id: product.id,
+        name: product.name,
+        skuPrefix: product.skuPrefix,
+      },
+      variants: variants.map((v) => ({
+        id: v.id,
+        label: [v.size, v.color].filter(Boolean).join(' / '),
+      })),
+    };
     if (variants.length === 0) {
-      return { product, movements: [], currentStock: 0, variants: [] };
+      return {
+        ...ficha,
+        movements: [],
+        currentStock: 0,
+        total: 0,
+        page: 1,
+        limit: 0,
+        totalPages: 0,
+      };
     }
     const variantIds = variants.map((v) => v.id);
+
+    const limit = Math.min(Math.max(filters?.limit ?? 100, 1), 500);
+    const page = Math.max(filters?.page ?? 1, 1);
 
     const where: Record<string, unknown> = {
       tenantId,
       variantId: In(variantIds),
     };
     if (filters?.warehouseId) where.warehouseId = filters.warehouseId;
+    if (filters?.from && filters?.to) {
+      where.createdAt = Between(
+        desdeInicioDelDia(filters.from),
+        hastaFinDelDia(filters.to),
+      );
+    } else if (filters?.from) {
+      where.createdAt = MoreThanOrEqual(desdeInicioDelDia(filters.from));
+    } else if (filters?.to) {
+      where.createdAt = LessThanOrEqual(hastaFinDelDia(filters.to));
+    }
 
-    const movimientos = await this.movementRepository.find({
+    const [pagina, total] = await this.movementRepository.findAndCount({
       where,
       relations: ['variant', 'warehouse', 'createdBy'],
-      // Ascendente: el saldo se acumula hacia adelante. Un ADJUSTMENT fija el
-      // valor y borra lo anterior, así que hacia atrás no se puede calcular.
-      order: { createdAt: 'ASC' },
-      take: filters?.limit ?? 500,
+      // Lo más nuevo primero, que es como se mira. El id desempata: con dos
+      // movimientos en el mismo segundo, un orden inestable haría que una fila
+      // apareciera en dos páginas y otra en ninguna.
+      order: { createdAt: 'DESC', id: 'DESC' },
+      take: limit,
+      skip: (page - 1) * limit,
     });
 
     const stockRows = await this.stockRepository.find({
@@ -1052,10 +1104,25 @@ export class InventoryService {
     });
     const currentStock = stockRows.reduce((t, s) => t + Number(s.quantity), 0);
 
-    // El saldo se lleva por variante y bodega: mezclarlas daría una columna
-    // que no corresponde a ninguna existencia real.
-    const saldos = new Map<string, number>();
-    const movements = movimientos.map((m) => {
+    // El saldo de la fila más antigua de esta página depende de todo lo que
+    // pasó antes, que puede estar en otra página o fuera del filtro de fechas.
+    // Sin esto, cada página empezaría a contar desde cero.
+    const masAntiguo = pagina[pagina.length - 1];
+    const apertura = masAntiguo
+      ? await this.saldosAntesDe(
+          tenantId,
+          variantIds,
+          masAntiguo.createdAt,
+          masAntiguo.id,
+          filters?.warehouseId,
+        )
+      : new Map<string, number>();
+
+    // Se acumula del más viejo al más nuevo, que es el único sentido en que un
+    // saldo se puede calcular: un ADJUSTMENT fija el valor y borra lo anterior.
+    const saldos = new Map(apertura);
+    const enOrden = [...pagina].reverse();
+    const movements = enOrden.map((m) => {
       const clave = `${m.variantId}:${m.warehouseId}`;
       const delta = movementDelta(m.movementType, m.quantity);
       const previo = saldos.get(clave) ?? 0;
@@ -1082,19 +1149,80 @@ export class InventoryService {
       };
     });
 
-    // Se devuelve al derecho para la pantalla (lo último primero), pero el
-    // saldo ya viene calculado en el orden correcto.
     movements.reverse();
 
     return {
-      product: { id: product.id, name: product.name, skuPrefix: product.skuPrefix },
-      variants: variants.map((v) => ({
-        id: v.id,
-        label: [v.size, v.color].filter(Boolean).join(' / '),
-      })),
+      ...ficha,
       currentStock,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
       movements,
     };
+  }
+
+  /**
+   * Saldo por variante y bodega justo antes de un movimiento dado.
+   *
+   * Va en SQL porque traer el historial completo a memoria para sumar los
+   * primeros N sería justamente lo que la paginación viene a evitar. El último
+   * `ADJUSTMENT` manda: fija el saldo, y solo cuenta lo que pasó después.
+   */
+  private async saldosAntesDe(
+    tenantId: string,
+    variantIds: string[],
+    fecha: Date,
+    id: string,
+    warehouseId?: string,
+  ): Promise<Map<string, number>> {
+    const filtroBodega = warehouseId ? 'AND m.warehouse_id = $5' : '';
+    const params: unknown[] = [tenantId, variantIds, fecha, id];
+    if (warehouseId) params.push(warehouseId);
+
+    const filas = await this.dataSource.query<
+      { variant_id: string; warehouse_id: string; saldo: string }[]
+    >(
+      `
+      WITH previos AS (
+        SELECT m.variant_id, m.warehouse_id, m.movement_type, m.quantity,
+               m.created_at, m.id
+        FROM stock_movements m
+        WHERE m.tenant_id = $1
+          AND m.variant_id = ANY($2::uuid[])
+          AND (m.created_at, m.id) < ($3::timestamptz, $4::uuid)
+          ${filtroBodega}
+      ),
+      ultimo_ajuste AS (
+        SELECT DISTINCT ON (variant_id, warehouse_id)
+               variant_id, warehouse_id, abs(quantity) AS valor, created_at, id
+        FROM previos
+        WHERE movement_type = 'ADJUSTMENT'
+        ORDER BY variant_id, warehouse_id, created_at DESC, id DESC
+      )
+      SELECT p.variant_id, p.warehouse_id,
+             COALESCE(u.valor, 0) + COALESCE(SUM(
+               CASE p.movement_type
+                 WHEN 'IN' THEN abs(p.quantity)
+                 WHEN 'OUT' THEN -abs(p.quantity)
+                 WHEN 'TRANSFER' THEN p.quantity
+                 ELSE 0
+               END
+             ) FILTER (
+               WHERE u.created_at IS NULL
+                  OR (p.created_at, p.id) > (u.created_at, u.id)
+             ), 0) AS saldo
+      FROM previos p
+      LEFT JOIN ultimo_ajuste u
+        ON u.variant_id = p.variant_id AND u.warehouse_id = p.warehouse_id
+      GROUP BY p.variant_id, p.warehouse_id, u.valor, u.created_at, u.id
+      `,
+      params,
+    );
+
+    return new Map(
+      filas.map((f) => [`${f.variant_id}:${f.warehouse_id}`, Number(f.saldo)]),
+    );
   }
 
   // ─── Set min stock ───
