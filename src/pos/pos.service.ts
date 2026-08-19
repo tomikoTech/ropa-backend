@@ -1276,6 +1276,14 @@ export class PosService {
           await saleItemRepo.save(item);
           lineCalcs.push(calculation);
         }
+        // `sale.items` todavía apunta a las líneas viejas. Cuando cambia una
+        // cantidad esas filas ya se borraron, y como la relación tiene
+        // `cascade: true`, el `save(sale)` del final las volvía a insertar
+        // sin su `sale_id` y la edición moría con «Falta un dato obligatorio
+        // (sale_id)». La venta en memoria tiene que reflejar lo que quedó en
+        // la base.
+        sale.items = editedItems;
+
         const totals = this.taxService.calculateSaleTotals(lineCalcs);
         sale.subtotal = totals.subtotal;
         sale.taxAmount = totals.taxAmount;

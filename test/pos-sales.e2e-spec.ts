@@ -683,4 +683,153 @@ describe('POS Sales & Accounts Receivable (e2e)', () => {
       expect(res.body.message).toContain('abonos');
     });
   });
+
+  /**
+   * Editar una factura cambiando **cantidades o productos**.
+   *
+   * Las pruebas que ya había cambiaban solo el precio, y ese camino reutiliza
+   * las mismas líneas. Cambiar una cantidad toma el otro: borra las líneas y
+   * las vuelve a crear. Ahí la venta en memoria quedaba apuntando a filas que
+   * ya no existían y, como la relación tiene `cascade: true`, el guardado
+   * final intentaba reinsertarlas sin `sale_id`. La tienda veía «Falta un
+   * dato obligatorio (sale_id)» y no podía corregir una factura mal digitada.
+   */
+  describe('editar cantidades y productos de una factura', () => {
+    beforeAll(async () => {
+      // Stock propio: las pruebas anteriores ya consumieron el inicial y una
+      // prueba que se cae por falta de existencias no dice nada del error que
+      // busca.
+      for (const variantId of [variant1Id, variant2Id]) {
+        await request(app.getHttpServer())
+          .post('/api/inventory/adjust')
+          .set('Authorization', `Bearer ${token}`)
+          .send({
+            variantId,
+            warehouseId,
+            quantity: 200,
+            movementType: 'IN',
+            notes: 'Stock para las pruebas de edición',
+          })
+          .expect(201);
+      }
+    });
+
+    const crearVentaEfectivo = async (cantidad = 2) => {
+      const res = await request(app.getHttpServer())
+        .post('/api/pos/sales')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          clientId,
+          warehouseId,
+          items: [{ variantId: variant1Id, quantity: cantidad }],
+          payments: [
+            { method: 'EFECTIVO', amount: 100000, receivedAmount: 100000 },
+          ],
+        })
+        .expect(201);
+      return res.body;
+    };
+
+    it('cambiar la cantidad no rompe la venta', async () => {
+      const venta = await crearVentaEfectivo(2);
+
+      const res = await request(app.getHttpServer())
+        .patch(`/api/pos/sales/${venta.id}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ items: [{ variantId: variant1Id, quantity: 3, unitPrice: 50000 }] })
+        .expect(200);
+
+      expect(res.body.items).toHaveLength(1);
+      expect(Number(res.body.items[0].quantity)).toBe(3);
+      expect(res.body.items[0].saleId).toBe(venta.id);
+    });
+
+    it('la venta queda con sus líneas nuevas y ninguna vieja', async () => {
+      // Si las viejas revivieran, la factura mostraría el doble de productos.
+      const venta = await crearVentaEfectivo(2);
+      const antes = venta.items[0].id;
+
+      await request(app.getHttpServer())
+        .patch(`/api/pos/sales/${venta.id}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ items: [{ variantId: variant1Id, quantity: 5, unitPrice: 50000 }] })
+        .expect(200);
+
+      const res = await request(app.getHttpServer())
+        .get(`/api/pos/sales/${venta.id}`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+
+      expect(res.body.items).toHaveLength(1);
+      expect(res.body.items[0].id).not.toBe(antes);
+      expect(Number(res.body.items[0].quantity)).toBe(5);
+    });
+
+    it('cambiar el producto de una línea también funciona', async () => {
+      const venta = await crearVentaEfectivo(1);
+
+      const res = await request(app.getHttpServer())
+        .patch(`/api/pos/sales/${venta.id}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ items: [{ variantId: variant2Id, quantity: 1, unitPrice: 50000 }] })
+        .expect(200);
+
+      expect(res.body.items).toHaveLength(1);
+      expect(res.body.items[0].variantId).toBe(variant2Id);
+    });
+
+    it('agregar una segunda línea funciona', async () => {
+      const venta = await crearVentaEfectivo(1);
+
+      const res = await request(app.getHttpServer())
+        .patch(`/api/pos/sales/${venta.id}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          items: [
+            { variantId: variant1Id, quantity: 1, unitPrice: 50000 },
+            { variantId: variant2Id, quantity: 2, unitPrice: 50000 },
+          ],
+        })
+        .expect(200);
+
+      expect(res.body.items).toHaveLength(2);
+      for (const linea of res.body.items) {
+        expect(linea.saleId).toBe(venta.id);
+      }
+    });
+
+    it('el inventario queda cuadrado después de subir y bajar la cantidad', async () => {
+      // Lo que la tienda revisa al día siguiente: que corregir una factura no
+      // le deje el stock movido.
+      const antes = await request(app.getHttpServer())
+        .get(`/api/inventory/stock/variant/${variant1Id}`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      const cantidadAntes = antes.body.reduce(
+        (t: number, s: { quantity: number }) => t + Number(s.quantity),
+        0,
+      );
+
+      const venta = await crearVentaEfectivo(2);
+      for (const cantidad of [6, 2]) {
+        await request(app.getHttpServer())
+          .patch(`/api/pos/sales/${venta.id}`)
+          .set('Authorization', `Bearer ${token}`)
+          .send({ items: [{ variantId: variant1Id, quantity: cantidad, unitPrice: 50000 }] })
+          .expect(200);
+      }
+
+      const despues = await request(app.getHttpServer())
+        .get(`/api/inventory/stock/variant/${variant1Id}`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      const cantidadDespues = despues.body.reduce(
+        (t: number, s: { quantity: number }) => t + Number(s.quantity),
+        0,
+      );
+
+      // La venta descontó 2 y las ediciones se compensaron entre sí.
+      expect(cantidadDespues).toBe(cantidadAntes - 2);
+    });
+  });
 });
