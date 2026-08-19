@@ -116,6 +116,8 @@ export class StoreSettingsService {
       settings.quickLoanEnabled = dto.quickLoanEnabled;
     if (dto.arPaymentAllocationMode !== undefined)
       settings.arPaymentAllocationMode = dto.arPaymentAllocationMode;
+    if (dto.unitTrackingEnabled !== undefined)
+      settings.unitTrackingEnabled = dto.unitTrackingEnabled;
     if (dto.showBoxPairSequenceOnLabels !== undefined)
       settings.showBoxPairSequenceOnLabels = dto.showBoxPairSequenceOnLabels;
     if (dto.leftoverAgeMonths !== undefined)

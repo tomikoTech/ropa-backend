@@ -3,7 +3,9 @@ import {
   IsInt,
   IsNumber,
   IsOptional,
+  IsString,
   IsUUID,
+  MaxLength,
   Min,
   ArrayMinSize,
   ValidateNested,
@@ -68,4 +70,64 @@ export class UpdateBoxContentsDto {
   @ValidateNested({ each: true })
   @Type(() => BoxContentItemDto)
   items: BoxContentItemDto[];
+}
+
+/**
+ * Ingreso directo de cajas que ya están en la bodega, sin orden de compra.
+ *
+ * Es el caso de quien arranca con el inventario puesto: las cajas existen, el
+ * proveedor ya cobró y no hay una compra que registrar. Lo que sí hay que
+ * saber es qué trae cada caja, y para eso sirve la curva.
+ */
+export class IntakeBoxesDto {
+  @ApiProperty({ description: 'Producto de las cajas' })
+  @IsUUID()
+  productId: string;
+
+  @ApiPropertyOptional({ description: 'Color, si el producto lo maneja' })
+  @IsOptional()
+  @IsUUID()
+  colorId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Curva de tallas: define qué trae cada caja',
+  })
+  @IsOptional()
+  @IsUUID()
+  sizeCurveId?: string;
+
+  @ApiProperty({ description: 'Cuántas cajas iguales entran', minimum: 1 })
+  @IsInt()
+  @Min(1)
+  boxes: number;
+
+  @ApiPropertyOptional({
+    description:
+      'Unidades por caja. Solo se usa cuando no hay curva; con curva manda el surtido.',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  unitsPerBox?: number;
+
+  @ApiProperty({ description: 'Bodega donde quedan las cajas' })
+  @IsUUID()
+  warehouseId: string;
+
+  @ApiPropertyOptional({ description: 'Estante o ubicación dentro de la bodega' })
+  @IsOptional()
+  @IsUUID()
+  standId?: string;
+
+  @ApiPropertyOptional({ description: 'Costo por unidad puesto en bodega' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  unitCost?: number;
+
+  @ApiPropertyOptional({ description: 'Por qué entran (queda en el historial)' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  notes?: string;
 }

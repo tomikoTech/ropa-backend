@@ -15,6 +15,8 @@ describe('Recepción por cajas y apertura de bultos (e2e)', () => {
   let warehouseId: string;
   let returnWarehouseId: string;
   let curveSizeIds: string[] = [];
+  let productId: string;
+  let curveId: string;
   let productName: string;
   let orderNumber: string;
   let soldUnitBarcode: string;
@@ -117,6 +119,7 @@ describe('Recepción por cajas y apertura de bultos (e2e)', () => {
         costPrice: 50000,
         variants: sizeNames.map((size) => ({ size, color: 'Negro' })),
       });
+    productId = prod.body.id;
     const curve = await request(app.getHttpServer())
       .post('/api/size-curves')
       .set(auth())
@@ -124,6 +127,8 @@ describe('Recepción por cajas y apertura de bultos (e2e)', () => {
         name: `Curva bulto ${ts}`,
         items: sizeIds.map((sizeId) => ({ sizeId, quantity: 2 })),
       });
+
+    curveId = curve.body.id;
 
     const order = await request(app.getHttpServer())
       .post('/api/purchases')
@@ -1235,5 +1240,162 @@ describe('Recepción por cajas y apertura de bultos (e2e)', () => {
       .set(auth())
       .expect(200);
     expect(scan.body.stockUnitId).toBe(unit.id);
+  });
+
+  /**
+   * Lo que preguntó una tienda mirando su bodega llena: «¿cómo veo las cajas
+   * que tengo y cómo ingreso las que ya están acá?». Ver cajas se podía a
+   * medias —sin separarlas de los pares— e ingresarlas no se podía: una caja
+   * solo nacía de una orden de compra.
+   */
+  describe('ver e ingresar cajas', () => {
+    const habilitarCajas = (enabled: boolean) =>
+      request(app.getHttpServer())
+        .patch('/api/store-settings')
+        .set(auth())
+        .send({ unitTrackingEnabled: enabled })
+        .expect(200);
+
+    it('separa las cajas de los pares y cuenta las dos cosas', async () => {
+      const cajas = await request(app.getHttpServer())
+        .get('/api/stock-units/search')
+        .query({ kind: 'BOX', productId, limit: 100 })
+        .set(auth())
+        .expect(200);
+      const pares = await request(app.getHttpServer())
+        .get('/api/stock-units/search')
+        .query({ kind: 'UNIT', productId, limit: 100 })
+        .set(auth())
+        .expect(200);
+
+      expect(cajas.body.data.length).toBeGreaterThan(0);
+      expect(pares.body.data.length).toBeGreaterThan(0);
+      expect(
+        cajas.body.data.every((u: { kind: string }) => u.kind === 'BOX'),
+      ).toBe(true);
+      expect(
+        pares.body.data.every((u: { kind: string }) => u.kind === 'UNIT'),
+      ).toBe(true);
+
+      // El resumen no cambia al conmutar de pestaña: es justo lo que permite
+      // decidir a cuál ir sin tener que probar las dos.
+      expect(cajas.body.resumen).toEqual(pares.body.resumen);
+      expect(cajas.body.resumen.cajas).toBe(cajas.body.meta.total);
+      expect(cajas.body.resumen.pares).toBe(pares.body.meta.total);
+      expect(cajas.body.resumen.unidades).toBeGreaterThan(0);
+    });
+
+    it('una caja abierta dice cuántos pares salieron de ella', async () => {
+      const cajas = await request(app.getHttpServer())
+        .get('/api/stock-units/search')
+        .query({ kind: 'BOX', productId, status: 'SPLIT', limit: 100 })
+        .set(auth())
+        .expect(200);
+      expect(cajas.body.data.length).toBeGreaterThan(0);
+      expect(cajas.body.data[0].childCount).toBeGreaterThan(0);
+    });
+
+    it('rechaza un tipo de bulto que no existe', async () => {
+      await request(app.getHttpServer())
+        .get('/api/stock-units/search')
+        .query({ kind: 'PALETA' })
+        .set(auth())
+        .expect(400);
+    });
+
+    it('no deja ingresar cajas si la tienda no trabaja por cajas', async () => {
+      await habilitarCajas(false);
+      const res = await request(app.getHttpServer())
+        .post('/api/stock-units/intake')
+        .set(auth())
+        .send({ productId, sizeCurveId: curveId, boxes: 1, warehouseId })
+        .expect(400);
+      expect(res.body.message).toMatch(/apagado|Configuración/i);
+      await habilitarCajas(true);
+    });
+
+    it('ingresa cajas que ya están en la bodega, sin orden de compra', async () => {
+      await habilitarCajas(true);
+      const antes = await request(app.getHttpServer())
+        .get(`/api/inventory/products/${productId}/history`)
+        .set(auth())
+        .expect(200);
+
+      const res = await request(app.getHttpServer())
+        .post('/api/stock-units/intake')
+        .set(auth())
+        .send({
+          productId,
+          sizeCurveId: curveId,
+          boxes: 2,
+          warehouseId,
+          unitCost: 30000,
+          notes: 'Inventario inicial de la bodega',
+        })
+        .expect(201);
+
+      expect(res.body).toHaveLength(2);
+      for (const caja of res.body) {
+        expect(caja.kind).toBe('BOX');
+        expect(caja.purchaseBoxLineId).toBeNull();
+        // La curva manda: 2 tallas × 2 pares.
+        expect(caja.quantity).toBe(4);
+        expect(isValidBarcode(caja.barcode)).toBe(true);
+      }
+      const codigos = res.body.map((u: { barcode: string }) => u.barcode);
+      expect(new Set(codigos).size).toBe(2);
+
+      // El inventario sube por las 8 unidades que entraron dentro de las cajas.
+      const despues = await request(app.getHttpServer())
+        .get(`/api/inventory/products/${productId}/history`)
+        .set(auth())
+        .expect(200);
+      expect(despues.body.currentStock).toBe(antes.body.currentStock + 8);
+
+      // Y el movimiento dice por qué entró, no solo que entró.
+      const movimiento = despues.body.movements.find(
+        (m: { referenceType: string | null }) =>
+          m.referenceType === 'STOCK_UNIT_INTAKE',
+      );
+      expect(movimiento).toBeDefined();
+      expect(movimiento.notes).toContain('Inventario inicial de la bodega');
+
+      // La caja sabe qué trae, igual que si hubiera venido de una compra.
+      const trace = await request(app.getHttpServer())
+        .get(`/api/stock-units/trace/${codigos[0]}`)
+        .set(auth())
+        .expect(200);
+      expect(trace.body.unit.contents).toHaveLength(2);
+      expect(trace.body.purchase).toBeNull();
+    });
+
+    it('sin curva hay que decir cuántas unidades trae la caja', async () => {
+      await habilitarCajas(true);
+      const res = await request(app.getHttpServer())
+        .post('/api/stock-units/intake')
+        .set(auth())
+        .send({ productId, boxes: 1, warehouseId })
+        .expect(400);
+      expect(res.body.message).toMatch(/unidades|curva/i);
+
+      const ok = await request(app.getHttpServer())
+        .post('/api/stock-units/intake')
+        .set(auth())
+        .send({ productId, boxes: 1, unitsPerBox: 6, warehouseId })
+        .expect(201);
+      expect(ok.body[0].quantity).toBe(6);
+    });
+
+    it('las cajas ingresadas a mano aparecen en el listado sin orden de compra', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/stock-units/search')
+        .query({ kind: 'BOX', productId, status: 'IN_STOCK', limit: 100 })
+        .set(auth())
+        .expect(200);
+      const sinOrden = res.body.data.filter(
+        (u: { orderNumber: string | null }) => u.orderNumber === null,
+      );
+      expect(sinOrden.length).toBeGreaterThanOrEqual(3);
+    });
   });
 });

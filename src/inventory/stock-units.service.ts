@@ -4,7 +4,14 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, DataSource, EntityManager, In, Repository } from 'typeorm';
+import {
+  Brackets,
+  DataSource,
+  EntityManager,
+  In,
+  Repository,
+  SelectQueryBuilder,
+} from 'typeorm';
 import {
   StockUnit,
   StockUnitKind,
@@ -19,7 +26,11 @@ import { SizeCurveItem } from '../catalogs/entities/size-curve-item.entity.js';
 import { ProductVariant } from '../products/entities/product-variant.entity.js';
 import { MovementType } from '../common/enums/movement-type.enum.js';
 import { PurchaseOrderStatus } from '../common/enums/purchase-order-status.enum.js';
-import { buildStockBarcode, withCheckDigit } from './barcode.util.js';
+import {
+  BARCODE_LIMITS,
+  buildStockBarcode,
+  withCheckDigit,
+} from './barcode.util.js';
 import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
 import { StockUnitContent } from './entities/stock-unit-content.entity.js';
 import {
@@ -27,6 +38,24 @@ import {
   StockUnitEventType,
 } from './entities/stock-unit-event.entity.js';
 import { SaleItem } from '../pos/entities/sale-item.entity.js';
+import { Product } from '../products/entities/product.entity.js';
+import { Warehouse } from './entities/warehouse.entity.js';
+import { Stand } from './entities/stand.entity.js';
+import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
+import { IntakeBoxesDto } from './dto/stock-unit.dto.js';
+
+/** Identificadores que llegan por query string: se validan antes de consultar. */
+/**
+ * Tramo de «orden de compra» reservado para lo que entra sin compra. Ninguna
+ * orden real lo usa: el consecutivo de una orden empieza en 1.
+ */
+const INTAKE_ORDER_SEQUENCE = 0;
+
+/** Origen de los movimientos y eventos del ingreso directo. */
+const INTAKE_REFERENCE = 'STOCK_UNIT_INTAKE';
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 @Injectable()
 export class StockUnitsService {
@@ -112,43 +141,27 @@ export class StockUnitsService {
         const units: StockUnit[] = [];
         const today = new Date();
         // Una caja contiene varias tallas, pero la venta necesita una variante
-        // para convivir con el stock agregado. Usa la primera variante activa
-        // del mismo producto/color (el detalle real sigue en la caja/curva).
-        const variant = await m.getRepository(ProductVariant).findOne({
-          where: {
-            productId: line.productId,
-            ...(line.colorId ? { colorId: line.colorId } : {}),
-            tenantId,
-            isActive: true,
-          },
-          order: { createdAt: 'ASC' },
-        });
-        if (!variant) {
-          throw new BadRequestException(
-            'El producto no tiene una variante activa compatible con el color de la caja.',
-          );
-        }
+        // para convivir con el stock agregado (ver `equivalentVariant`).
+        const variant = await this.equivalentVariant(
+          m,
+          line.productId,
+          line.colorId,
+          tenantId,
+        );
 
         const curveItems = line.sizeCurveId
           ? await m.getRepository(SizeCurveItem).find({
               where: { curveId: line.sizeCurveId, tenantId },
             })
           : [];
-        const contentVariants = curveItems.length
-          ? await m.getRepository(ProductVariant).find({
-              where: {
-                productId: line.productId,
-                tenantId,
-                isActive: true,
-                sizeId: In(curveItems.map((item) => item.sizeId)),
-                ...(line.colorId ? { colorId: line.colorId } : {}),
-              },
-            })
-          : [];
-        const contentVariantBySize = new Map(
-          contentVariants
-            .filter((candidate) => candidate.sizeId)
-            .map((candidate) => [candidate.sizeId!, candidate]),
+        const contentVariantBySize = await this.variantsBySize(
+          m,
+          {
+            productId: line.productId,
+            colorId: line.colorId,
+            sizeIds: curveItems.map((item) => item.sizeId),
+          },
+          tenantId,
         );
 
         const barcodePrefix = buildStockBarcode({
@@ -288,6 +301,300 @@ export class StockUnitsService {
 
         return saved;
       }),
+    );
+  }
+
+  /**
+   * Ingresa cajas que **ya están en la bodega**, sin orden de compra.
+   *
+   * Hasta ahora una caja solo podía nacer de un renglón de compra, y eso deja
+   * fuera el caso más común al arrancar: la mercancía ya está ahí, el
+   * proveedor ya cobró y no hay compra que registrar. Había que inventarse una
+   * orden ficticia para poder etiquetar lo que uno ya tiene.
+   *
+   * Las cajas que entran por aquí son iguales a las de una compra —mismo
+   * código de 16 dígitos, mismas etiquetas, mismo contenido por curva—. Lo
+   * único que cambia es que no cuelgan de un proveedor, y por eso el código
+   * lleva `0000` donde iría el consecutivo de la orden.
+   */
+  async intakeBoxes(
+    dto: IntakeBoxesDto,
+    userId: string,
+    tenantId: string,
+  ): Promise<StockUnit[]> {
+    return retryOnUniqueViolation(async () =>
+      this.dataSource.transaction(async (m) => {
+        const settings = await m
+          .getRepository(StoreSettings)
+          .findOne({ where: { tenantId } });
+        if (!settings?.unitTrackingEnabled) {
+          throw new BadRequestException(
+            'El inventario por cajas está apagado en esta tienda. Actívalo en Configuración antes de ingresar cajas.',
+          );
+        }
+
+        const product = await m
+          .getRepository(Product)
+          .findOne({ where: { id: dto.productId, tenantId } });
+        if (!product) throw new NotFoundException('Producto no encontrado');
+
+        const warehouse = await m
+          .getRepository(Warehouse)
+          .findOne({ where: { id: dto.warehouseId, tenantId } });
+        if (!warehouse) throw new NotFoundException('Bodega no encontrada');
+
+        if (dto.standId) {
+          const stand = await m
+            .getRepository(Stand)
+            .findOne({ where: { id: dto.standId, tenantId } });
+          if (!stand) throw new NotFoundException('Estante no encontrado');
+        }
+
+        const curveItems = dto.sizeCurveId
+          ? await m
+              .getRepository(SizeCurveItem)
+              .find({ where: { curveId: dto.sizeCurveId, tenantId } })
+          : [];
+        if (dto.sizeCurveId && curveItems.length === 0) {
+          throw new BadRequestException(
+            'La curva elegida no tiene tallas cargadas.',
+          );
+        }
+
+        // Con curva manda el surtido: es lo que la caja trae de verdad. Sin
+        // curva hay que decir cuántas unidades vienen, porque si no el
+        // inventario que suma esta caja sería una adivinanza.
+        const unitsPerBox = curveItems.length
+          ? curveItems.reduce((total, item) => total + item.quantity, 0)
+          : (dto.unitsPerBox ?? 0);
+        if (unitsPerBox <= 0) {
+          throw new BadRequestException(
+            'Indica cuántas unidades trae cada caja, o elige una curva de tallas.',
+          );
+        }
+
+        const variant = await this.equivalentVariant(
+          m,
+          dto.productId,
+          dto.colorId ?? null,
+          tenantId,
+        );
+        const contentVariantBySize = await this.variantsBySize(
+          m,
+          {
+            productId: dto.productId,
+            colorId: dto.colorId ?? null,
+            sizeIds: curveItems.map((item) => item.sizeId),
+          },
+          tenantId,
+        );
+
+        const today = new Date();
+        const lineConsecutive = await this.nextIntakeConsecutive(
+          today,
+          tenantId,
+          m,
+        );
+        const barcodePrefix = buildStockBarcode({
+          date: today,
+          orderSequence: INTAKE_ORDER_SEQUENCE,
+          lineConsecutive,
+          unitSequence: 0,
+        }).slice(0, 13);
+        let barcodeSequence = await this.nextUnitSequence(
+          null,
+          barcodePrefix,
+          tenantId,
+          m,
+        );
+        if (barcodeSequence + dto.boxes - 1 > BARCODE_LIMITS.unit) {
+          throw new BadRequestException(
+            `Un ingreso admite hasta ${BARCODE_LIMITS.unit} cajas. Divídelo en varios.`,
+          );
+        }
+
+        const unitRepo = m.getRepository(StockUnit);
+        const units: StockUnit[] = [];
+        for (let i = 0; i < dto.boxes; i++) {
+          const body = buildStockBarcode({
+            date: today,
+            orderSequence: INTAKE_ORDER_SEQUENCE,
+            lineConsecutive,
+            unitSequence: barcodeSequence,
+          });
+          barcodeSequence++;
+          units.push(
+            unitRepo.create({
+              barcode: withCheckDigit(body),
+              kind: StockUnitKind.BOX,
+              status: StockUnitStatus.IN_STOCK,
+              productId: dto.productId,
+              variantId: variant.id,
+              colorId: dto.colorId ?? null,
+              sizeId: null,
+              warehouseId: dto.warehouseId,
+              standId: dto.standId ?? null,
+              quantity: unitsPerBox,
+              cost: dto.unitCost ?? 0,
+              purchaseBoxLineId: null,
+              boxSequence: i + 1,
+              pairSequence: null,
+              tenantId,
+            }),
+          );
+        }
+        const saved = await unitRepo.save(units);
+
+        if (curveItems.length > 0) {
+          const contentRepo = m.getRepository(StockUnitContent);
+          await contentRepo.save(
+            saved.flatMap((box) =>
+              curveItems.map((item) =>
+                contentRepo.create({
+                  boxUnitId: box.id,
+                  sizeId: item.sizeId,
+                  variantId: contentVariantBySize.get(item.sizeId)?.id ?? null,
+                  expectedQuantity: item.quantity,
+                  actualQuantity: item.quantity,
+                  tenantId,
+                }),
+              ),
+            ),
+          );
+        }
+
+        const eventRepo = m.getRepository(StockUnitEvent);
+        await eventRepo.save(
+          saved.map((box) =>
+            eventRepo.create({
+              stockUnitId: box.id,
+              eventType: StockUnitEventType.RECEIVED,
+              fromStatus: null,
+              toStatus: StockUnitStatus.IN_STOCK,
+              referenceType: INTAKE_REFERENCE,
+              referenceId: null,
+              userId,
+              metadata: {
+                barcode: box.barcode,
+                quantity: box.quantity,
+                warehouseId: dto.warehouseId,
+                notes: dto.notes ?? null,
+              },
+              tenantId,
+            }),
+          ),
+        );
+
+        const motivo = dto.notes?.trim();
+        await this.applyStockDelta(
+          m,
+          {
+            variantId: variant.id,
+            warehouseId: dto.warehouseId,
+            quantity: dto.boxes * unitsPerBox,
+            userId,
+            tenantId,
+            notes: motivo
+              ? `Ingreso directo de ${dto.boxes} caja(s) · ${motivo}`
+              : `Ingreso directo de ${dto.boxes} caja(s)`,
+            referenceType: INTAKE_REFERENCE,
+          },
+          MovementType.IN,
+        );
+
+        return saved;
+      }),
+    );
+  }
+
+  /**
+   * Consecutivo del ingreso directo dentro del día.
+   *
+   * Los ingresos sin compra comparten el tramo de orden (`0000`), así que lo
+   * que los separa es este número: sin él, dos ingresos del mismo día
+   * chocarían de código desde la primera caja.
+   */
+  private async nextIntakeConsecutive(
+    date: Date,
+    tenantId: string,
+    manager: EntityManager,
+  ): Promise<number> {
+    const dayPrefix = buildStockBarcode({
+      date,
+      orderSequence: INTAKE_ORDER_SEQUENCE,
+      lineConsecutive: 0,
+      unitSequence: 0,
+    }).slice(0, 10);
+    const rows = await manager
+      .getRepository(StockUnit)
+      .createQueryBuilder('unit')
+      .select('unit.barcode', 'barcode')
+      .where('unit.tenantId = :tenantId', { tenantId })
+      .andWhere('unit.barcode LIKE :prefix', { prefix: `${dayPrefix}%` })
+      .getRawMany<{ barcode: string }>();
+    let max = 0;
+    for (const row of rows) {
+      const consecutive = Number(row.barcode.slice(10, 13));
+      if (!Number.isNaN(consecutive) && consecutive > max) max = consecutive;
+    }
+    if (max + 1 > BARCODE_LIMITS.line) {
+      throw new BadRequestException(
+        `Hoy ya se hicieron ${BARCODE_LIMITS.line} ingresos de cajas. Continúa mañana o registra la mercancía como compra.`,
+      );
+    }
+    return max + 1;
+  }
+
+  /**
+   * La variante donde vive el inventario de una caja cerrada.
+   *
+   * Una caja trae varias tallas, pero el stock agregado necesita una: se usa
+   * la primera activa del producto/color y al abrirla se reparte a las tallas
+   * reales. Es la misma regla que sigue la recepción de una compra.
+   */
+  private async equivalentVariant(
+    m: EntityManager,
+    productId: string,
+    colorId: string | null,
+    tenantId: string,
+  ): Promise<ProductVariant> {
+    const variant = await m.getRepository(ProductVariant).findOne({
+      where: {
+        productId,
+        ...(colorId ? { colorId } : {}),
+        tenantId,
+        isActive: true,
+      },
+      order: { createdAt: 'ASC' },
+    });
+    if (!variant) {
+      throw new BadRequestException(
+        'El producto no tiene una variante activa compatible con el color de la caja.',
+      );
+    }
+    return variant;
+  }
+
+  /** Variantes del producto por talla, para poder detallar lo que trae la caja. */
+  private async variantsBySize(
+    m: EntityManager,
+    params: { productId: string; colorId: string | null; sizeIds: string[] },
+    tenantId: string,
+  ): Promise<Map<string, ProductVariant>> {
+    if (params.sizeIds.length === 0) return new Map();
+    const variants = await m.getRepository(ProductVariant).find({
+      where: {
+        productId: params.productId,
+        tenantId,
+        isActive: true,
+        sizeId: In(params.sizeIds),
+        ...(params.colorId ? { colorId: params.colorId } : {}),
+      },
+    });
+    return new Map(
+      variants
+        .filter((variant) => variant.sizeId)
+        .map((variant) => [variant.sizeId!, variant]),
     );
   }
 
@@ -552,14 +859,22 @@ export class StockUnitsService {
     tenantId: string,
     manager?: EntityManager,
   ): Promise<number> {
-    if (!boxLineId) return 1;
     const repository = manager
       ? manager.getRepository(StockUnit)
       : this.unitRepo;
-    const rows = await repository.find({
-      where: { purchaseBoxLineId: boxLineId, tenantId },
-      select: { barcode: true },
-    });
+    // Con renglón de compra el universo son sus bultos; sin él —un ingreso
+    // directo— son los códigos que ya empiezan por el mismo prefijo del día.
+    const rows = boxLineId
+      ? await repository.find({
+          where: { purchaseBoxLineId: boxLineId, tenantId },
+          select: { barcode: true },
+        })
+      : await repository
+          .createQueryBuilder('unit')
+          .select('unit.barcode', 'barcode')
+          .where('unit.tenantId = :tenantId', { tenantId })
+          .andWhere('unit.barcode LIKE :prefix', { prefix: `${prefix}%` })
+          .getRawMany<{ barcode: string }>();
     let max = 0;
     for (const r of rows) {
       if (!r.barcode.startsWith(prefix)) continue;
@@ -901,8 +1216,18 @@ export class StockUnitsService {
     };
   }
 
+  /**
+   * Busca códigos físicos: cajas cerradas, pares sueltos o los dos.
+   *
+   * El **resumen se calcula sin el filtro de tipo**, a propósito: el
+   * conmutador «Cajas / Pares» tiene que poder decir cuántas hay de cada una
+   * *antes* de que alguien lo toque. El resto de filtros sí lo respeta,
+   * porque la pregunta real de la bodega es «cuántas cajas tengo **aquí**».
+   */
   async search(params: {
     q?: string;
+    kind?: string;
+    productId?: string;
     status?: string;
     warehouseId?: string;
     from?: string;
@@ -913,103 +1238,24 @@ export class StockUnitsService {
   }) {
     const page = Math.max(1, Number(params.page) || 1);
     const limit = Math.min(100, Math.max(1, Number(params.limit) || 25));
-    const q = params.q?.trim();
-    for (const [label, value] of [
-      ['desde', params.from],
-      ['hasta', params.to],
-    ] as const) {
-      if (
-        value &&
-        (!/^\d{4}-\d{2}-\d{2}$/.test(value) ||
-          Number.isNaN(new Date(`${value}T00:00:00.000Z`).getTime()))
-      ) {
-        throw new BadRequestException(`La fecha ${label} no es válida.`);
-      }
-    }
-    if (params.from && params.to && params.from > params.to) {
-      throw new BadRequestException(
-        'La fecha desde no puede ser posterior a la fecha hasta.',
-      );
-    }
-    const qb = this.unitRepo
-      .createQueryBuilder('unit')
-      .leftJoinAndSelect('unit.product', 'product')
+    this.validateSearchFilters(params);
+    const kind = params.kind?.trim().toUpperCase();
+
+    const qb = this.buildSearchQuery(params)
       .leftJoinAndSelect('unit.color', 'color')
       .leftJoinAndSelect('unit.size', 'size')
       .leftJoinAndSelect('unit.warehouse', 'warehouse')
-      .leftJoinAndSelect('unit.stand', 'stand')
-      .where('unit.tenantId = :tenantId', { tenantId: params.tenantId });
-
-    if (q) {
-      qb.leftJoin(
-        PurchaseBoxLine,
-        'searchLine',
-        'searchLine.id = unit.purchaseBoxLineId AND searchLine.tenantId = :tenantId',
-      )
-        .leftJoin(
-          PurchaseOrder,
-          'searchOrder',
-          'searchOrder.id = searchLine.purchaseOrderId AND searchOrder.tenantId = :tenantId',
-        )
-        .leftJoin(
-          SaleItem,
-          'searchItem',
-          'searchItem.stockUnitId = unit.id AND searchItem.tenantId = :tenantId',
-        )
-        .leftJoin('searchItem.sale', 'searchSale')
-        .andWhere(
-          new Brackets((where) => {
-            where
-              .where('unit.barcode ILIKE :q')
-              .orWhere('product.name ILIKE :q')
-              .orWhere('product.skuPrefix ILIKE :q')
-              .orWhere('searchOrder.orderNumber ILIKE :q')
-              .orWhere('searchSale.saleNumber ILIKE :q')
-              .orWhere('searchSale.invoiceNumber ILIKE :q');
-          }),
-          { q: `%${q}%` },
-        );
-    }
-    if (params.status) {
-      if (
-        !Object.values(StockUnitStatus).includes(
-          params.status as StockUnitStatus,
-        )
-      ) {
-        throw new BadRequestException('Estado de código físico inválido.');
-      }
-      qb.andWhere('unit.status = :status', { status: params.status });
-    }
-    if (params.warehouseId) {
-      if (
-        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-          params.warehouseId,
-        )
-      ) {
-        throw new BadRequestException('Bodega inválida.');
-      }
-      qb.andWhere('unit.warehouseId = :warehouseId', {
-        warehouseId: params.warehouseId,
-      });
-    }
-    if (params.from) {
-      qb.andWhere('unit.createdAt >= :from', {
-        from: new Date(`${params.from}T00:00:00.000Z`),
-      });
-    }
-    if (params.to) {
-      const exclusiveTo = new Date(`${params.to}T00:00:00.000Z`);
-      exclusiveTo.setUTCDate(exclusiveTo.getUTCDate() + 1);
-      qb.andWhere('unit.createdAt < :to', { to: exclusiveTo });
-    }
+      .leftJoinAndSelect('unit.stand', 'stand');
+    if (kind) qb.andWhere('unit.kind = :kind', { kind });
 
     const [units, total] = await qb
-      .distinct(true)
       .orderBy('unit.createdAt', 'DESC')
       .addOrderBy('unit.barcode', 'ASC')
       .skip((page - 1) * limit)
       .take(limit)
       .getManyAndCount();
+
+    const resumen = await this.summarizeSearch(params);
 
     const lineIds = [
       ...new Set(units.map((unit) => unit.purchaseBoxLineId).filter(Boolean)),
@@ -1028,6 +1274,24 @@ export class StockUnitsService {
           order: { createdAt: 'DESC' },
         })
       : [];
+    // Cuántos pares nacieron de cada caja abierta: es lo que la bodega
+    // pregunta al ver una caja en «Abierta» y no encontrarla en el estante.
+    const openBoxIds = units
+      .filter((unit) => unit.status === StockUnitStatus.SPLIT)
+      .map((unit) => unit.id);
+    const childCounts = openBoxIds.length
+      ? await this.unitRepo
+          .createQueryBuilder('child')
+          .select('child.parentUnitId', 'parentId')
+          .addSelect('COUNT(child.id)', 'total')
+          .where('child.tenantId = :tenantId', { tenantId: params.tenantId })
+          .andWhere('child.parentUnitId IN (:...openBoxIds)', { openBoxIds })
+          .groupBy('child.parentUnitId')
+          .getRawMany<{ parentId: string; total: string }>()
+      : [];
+    const childrenByBox = new Map(
+      childCounts.map((row) => [row.parentId, Number(row.total)]),
+    );
     const lineById = new Map(lines.map((line) => [line.id, line]));
     const saleByUnit = new Map<string, SaleItem>();
     for (const item of saleItems) {
@@ -1050,10 +1314,15 @@ export class StockUnitsService {
           quantity: unit.quantity,
           cost: Number(unit.cost),
           createdAt: unit.createdAt,
+          boxSequence: unit.boxSequence,
+          pairSequence: unit.pairSequence,
+          parentUnitId: unit.parentUnitId,
+          childCount: childrenByBox.get(unit.id) ?? 0,
           product: {
             id: unit.product.id,
             name: unit.product.name,
             skuPrefix: unit.product.skuPrefix,
+            imageUrl: unit.product.imageUrl ?? null,
           },
           color: unit.color
             ? { id: unit.color.id, name: unit.color.name }
@@ -1068,8 +1337,167 @@ export class StockUnitsService {
           invoiceNumber: saleItem?.sale?.invoiceNumber ?? null,
         };
       }),
+      resumen,
       meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
     };
+  }
+
+  /** Cuántas cajas y cuántos pares hay bajo el filtro, y cuánto valen. */
+  private async summarizeSearch(params: {
+    q?: string;
+    productId?: string;
+    status?: string;
+    warehouseId?: string;
+    from?: string;
+    to?: string;
+    tenantId: string;
+  }) {
+    const filas = await this.buildSearchQuery(params)
+      .select('unit.kind', 'kind')
+      .addSelect('COUNT(unit.id)', 'bultos')
+      .addSelect('COALESCE(SUM(unit.quantity), 0)', 'unidades')
+      .addSelect('COALESCE(SUM(unit.quantity * unit.cost), 0)', 'costo')
+      .groupBy('unit.kind')
+      .getRawMany<{
+        kind: string;
+        bultos: string;
+        unidades: string;
+        costo: string;
+      }>();
+    const porTipo = (kind: StockUnitKind) =>
+      filas.find((fila) => fila.kind === kind);
+    const cajas = porTipo(StockUnitKind.BOX);
+    const pares = porTipo(StockUnitKind.UNIT);
+    return {
+      cajas: Number(cajas?.bultos ?? 0),
+      pares: Number(pares?.bultos ?? 0),
+      // Unidades reales: una caja arrastra su contenido, un par vale uno.
+      unidades: filas.reduce((suma, fila) => suma + Number(fila.unidades), 0),
+      costo: filas.reduce((suma, fila) => suma + Number(fila.costo), 0),
+    };
+  }
+
+  private validateSearchFilters(params: {
+    from?: string;
+    to?: string;
+    kind?: string;
+    status?: string;
+    warehouseId?: string;
+    productId?: string;
+  }) {
+    for (const [label, value] of [
+      ['desde', params.from],
+      ['hasta', params.to],
+    ] as const) {
+      if (
+        value &&
+        (!/^\d{4}-\d{2}-\d{2}$/.test(value) ||
+          Number.isNaN(new Date(`${value}T00:00:00.000Z`).getTime()))
+      ) {
+        throw new BadRequestException(`La fecha ${label} no es válida.`);
+      }
+    }
+    if (params.from && params.to && params.from > params.to) {
+      throw new BadRequestException(
+        'La fecha desde no puede ser posterior a la fecha hasta.',
+      );
+    }
+    const kind = params.kind?.trim().toUpperCase();
+    if (
+      kind &&
+      !Object.values(StockUnitKind).includes(kind as StockUnitKind)
+    ) {
+      throw new BadRequestException(
+        'Tipo de bulto inválido: solo cajas o pares.',
+      );
+    }
+    if (
+      params.status &&
+      !Object.values(StockUnitStatus).includes(params.status as StockUnitStatus)
+    ) {
+      throw new BadRequestException('Estado de código físico inválido.');
+    }
+    for (const [label, value] of [
+      ['Bodega', params.warehouseId],
+      ['Producto', params.productId],
+    ] as const) {
+      if (value && !UUID_PATTERN.test(value)) {
+        throw new BadRequestException(`${label} inválida.`);
+      }
+    }
+  }
+
+  /**
+   * Filtros comunes del buscador, **sin el tipo de bulto**.
+   *
+   * La búsqueda por texto va con `EXISTS` y no con `JOIN`: unir contra las
+   * ventas duplica la fila del bulto que se vendió y editó más de una vez, y
+   * con eso el conteo y las sumas del resumen salían infladas.
+   */
+  private buildSearchQuery(params: {
+    q?: string;
+    productId?: string;
+    status?: string;
+    warehouseId?: string;
+    from?: string;
+    to?: string;
+    tenantId: string;
+  }): SelectQueryBuilder<StockUnit> {
+    const qb = this.unitRepo
+      .createQueryBuilder('unit')
+      .leftJoinAndSelect('unit.product', 'product')
+      .where('unit.tenantId = :tenantId', { tenantId: params.tenantId });
+
+    const q = params.q?.trim();
+    if (q) {
+      qb.andWhere(
+        new Brackets((where) => {
+          where
+            .where('unit.barcode ILIKE :q')
+            .orWhere('product.name ILIKE :q')
+            .orWhere('product.skuPrefix ILIKE :q')
+            .orWhere(
+              `EXISTS (SELECT 1 FROM purchase_box_lines pbl
+                 JOIN purchase_orders po ON po.id = pbl.purchase_order_id
+                WHERE pbl.id = unit.purchase_box_line_id
+                  AND po.tenant_id = unit.tenant_id
+                  AND po.order_number ILIKE :q)`,
+            )
+            .orWhere(
+              `EXISTS (SELECT 1 FROM sale_items si
+                 JOIN sales s ON s.id = si.sale_id
+                WHERE si.stock_unit_id = unit.id
+                  AND s.tenant_id = unit.tenant_id
+                  AND (s.sale_number ILIKE :q OR s.invoice_number ILIKE :q))`,
+            );
+        }),
+        { q: `%${q}%` },
+      );
+    }
+    if (params.status) {
+      qb.andWhere('unit.status = :status', { status: params.status });
+    }
+    if (params.warehouseId) {
+      qb.andWhere('unit.warehouseId = :warehouseId', {
+        warehouseId: params.warehouseId,
+      });
+    }
+    if (params.productId) {
+      qb.andWhere('unit.productId = :productId', {
+        productId: params.productId,
+      });
+    }
+    if (params.from) {
+      qb.andWhere('unit.createdAt >= :from', {
+        from: new Date(`${params.from}T00:00:00.000Z`),
+      });
+    }
+    if (params.to) {
+      const exclusiveTo = new Date(`${params.to}T00:00:00.000Z`);
+      exclusiveTo.setUTCDate(exclusiveTo.getUTCDate() + 1);
+      qb.andWhere('unit.createdAt < :to', { to: exclusiveTo });
+    }
+    return qb;
   }
 
   async findByBoxLine(
@@ -1137,6 +1565,8 @@ export class StockUnitsService {
       userId: string;
       tenantId: string;
       notes: string;
+      referenceType?: string;
+      referenceId?: string;
     },
     type: MovementType,
   ): Promise<void> {
@@ -1173,6 +1603,8 @@ export class StockUnitsService {
         quantity: params.quantity,
         createdById: params.userId,
         notes: params.notes,
+        referenceType: params.referenceType,
+        referenceId: params.referenceId,
         tenantId: params.tenantId,
       }),
     );

@@ -13,6 +13,7 @@ import { TenantId } from '../common/decorators/tenant-id.decorator.js';
 import { UserId } from '../common/decorators/user-id.decorator.js';
 import {
   ReceiveBoxesDto,
+  IntakeBoxesDto,
   MarkPrintedDto,
   UpdateBoxContentsDto,
 } from './dto/stock-unit.dto.js';
@@ -46,10 +47,13 @@ export class StockUnitsController {
 
   @Get('search')
   @ApiOperation({
-    summary: 'Buscar códigos por texto, estado, bodega y fecha',
+    summary:
+      'Buscar códigos por texto, tipo (caja o par), producto, estado, bodega y fecha',
   })
   search(
     @Query('q') q: string | undefined,
+    @Query('kind') kind: string | undefined,
+    @Query('productId') productId: string | undefined,
     @Query('status') status: string | undefined,
     @Query('warehouseId') warehouseId: string | undefined,
     @Query('from') from: string | undefined,
@@ -60,6 +64,8 @@ export class StockUnitsController {
   ) {
     return this.units.search({
       q,
+      kind,
+      productId,
       status,
       warehouseId,
       from,
@@ -90,6 +96,18 @@ export class StockUnitsController {
     @TenantId() tenantId: string,
   ) {
     return this.units.receiveBoxLine(boxLineId, dto, userId, tenantId);
+  }
+
+  @Post('intake')
+  @ApiOperation({
+    summary: 'Ingresar cajas que ya están en la bodega, sin orden de compra',
+  })
+  intake(
+    @Body() dto: IntakeBoxesDto,
+    @UserId() userId: string,
+    @TenantId() tenantId: string,
+  ) {
+    return this.units.intakeBoxes(dto, userId, tenantId);
   }
 
   @Post(':id/split')

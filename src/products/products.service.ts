@@ -423,6 +423,7 @@ export class ProductsService {
         imageUrl: dto.imageUrl || dto.imageUrls?.[0],
         imageUrls: dto.imageUrls ?? [],
         videoUrl: dto.videoUrl,
+        unitTracking: dto.unitTracking ?? false,
         tenantId,
       });
 
@@ -643,6 +644,7 @@ export class ProductsService {
     if (dto.imageUrl !== undefined) product.imageUrl = dto.imageUrl;
     if (dto.imageUrls !== undefined) product.imageUrls = dto.imageUrls;
     if (dto.videoUrl !== undefined) product.videoUrl = dto.videoUrl;
+    if (dto.unitTracking !== undefined) product.unitTracking = dto.unitTracking;
     if (dto.isPublished !== undefined) {
       product.isPublished = dto.isPublished;
       product.publishedAt = dto.isPublished ? new Date() : null!;
