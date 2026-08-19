@@ -262,6 +262,13 @@ const ALWAYS_ALLOWED: Record<string, string> = {
   'GET reports/dashboard': 'Resumen del inicio',
   // Un usuario tiene derecho a saber qué puede hacer.
   'GET access/me': 'Permisos del propio usuario',
+  // Encontrar una referencia no es un módulo: es lo primero que hace quien
+  // vende, quien recibe una compra, quien traslada entre bodegas y quien
+  // revisa el historial de un producto. Atarlo a Ventas dejaba a un
+  // bodeguero sin poder buscar en su propia pantalla de Inventario. Es una
+  // lectura del catálogo —nombre, foto y existencias, sin costos— y lo que
+  // se haga después sí pasa por la matriz.
+  'GET products/search/pos-catalog': 'Buscador de productos compartido',
 };
 
 export const ALWAYS_ALLOWED_ROUTES = ALWAYS_ALLOWED;

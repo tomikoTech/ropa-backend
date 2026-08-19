@@ -242,6 +242,23 @@ describe('resolvePermission', () => {
       action: 'list',
     });
   });
+
+  it('el buscador de productos lo puede usar cualquiera', () => {
+    // Lo usan Ventas, Compras, Inventario y Cotizaciones: si dependiera de un
+    // módulo, un bodeguero no podría buscar en su propia pantalla.
+    expect(
+      resolvePermission('GET', '/api/products/search/pos-catalog'),
+    ).toBeNull();
+    // Pero administrar el catálogo sigue siendo de Productos.
+    expect(resolvePermission('GET', '/api/products')).toEqual({
+      module: 'products',
+      action: 'list',
+    });
+    expect(resolvePermission('POST', '/api/products')).toEqual({
+      module: 'products',
+      action: 'create',
+    });
+  });
 });
 
 describe('plantillas de rol', () => {
