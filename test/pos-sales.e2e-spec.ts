@@ -306,9 +306,13 @@ describe('POS Sales & Accounts Receivable (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
 
-    const sales = res.body;
+    // El listado viene paginado por el servidor: la respuesta trae la página
+    // y el total aparte. Devolver la historia completa era lo que hacía que
+    // una tienda con un año de facturación recibiera veinte megas.
+    const { data: sales, total, totalPages } = res.body;
     expect(Array.isArray(sales)).toBe(true);
-    expect(sales.length).toBeGreaterThanOrEqual(2);
+    expect(total).toBeGreaterThanOrEqual(2);
+    expect(totalPages).toBeGreaterThanOrEqual(1);
 
     const cashSale = sales.find((s: any) => s.id === cashSaleId);
     expect(cashSale).toBeDefined();

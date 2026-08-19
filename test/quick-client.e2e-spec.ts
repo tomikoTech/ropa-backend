@@ -86,8 +86,8 @@ describe('Quick client by phone + find sale by phone (e2e)', () => {
       .get(`/api/pos/sales?clientPhone=${phone.slice(-6)}`)
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
-    expect(Array.isArray(res.body)).toBe(true);
-    const found = res.body.find((s: any) => s.client?.phone === phone);
+    expect(Array.isArray(res.body.data)).toBe(true);
+    const found = res.body.data.find((s: any) => s.client?.phone === phone);
     expect(found).toBeDefined();
   });
 
@@ -96,6 +96,7 @@ describe('Quick client by phone + find sale by phone (e2e)', () => {
       .get('/api/pos/sales?clientPhone=000000000000')
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
-    expect(res.body.every((s: any) => s.client?.phone !== phone)).toBe(true);
+    expect(res.body.total).toBe(0);
+    expect(res.body.data).toEqual([]);
   });
 });

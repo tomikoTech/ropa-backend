@@ -719,6 +719,21 @@ export class PosService {
     return remainingSizes <= Number(settings.leftoverMaxSizes ?? 2);
   }
 
+  /**
+   * Listado de ventas, **paginado en el servidor**.
+   *
+   * Antes devolvía la historia completa y la pantalla filtraba y paginaba en
+   * el navegador. Con una tienda que lleva un año facturando eso son casi
+   * diez mil ventas con sus líneas, sus pagos y su cartera: veinte megas por
+   * petición. En el local, con la conexión que hay, no alcanzaba a llegar
+   * antes de que el navegador cortara a los veinte segundos —y la petición se
+   * repite cada vez que se edita una factura, así que corregir una factura
+   * terminaba en «la conexión tardó demasiado» y la lista sin refrescar—.
+   *
+   * Buscar y acotar por fecha también viven acá ahora: si el filtro se
+   * aplicara sobre la página, buscar una factura de marzo en la página 1 no
+   * encontraría nada.
+   */
   async findAll(
     filters:
       | {
@@ -728,43 +743,111 @@ export class PosService {
           from?: string;
           to?: string;
           limit?: number;
+          page?: number;
+          q?: string;
           saleChannel?: string;
           paid?: boolean;
           clientPhone?: string;
         }
       | undefined,
     tenantId: string,
-  ): Promise<Sale[]> {
-    const where: Record<string, unknown> = { tenantId };
-    if (filters?.status) where.status = filters.status;
-    if (filters?.warehouseId) where.warehouseId = filters.warehouseId;
-    if (filters?.userId) where.userId = filters.userId;
-    if (filters?.saleChannel) where.saleChannel = filters.saleChannel;
-    if (filters?.paid !== undefined) where.isPaid = filters.paid;
-    // Buscar venta por teléfono del cliente (para recuperar una venta cuando
-    // solo se tiene el número de WhatsApp).
-    if (filters?.clientPhone?.trim()) {
-      where.client = { phone: ILike(`%${filters.clientPhone.trim()}%`) };
-    }
+  ): Promise<{
+    data: Sale[];
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+    /** Vendido en **todo** el filtro, no solo en la página que se ve. */
+    soldTotal: number;
+  }> {
+    const limit = Math.min(Math.max(Number(filters?.limit) || 20, 1), 200);
+    const page = Math.max(Number(filters?.page) || 1, 1);
 
-    return this.saleRepository.find({
-      where,
-      relations: [
-        'client',
-        'user',
-        'warehouse',
-        'items',
-        'payments',
-        'accountsReceivable',
-      ],
-      order: { createdAt: 'DESC' },
-      // Ventas pagina y filtra en el navegador. Aplicar aquí un límite por
-      // defecto recorta silenciosamente el universo antes de paginar: una
-      // tienda con más de 100 ventas no puede ver ni buscar las anteriores.
-      // Solo limitar cuando el consumidor lo pide expresamente (p. ej. una
-      // búsqueda auxiliar que necesita las últimas N).
-      ...(filters?.limit && filters.limit > 0 ? { take: filters.limit } : {}),
-    });
+    // Los ids de la página se resuelven aparte: con los `leftJoin` de las
+    // líneas, un `LIMIT` sobre el join cortaría una venta por la mitad.
+    const base = () => {
+      const qb = this.saleRepository
+        .createQueryBuilder('sale')
+        .leftJoin('sale.client', 'client')
+        .where('sale.tenant_id = :tenantId', { tenantId });
+
+      if (filters?.status) qb.andWhere('sale.status = :status', { status: filters.status });
+      if (filters?.warehouseId)
+        qb.andWhere('sale.warehouse_id = :warehouseId', { warehouseId: filters.warehouseId });
+      if (filters?.userId) qb.andWhere('sale.user_id = :userId', { userId: filters.userId });
+      if (filters?.saleChannel)
+        qb.andWhere('sale.sale_channel = :saleChannel', { saleChannel: filters.saleChannel });
+      if (filters?.paid !== undefined)
+        qb.andWhere('sale.is_paid = :paid', { paid: filters.paid });
+      if (filters?.clientPhone?.trim())
+        qb.andWhere('client.phone ILIKE :phone', { phone: `%${filters.clientPhone.trim()}%` });
+
+      // Las fechas llegan como instantes completos: la pantalla sabe en qué
+      // huso está la tienda y el servidor corre en UTC. Con una fecha pelada
+      // («2026-08-18») el día se corría cinco horas.
+      const desde = parseInstant(filters?.from);
+      const hasta = parseInstant(filters?.to);
+      if (desde) qb.andWhere('sale.created_at >= :desde', { desde });
+      if (hasta) qb.andWhere('sale.created_at <= :hasta', { hasta });
+
+      const texto = filters?.q?.trim();
+      if (texto) {
+        // El producto se busca con EXISTS y no con un JOIN: el JOIN dejaría
+        // fuera las demás líneas de la misma factura.
+        qb.andWhere(
+          `(
+            sale.sale_number ILIKE :texto OR
+            sale.invoice_number ILIKE :texto OR
+            client.first_name ILIKE :texto OR
+            client.last_name ILIKE :texto OR
+            client.document_number ILIKE :texto OR
+            EXISTS (
+              SELECT 1 FROM sale_items linea
+              WHERE linea.sale_id = sale.id
+                AND (linea.product_name ILIKE :texto OR linea.variant_sku ILIKE :texto)
+            )
+          )`,
+          { texto: `%${texto}%` },
+        );
+      }
+      return qb;
+    };
+
+    const total = await base().getCount();
+
+    // Lo vendido del filtro completo: es el número que la tienda cuadra con
+    // la caja, así que no puede depender de en qué página esté parada.
+    const suma = await base()
+      .andWhere('sale.status NOT IN (:...anuladas)', {
+        anuladas: [SaleStatus.CANCELLED, SaleStatus.REFUNDED],
+      })
+      .select('COALESCE(SUM(sale.total), 0)', 'suma')
+      .getRawOne<{ suma: string }>();
+
+    const ids = await base()
+      .select('sale.id', 'id')
+      .orderBy('sale.created_at', 'DESC')
+      .addOrderBy('sale.id', 'DESC')
+      .limit(limit)
+      .offset((page - 1) * limit)
+      .getRawMany<{ id: string }>();
+
+    const data = ids.length
+      ? await this.saleRepository.find({
+          where: { id: In(ids.map((row) => row.id)), tenantId },
+          relations: ['client', 'user', 'warehouse', 'items', 'payments', 'accountsReceivable'],
+          order: { createdAt: 'DESC' },
+        })
+      : [];
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+      soldTotal: Number(suma?.suma ?? 0),
+    };
   }
 
   async findOne(id: string, tenantId: string): Promise<Sale> {
@@ -1997,4 +2080,17 @@ export class PosService {
       totals: { totalCredit, totalPaid, totalDebt },
     };
   }
+}
+
+/**
+ * Un instante de la petición, o `undefined` si no vino o no se entiende.
+ *
+ * La pantalla manda ISO con huso (`2026-08-18T00:00:00-05:00`) porque es la
+ * única que sabe en qué huso está la tienda; el servidor corre en UTC. Una
+ * fecha pelada se acepta por compatibilidad y se lee como UTC.
+ */
+function parseInstant(valor?: string): Date | undefined {
+  if (!valor?.trim()) return undefined;
+  const fecha = new Date(valor.trim());
+  return Number.isNaN(fecha.getTime()) ? undefined : fecha;
 }
