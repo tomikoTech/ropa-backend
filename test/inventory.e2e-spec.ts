@@ -207,14 +207,55 @@ describe('Inventory (e2e)', () => {
   });
 
   describe('GET /api/inventory/movements', () => {
-    it('should return movement history', async () => {
+    it('devuelve la página con su total y el resumen del periodo', async () => {
+      // La pantalla pregunta «qué se movió en esta fecha»: necesita paginar y
+      // necesita el resumen calculado sobre todo el filtro, no sobre la
+      // página, porque es el número con el que se cuadra el día.
       const res = await request(app.getHttpServer())
         .get('/api/inventory/movements')
         .set('Authorization', `Bearer ${token}`)
         .expect(200);
 
-      expect(res.body).toBeInstanceOf(Array);
-      expect(res.body.length).toBeGreaterThanOrEqual(1);
+      expect(res.body.data).toBeInstanceOf(Array);
+      expect(res.body.data.length).toBeGreaterThanOrEqual(1);
+      expect(res.body.total).toBeGreaterThanOrEqual(1);
+      expect(res.body.resumen).toMatchObject({
+        entradas: expect.any(Number),
+        salidas: expect.any(Number),
+        referencias: expect.any(Number),
+        ajustes: expect.any(Number),
+      });
+      // Cada fila trae con qué producto fue, sin tener que pedirlo aparte.
+      expect(res.body.data[0].productName).toBeTruthy();
+    });
+
+    it('acota a una fecha sin movimientos', async () => {
+      const res = await request(app.getHttpServer())
+        .get(
+          '/api/inventory/movements?from=2019-01-01T00:00:00-05:00&to=2019-01-02T23:59:59-05:00',
+        )
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+
+      expect(res.body.total).toBe(0);
+      expect(res.body.data).toEqual([]);
+      expect(res.body.resumen.entradas).toBe(0);
+      expect(res.body.resumen.salidas).toBe(0);
+    });
+
+    it('el resumen no cambia al pasar de página', async () => {
+      const completo = await request(app.getHttpServer())
+        .get('/api/inventory/movements?limit=200&page=1')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      const unaFila = await request(app.getHttpServer())
+        .get('/api/inventory/movements?limit=1&page=1')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+
+      expect(unaFila.body.data).toHaveLength(1);
+      expect(unaFila.body.total).toBe(completo.body.total);
+      expect(unaFila.body.resumen).toEqual(completo.body.resumen);
     });
   });
 

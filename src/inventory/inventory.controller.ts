@@ -242,18 +242,30 @@ export class InventoryController {
   @ApiQuery({ name: 'variantId', required: false })
   @ApiQuery({ name: 'movementType', required: false, enum: MovementType })
   @ApiQuery({ name: 'limit', required: false })
+  @ApiQuery({ name: 'page', required: false })
+  @ApiQuery({ name: 'from', required: false, description: 'Instante ISO' })
+  @ApiQuery({ name: 'to', required: false, description: 'Instante ISO' })
+  @ApiQuery({ name: 'q', required: false, description: 'Producto o SKU' })
   getMovements(
     @TenantId() tenantId: string,
     @Query('warehouseId') warehouseId?: string,
     @Query('variantId') variantId?: string,
     @Query('movementType') movementType?: MovementType,
     @Query('limit') limit?: string,
+    @Query('page') page?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('q') q?: string,
   ) {
     return this.inventoryService.getMovements(tenantId, {
       warehouseId,
       variantId,
       movementType,
       limit: limit ? parseInt(limit, 10) : undefined,
+      page: page ? parseInt(page, 10) : undefined,
+      from,
+      to,
+      q,
     });
   }
 

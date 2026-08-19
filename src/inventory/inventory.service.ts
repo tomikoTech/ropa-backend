@@ -34,6 +34,40 @@ import {
 import { RecipeService } from '../products/services/recipe.service.js';
 import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
 
+/** Un movimiento con todo lo que la pantalla necesita para explicarlo. */
+export interface MovimientoConContexto {
+  id: string;
+  date: Date;
+  movementType: MovementType;
+  quantity: number;
+  productId: string | null;
+  productName: string;
+  variantSku: string;
+  variantLabel: string;
+  warehouseName: string;
+  referenceType: string | null;
+  referenceId: string | null;
+  /** Número de factura o de orden, en vez del id interno. */
+  referenceLabel: string | null;
+  /** El cliente que se llevó la mercancía o el proveedor que la trajo. */
+  counterparty: string | null;
+  notes: string | null;
+  userName: string | null;
+  userEmail: string | null;
+}
+
+/**
+ * Un instante de la petición, o `undefined` si no vino o no se entiende.
+ *
+ * La pantalla manda ISO con huso porque es la única que sabe dónde está la
+ * tienda; el servidor corre en UTC.
+ */
+function parseInstante(valor?: string): Date | undefined {
+  if (!valor?.trim()) return undefined;
+  const fecha = new Date(valor.trim());
+  return Number.isNaN(fecha.getTime()) ? undefined : fecha;
+}
+
 @Injectable()
 export class InventoryService {
   constructor(
@@ -988,6 +1022,18 @@ export class InventoryService {
 
   // ─── Movements ───
 
+  /**
+   * Qué se movió en el inventario, con foco en **un día**.
+   *
+   * La pantalla mostraba los últimos cincuenta de toda la bodega, sin fecha y
+   * sin paginar. Una tienda lo dijo así: quiere saber qué se movió en una sola
+   * fecha, sin ir producto por producto. Con cincuenta filas mezcladas, para
+   * revisar un día había que abrir el historial de cada referencia.
+   *
+   * Devuelve además el resumen del periodo —cuánto entró, cuánto salió y
+   * cuántas referencias se tocaron—, que es lo que se mira primero al cuadrar
+   * el día.
+   */
   async getMovements(
     tenantId: string,
     filters?: {
@@ -995,19 +1041,147 @@ export class InventoryService {
       variantId?: string;
       movementType?: MovementType;
       limit?: number;
+      page?: number;
+      from?: string;
+      to?: string;
+      q?: string;
     },
-  ): Promise<StockMovement[]> {
-    const where: Record<string, unknown> = { tenantId };
-    if (filters?.warehouseId) where.warehouseId = filters.warehouseId;
-    if (filters?.variantId) where.variantId = filters.variantId;
-    if (filters?.movementType) where.movementType = filters.movementType;
+  ): Promise<{
+    data: MovimientoConContexto[];
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+    resumen: {
+      entradas: number;
+      salidas: number;
+      referencias: number;
+      ajustes: number;
+    };
+  }> {
+    const limit = Math.min(Math.max(Number(filters?.limit) || 50, 1), 200);
+    const page = Math.max(Number(filters?.page) || 1, 1);
 
-    return this.movementRepository.find({
-      where,
-      relations: ['variant', 'variant.product', 'warehouse', 'createdBy'],
-      order: { createdAt: 'DESC' },
-      take: filters?.limit || 100,
-    });
+    const base = () => {
+      const qb = this.movementRepository
+        .createQueryBuilder('m')
+        .innerJoin('m.variant', 'v')
+        .innerJoin('v.product', 'p')
+        .where('m.tenant_id = :tenantId', { tenantId });
+
+      if (filters?.warehouseId)
+        qb.andWhere('m.warehouse_id = :warehouseId', {
+          warehouseId: filters.warehouseId,
+        });
+      if (filters?.variantId)
+        qb.andWhere('m.variant_id = :variantId', { variantId: filters.variantId });
+      if (filters?.movementType)
+        qb.andWhere('m.movement_type = :movementType', {
+          movementType: filters.movementType,
+        });
+
+      // Instantes completos: el servidor corre en UTC y la pantalla es la que
+      // sabe en qué huso está la tienda. Con una fecha pelada, «hoy» empezaba
+      // a las 7 de la tarde de ayer.
+      const desde = parseInstante(filters?.from);
+      const hasta = parseInstante(filters?.to);
+      if (desde) qb.andWhere('m.created_at >= :desde', { desde });
+      if (hasta) qb.andWhere('m.created_at <= :hasta', { hasta });
+
+      const texto = filters?.q?.trim();
+      if (texto) {
+        qb.andWhere('(p.name ILIKE :texto OR v.sku ILIKE :texto)', {
+          texto: `%${texto}%`,
+        });
+      }
+      return qb;
+    };
+
+    const total = await base().getCount();
+
+    // El resumen del periodo completo, no de la página: es el número con el
+    // que se cuadra el día. El signo se deduce del tipo, igual que en la
+    // pantalla, porque la columna guardada no es comparable entre módulos.
+    const resumenCrudo = await base()
+      .select(
+        `COALESCE(SUM(CASE WHEN m.movement_type = 'IN' THEN ABS(m.quantity)
+                           WHEN m.movement_type = 'TRANSFER' AND m.quantity > 0 THEN m.quantity
+                           ELSE 0 END), 0)`,
+        'entradas',
+      )
+      .addSelect(
+        `COALESCE(SUM(CASE WHEN m.movement_type = 'OUT' THEN ABS(m.quantity)
+                           WHEN m.movement_type = 'TRANSFER' AND m.quantity < 0 THEN ABS(m.quantity)
+                           ELSE 0 END), 0)`,
+        'salidas',
+      )
+      .addSelect(
+        `COUNT(*) FILTER (WHERE m.movement_type = 'ADJUSTMENT')`,
+        'ajustes',
+      )
+      .addSelect('COUNT(DISTINCT p.id)', 'referencias')
+      .getRawOne<{
+        entradas: string;
+        salidas: string;
+        ajustes: string;
+        referencias: string;
+      }>();
+
+    const ids = await base()
+      .select('m.id', 'id')
+      .orderBy('m.created_at', 'DESC')
+      .addOrderBy('m.id', 'DESC')
+      .limit(limit)
+      .offset((page - 1) * limit)
+      .getRawMany<{ id: string }>();
+
+    const filas = ids.length
+      ? await this.movementRepository.find({
+          where: { id: In(ids.map((r) => r.id)), tenantId },
+          relations: ['variant', 'variant.product', 'warehouse', 'createdBy'],
+          order: { createdAt: 'DESC', id: 'DESC' },
+        })
+      : [];
+
+    const data: MovimientoConContexto[] = filas.map((m) => ({
+      id: m.id,
+      date: m.createdAt,
+      movementType: m.movementType,
+      quantity: Number(m.quantity),
+      productId: m.variant?.product?.id ?? null,
+      productName: m.variant?.product?.name ?? '',
+      variantSku: m.variant?.sku ?? '',
+      variantLabel:
+        [m.variant?.size, m.variant?.color].filter(Boolean).join(' / ') || '',
+      warehouseName: m.warehouse?.name ?? '',
+      referenceType: m.referenceType ?? null,
+      referenceId: m.referenceId ?? null,
+      referenceLabel: null,
+      counterparty: null,
+      notes: m.notes ?? null,
+      userName: m.createdBy
+        ? `${m.createdBy.firstName} ${m.createdBy.lastName}`.trim()
+        : null,
+      userEmail: m.createdBy?.email ?? null,
+    }));
+
+    // Con quién fue: el número de factura y el cliente o el proveedor. Dos
+    // consultas por página, no una por fila.
+    await this.agregarContraparte(data, tenantId);
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+      resumen: {
+        entradas: Number(resumenCrudo?.entradas ?? 0),
+        salidas: Number(resumenCrudo?.salidas ?? 0),
+        ajustes: Number(resumenCrudo?.ajustes ?? 0),
+        referencias: Number(resumenCrudo?.referencias ?? 0),
+      },
+    };
   }
 
   /**
