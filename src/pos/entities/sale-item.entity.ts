@@ -50,6 +50,27 @@ export class SaleItem extends TenantAwareEntity {
   @Column({ name: 'stock_unit_id', type: 'uuid', nullable: true })
   stockUnitId: string | null;
 
+  /**
+   * Qué se vendió: una caja cerrada, un par etiquetado, o nada de eso.
+   *
+   * Es un snapshot y no una consulta al bulto a propósito: la caja se abre,
+   * se traslada y cambia de estado después de la venta, y la factura tiene
+   * que seguir diciendo lo que se entregó ese día.
+   */
+  @Column({ name: 'unit_kind', type: 'varchar', nullable: true })
+  unitKind: 'BOX' | 'UNIT' | null;
+
+  /**
+   * El surtido real de la caja: qué tallas trae y cuántos pares de cada una.
+   *
+   * Sin esto la línea guardaba la talla de la **variante equivalente** —la
+   * primera del producto—, así que una caja surtida 36-39 quedaba registrada
+   * como «talla 36». El mayorista se llevaba una factura que no decía qué
+   * había recibido, y en el historial no había forma de reconstruirlo.
+   */
+  @Column({ name: 'box_contents', type: 'jsonb', nullable: true })
+  boxContents: { size: string; quantity: number }[] | null;
+
   // Snapshot fields — preserve data at time of sale
   @Column({ name: 'product_name' })
   productName: string;

@@ -20,6 +20,7 @@ import { ReceiptService } from './services/receipt.service.js';
 import { ClientsModule } from '../clients/clients.module.js';
 import { Promoter } from '../promoters/promoter.entity.js';
 import { PurchaseBoxLine } from '../purchases/entities/purchase-box-line.entity.js';
+import { StockUnitContent } from '../inventory/entities/stock-unit-content.entity.js';
 import { StockUnitEvent } from '../inventory/entities/stock-unit-event.entity.js';
 
 @Module({
@@ -39,6 +40,7 @@ import { StockUnitEvent } from '../inventory/entities/stock-unit-event.entity.js
       Reservation,
       Promoter,
       PurchaseBoxLine,
+      StockUnitContent,
     ]),
     ClientsModule,
   ],

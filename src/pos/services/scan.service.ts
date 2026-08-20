@@ -9,6 +9,7 @@ import {
 } from '../../inventory/entities/stock-unit.entity.js';
 import { Stock } from '../../inventory/entities/stock.entity.js';
 import { PurchaseBoxLine } from '../../purchases/entities/purchase-box-line.entity.js';
+import { StockUnitContent } from '../../inventory/entities/stock-unit-content.entity.js';
 
 export interface ScanResult {
   /** `UNIT` = bulto etiquetado; `VARIANT` = producto suelto de siempre. */
@@ -37,6 +38,19 @@ export interface ScanResult {
   warehouseId: string | null;
   /** Precio mínimo por unidad; null = sin restricción. */
   minimumSalePrice: number | null;
+  /**
+   * Qué trae la caja: talla y cuántos pares de cada una. Vacío en los pares
+   * sueltos y en los productos de siempre.
+   */
+  contents: { size: string; quantity: number }[];
+  /**
+   * De dónde salió el precio por par. La caja completa se cobra al por mayor
+   * cuando el producto tiene ese precio: vender veinticuatro pares de una vez
+   * no es una venta de mostrador.
+   */
+  priceSource: 'WHOLESALE' | 'PURCHASE' | 'BASE';
+  /** Precio de un par. El total de la línea es este por la cantidad. */
+  unitPrice: number;
 }
 
 /**
@@ -58,6 +72,8 @@ export class ScanService {
     private readonly stockRepo: Repository<Stock>,
     @InjectRepository(PurchaseBoxLine)
     private readonly boxLineRepo: Repository<PurchaseBoxLine>,
+    @InjectRepository(StockUnitContent)
+    private readonly contentRepo: Repository<StockUnitContent>,
   ) {}
 
   async resolve(barcode: string, tenantId: string): Promise<ScanResult> {
@@ -81,9 +97,45 @@ export class ScanService {
             where: { id: unit.purchaseBoxLineId, tenantId },
           })
         : null;
-      const basePrice = Number(
-        purchaseLine?.salePrice ?? unit.product?.basePrice ?? 0,
-      );
+      // El precio de un par, y de dónde sale. Una caja cerrada se vende
+      // completa —doce, veinticuatro pares de un golpe—, así que si el
+      // producto tiene precio al por mayor es ese el que manda: cobrarla a
+      // precio de mostrador obligaba a corregir cada venta a mano.
+      const mayorista = Number(unit.product?.wholesalePrice ?? 0);
+      const deLaCompra = Number(purchaseLine?.salePrice ?? 0);
+      const deLista = Number(unit.product?.basePrice ?? 0);
+      const esCaja = unit.kind === StockUnitKind.BOX;
+      const priceSource: ScanResult['priceSource'] =
+        esCaja && mayorista > 0
+          ? 'WHOLESALE'
+          : deLaCompra > 0
+            ? 'PURCHASE'
+            : 'BASE';
+      const basePrice =
+        priceSource === 'WHOLESALE'
+          ? mayorista
+          : priceSource === 'PURCHASE'
+            ? deLaCompra
+            : deLista;
+
+      // Lo que hay adentro. Se lee del contenido detallado de esa caja y no de
+      // la curva del renglón: la curva puede cambiar después, y lo que se
+      // entrega es lo que la caja trae.
+      const contents = esCaja
+        ? (
+            await this.contentRepo.find({
+              where: { boxUnitId: unit.id, tenantId },
+              relations: { size: true },
+            })
+          )
+            .filter((row) => Number(row.actualQuantity) > 0)
+            .map((row) => ({
+              size: row.size?.name ?? '',
+              quantity: Number(row.actualQuantity),
+            }))
+            .sort((a, b) => a.size.localeCompare(b.size, 'es', { numeric: true }))
+        : [];
+
       return {
         source: 'STOCK_UNIT',
         variantId: unit.variantId ?? unit.variant?.id ?? null,
@@ -98,6 +150,9 @@ export class ScanService {
         quantity: unit.quantity,
         // La caja se cobra por su contenido; el par, por su precio.
         suggestedPrice: basePrice * unit.quantity,
+        unitPrice: basePrice,
+        priceSource,
+        contents,
         stockUnitId: unit.id,
         kind: unit.kind,
         available: null,
@@ -171,6 +226,11 @@ export class ScanService {
       minimumSalePrice: variant.product?.minimumSalePrice
         ? Number(variant.product.minimumSalePrice)
         : null,
+      contents: [],
+      priceSource: 'BASE',
+      unitPrice: Number(
+        variant.priceOverride ?? variant.product?.basePrice ?? 0,
+      ),
     };
   }
 
@@ -179,7 +239,7 @@ export class ScanService {
     status: StockUnitStatus,
     kind: StockUnitKind,
   ): string {
-    const what = kind === StockUnitKind.BOX ? 'La caja' : 'La unidad';
+    const what = kind === StockUnitKind.BOX ? 'La caja' : 'El par';
     switch (status) {
       case StockUnitStatus.SOLD:
         return `${what} ya fue vendida.`;

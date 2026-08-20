@@ -42,7 +42,12 @@ import { Product } from '../products/entities/product.entity.js';
 import { Warehouse } from './entities/warehouse.entity.js';
 import { Stand } from './entities/stand.entity.js';
 import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
-import { IntakeBoxesDto } from './dto/stock-unit.dto.js';
+import { Shelf } from './entities/shelf.entity.js';
+import { sortSizes } from './box-description.js';
+import {
+  IntakeBoxesDto,
+  TransferUnitsDto,
+} from './dto/stock-unit.dto.js';
 
 /** Identificadores que llegan por query string: se validan antes de consultar. */
 /**
@@ -53,6 +58,19 @@ const INTAKE_ORDER_SEQUENCE = 0;
 
 /** Origen de los movimientos y eventos del ingreso directo. */
 const INTAKE_REFERENCE = 'STOCK_UNIT_INTAKE';
+
+/** Origen de los movimientos y eventos del traslado de bultos. */
+const TRANSFER_REFERENCE = 'STOCK_UNIT_TRANSFER';
+
+/** Por qué un código no se puede mover, en palabras de la bodega. */
+const DESCRIPCION_DE_ESTADO: Record<StockUnitStatus, string> = {
+  [StockUnitStatus.IN_STOCK]: 'está disponible',
+  [StockUnitStatus.SOLD]: 'ya se vendió',
+  [StockUnitStatus.CONSIGNED]: 'está en la calle, en consignación',
+  [StockUnitStatus.TRANSFERRED]: 'va en camino a otra bodega',
+  [StockUnitStatus.WRITTEN_OFF]: 'fue dado de baja',
+  [StockUnitStatus.SPLIT]: 'es una caja que ya se abrió: traslada sus pares',
+};
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -508,6 +526,185 @@ export class StockUnitsService {
   }
 
   /**
+   * Traslada cajas o pares a otra bodega, moviendo **el bulto y su
+   * inventario juntos**.
+   *
+   * El traslado de siempre (`transferStock`) mueve el agregado por variante y
+   * no toca el bulto: la caja seguía figurando en la bodega de origen, que
+   * quedaba en cero con una caja encima, y al intentar abrirla saltaba «el
+   * stock agregado de la caja no alcanza». Acá se mueven las dos cosas.
+   *
+   * El bulto **no pasa por `TRANSFERRED`**: ese estado significa «va en
+   * camino» y lo usa la remisión con confirmación de recepción
+   * (`InternalRequest`). Un traslado directo llega en el mismo acto, así que
+   * la caja sigue disponible y solo cambia de bodega. Si se marcara en
+   * tránsito, en el destino no se podría vender.
+   */
+  async transferUnits(
+    dto: TransferUnitsDto,
+    userId: string,
+    tenantId: string,
+  ): Promise<StockUnit[]> {
+    return this.dataSource.transaction(async (m) => {
+      const destino = await m
+        .getRepository(Warehouse)
+        .findOne({ where: { id: dto.toWarehouseId, tenantId } });
+      if (!destino) throw new NotFoundException('Bodega destino no encontrada');
+
+      if (dto.toStandId) {
+        // El estante tiene que ser de la bodega a la que llega: si no, la
+        // etiqueta diría que está en un pasillo de la otra sede.
+        const stand = await m
+          .getRepository(Stand)
+          .createQueryBuilder('stand')
+          .innerJoin(Shelf, 'shelf', 'shelf.id = stand.shelfId')
+          .where('stand.id = :standId', { standId: dto.toStandId })
+          .andWhere('stand.tenantId = :tenantId', { tenantId })
+          .andWhere('shelf.warehouse_id = :warehouseId', {
+            warehouseId: dto.toWarehouseId,
+          })
+          .getOne();
+        if (!stand) {
+          throw new BadRequestException(
+            'El estante elegido no pertenece a la bodega destino.',
+          );
+        }
+      }
+
+      const unitRepo = m.getRepository(StockUnit);
+      const units = await unitRepo
+        .createQueryBuilder('unit')
+        .setLock('pessimistic_write')
+        .where('unit.id IN (:...ids)', { ids: dto.ids })
+        .andWhere('unit.tenantId = :tenantId', { tenantId })
+        .getMany();
+      if (units.length !== dto.ids.length) {
+        throw new NotFoundException(
+          'Alguno de los códigos no existe en esta tienda.',
+        );
+      }
+
+      const stockRepo = m.getRepository(Stock);
+      const movementRepo = m.getRepository(StockMovement);
+      const eventRepo = m.getRepository(StockUnitEvent);
+      const motivo = dto.notes?.trim();
+
+      for (const unit of units) {
+        if (unit.status !== StockUnitStatus.IN_STOCK) {
+          throw new BadRequestException(
+            `El código ${unit.barcode} no está disponible para trasladar: ${DESCRIPCION_DE_ESTADO[unit.status]}.`,
+          );
+        }
+        if (unit.warehouseId === dto.toWarehouseId) {
+          throw new BadRequestException(
+            `El código ${unit.barcode} ya está en esa bodega.`,
+          );
+        }
+        if (!unit.variantId) {
+          throw new BadRequestException(
+            `El código ${unit.barcode} no tiene variante asociada y no se puede mover su inventario.`,
+          );
+        }
+
+        const origenId = unit.warehouseId;
+        const cantidad = Number(unit.quantity);
+
+        const origen = await stockRepo
+          .createQueryBuilder('stock')
+          .setLock('pessimistic_write')
+          .where('stock.variantId = :variantId', { variantId: unit.variantId })
+          .andWhere('stock.warehouseId = :warehouseId', {
+            warehouseId: origenId,
+          })
+          .andWhere('stock.tenantId = :tenantId', { tenantId })
+          .getOne();
+        if (!origen || Number(origen.quantity) < cantidad) {
+          throw new BadRequestException(
+            `El inventario de la bodega de origen no alcanza para mover ${unit.barcode} (${cantidad} unidades). Cuadra el inventario antes de trasladar.`,
+          );
+        }
+        let llegada = await stockRepo.findOne({
+          where: {
+            variantId: unit.variantId,
+            warehouseId: dto.toWarehouseId,
+            tenantId,
+          },
+        });
+        if (!llegada) {
+          llegada = stockRepo.create({
+            variantId: unit.variantId,
+            warehouseId: dto.toWarehouseId,
+            quantity: 0,
+            tenantId,
+          });
+        }
+        origen.quantity = Number(origen.quantity) - cantidad;
+        llegada.quantity = Number(llegada.quantity) + cantidad;
+        await stockRepo.save(origen);
+        await stockRepo.save(llegada);
+
+        // Dos filas, como cualquier traslado: el signo dice de qué bodega
+        // salió y a cuál entró.
+        const nota = motivo
+          ? `Traslado de ${unit.barcode} · ${motivo}`
+          : `Traslado de ${unit.barcode}`;
+        await movementRepo.save([
+          movementRepo.create({
+            variantId: unit.variantId,
+            warehouseId: origenId,
+            movementType: MovementType.TRANSFER,
+            quantity: -cantidad,
+            referenceType: TRANSFER_REFERENCE,
+            referenceId: unit.id,
+            notes: nota,
+            createdById: userId,
+            tenantId,
+          }),
+          movementRepo.create({
+            variantId: unit.variantId,
+            warehouseId: dto.toWarehouseId,
+            movementType: MovementType.TRANSFER,
+            quantity: cantidad,
+            referenceType: TRANSFER_REFERENCE,
+            referenceId: unit.id,
+            notes: nota,
+            createdById: userId,
+            tenantId,
+          }),
+        ]);
+
+        // El estante viejo es de la otra bodega: se limpia salvo que digan a
+        // cuál llega.
+        unit.warehouseId = dto.toWarehouseId;
+        unit.standId = dto.toStandId ?? null;
+        await unitRepo.save(unit);
+
+        await eventRepo.save(
+          eventRepo.create({
+            stockUnitId: unit.id,
+            eventType: StockUnitEventType.TRANSFERRED,
+            fromStatus: StockUnitStatus.IN_STOCK,
+            toStatus: StockUnitStatus.IN_STOCK,
+            referenceType: TRANSFER_REFERENCE,
+            referenceId: unit.id,
+            userId,
+            metadata: {
+              fromWarehouseId: origenId,
+              toWarehouseId: dto.toWarehouseId,
+              standId: dto.toStandId ?? null,
+              quantity: cantidad,
+              notes: motivo ?? null,
+            },
+            tenantId,
+          }),
+        );
+      }
+
+      return units;
+    });
+  }
+
+  /**
    * Consecutivo del ingreso directo dentro del día.
    *
    * Los ingresos sin compra comparten el tramo de orden (`0000`), así que lo
@@ -705,7 +902,7 @@ export class StockUnitsService {
         );
         if (missingSize) {
           throw new BadRequestException(
-            'Falta una variante activa para una de las tallas de la curva y el color de la caja. Créala antes de abrir el bulto.',
+            'Falta una variante activa para una de las tallas de la curva y el color de la caja. Créala antes de abrir la caja.',
           );
         }
 
@@ -1112,7 +1309,7 @@ export class StockUnitsService {
       where: { barcode, tenantId },
       relations: { product: true, color: true, size: true, stand: true },
     });
-    if (!unit) throw new NotFoundException('No existe un bulto con ese código');
+    if (!unit) throw new NotFoundException('No existe ninguna caja ni par con ese código');
     return unit;
   }
 
@@ -1292,6 +1489,28 @@ export class StockUnitsService {
     const childrenByBox = new Map(
       childCounts.map((row) => [row.parentId, Number(row.total)]),
     );
+    // Qué trae cada caja. Sin esto, elegir una caja en el punto de venta —o
+    // mirarla en el listado— obliga a abrir su detalle una por una para saber
+    // qué tallas hay adentro.
+    const boxIds = units
+      .filter((unit) => unit.kind === StockUnitKind.BOX)
+      .map((unit) => unit.id);
+    const contentRows = boxIds.length
+      ? await this.contentRepo.find({
+          where: { boxUnitId: In(boxIds), tenantId: params.tenantId },
+          relations: { size: true },
+        })
+      : [];
+    const contentsByBox = new Map<string, { size: string; quantity: number }[]>();
+    for (const row of contentRows) {
+      if (Number(row.actualQuantity) <= 0) continue;
+      const actual = contentsByBox.get(row.boxUnitId) ?? [];
+      actual.push({
+        size: row.size?.name ?? '',
+        quantity: Number(row.actualQuantity),
+      });
+      contentsByBox.set(row.boxUnitId, actual);
+    }
     const lineById = new Map(lines.map((line) => [line.id, line]));
     const saleByUnit = new Map<string, SaleItem>();
     for (const item of saleItems) {
@@ -1318,6 +1537,7 @@ export class StockUnitsService {
           pairSequence: unit.pairSequence,
           parentUnitId: unit.parentUnitId,
           childCount: childrenByBox.get(unit.id) ?? 0,
+          contents: sortSizes(contentsByBox.get(unit.id) ?? []),
           product: {
             id: unit.product.id,
             name: unit.product.name,
@@ -1408,7 +1628,7 @@ export class StockUnitsService {
       !Object.values(StockUnitKind).includes(kind as StockUnitKind)
     ) {
       throw new BadRequestException(
-        'Tipo de bulto inválido: solo cajas o pares.',
+        'Tipo inválido: solo cajas o pares.',
       );
     }
     if (

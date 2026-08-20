@@ -12,8 +12,14 @@ import { ProductVariant } from '../products/entities/product-variant.entity.js';
 import { Stock } from '../inventory/entities/stock.entity.js';
 import {
   StockUnit,
+  StockUnitKind,
   StockUnitStatus,
 } from '../inventory/entities/stock-unit.entity.js';
+import { StockUnitContent } from '../inventory/entities/stock-unit-content.entity.js';
+import {
+  describeBoxSizes,
+  sortSizes,
+} from '../inventory/box-description.js';
 import {
   StockUnitEvent,
   StockUnitEventType,
@@ -398,16 +404,16 @@ export class PosService {
               lock: { mode: 'pessimistic_write' },
             });
             if (!unit) {
-              throw new NotFoundException('El bulto escaneado no existe');
+              throw new NotFoundException('El código escaneado no existe');
             }
             if (unit.status !== StockUnitStatus.IN_STOCK) {
               throw new BadRequestException(
-                `El bulto ${unit.barcode} ya no está disponible para la venta.`,
+                `${unit.kind === StockUnitKind.BOX ? 'La caja' : 'El par'} ${unit.barcode} ya no está disponible para la venta.`,
               );
             }
             if (Number(unit.quantity) !== data.quantity) {
               throw new BadRequestException(
-                `El bulto ${unit.barcode} se vende completo: contiene ${unit.quantity} unidades.`,
+                `La caja ${unit.barcode} se vende completa: trae ${unit.quantity} pares.`,
               );
             }
             soldUnit = unit;
@@ -420,13 +426,43 @@ export class PosService {
             ? Number(soldUnit.cost) || 0
             : Number(data.variant.product.costPrice) || 0;
 
+          // Qué se entregó de verdad. Una caja no tiene talla: trae un
+          // surtido, y hasta ahora en esa columna se copiaba la talla de la
+          // variante equivalente —la primera del producto—, así que una caja
+          // 36-39 quedaba facturada como «talla 36». El detalle se lee de la
+          // propia caja, no de la curva del renglón: la curva puede cambiar
+          // después y lo que se entrega es lo que la caja trae.
+          let boxContents: { size: string; quantity: number }[] | null = null;
+          if (soldUnit?.kind === StockUnitKind.BOX) {
+            const filas = await manager
+              .getRepository(StockUnitContent)
+              .find({
+                where: { boxUnitId: soldUnit.id, tenantId },
+                relations: { size: true },
+              });
+            const detalle = sortSizes(
+              filas
+                .filter((fila) => Number(fila.actualQuantity) > 0)
+                .map((fila) => ({
+                  size: fila.size?.name ?? '',
+                  quantity: Number(fila.actualQuantity),
+                })),
+            );
+            boxContents = detalle.length > 0 ? detalle : null;
+          }
+          const variantSize = soldUnit?.kind === StockUnitKind.BOX
+            ? describeBoxSizes(boxContents ?? [])
+            : data.variant.sizeName;
+
           const saleItem = saleItemRepo.create({
             saleId: savedSale.id,
             variantId: data.variant.id,
             productName: data.variant.product.name,
             variantSku: data.variant.sku,
-            variantSize: data.variant.sizeName,
+            variantSize,
             variantColor: data.variant.colorName,
+            unitKind: soldUnit?.kind ?? null,
+            boxContents,
             quantity: data.quantity,
             unitPrice: data.lineCalc.unitPrice,
             unitCost,
@@ -1178,6 +1214,13 @@ export class PosService {
                     ? Number(previous.unitCost)
                     : Number(variant.product.costPrice) || 0,
                 stockUnitId: keptStockUnitId,
+                // Qué era esa línea —caja o par— y con qué surtido: se
+                // conserva junto al código físico. Si se perdiera, editar el
+                // precio de una factura le borraría a la caja su contenido.
+                unitKind: keptStockUnitId ? (previous?.unitKind ?? null) : null,
+                boxContents: keptStockUnitId
+                  ? (previous?.boxContents ?? null)
+                  : null,
                 promoterId: previous?.promoterId ?? null,
                 promoterName: previous?.promoterName ?? null,
                 discountPercent:

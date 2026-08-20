@@ -131,3 +131,35 @@ export class IntakeBoxesDto {
   @MaxLength(300)
   notes?: string;
 }
+
+/**
+ * Traslado de cajas o pares etiquetados entre bodegas.
+ *
+ * El traslado de siempre mueve el inventario agregado por variante y **no
+ * toca el bulto**: la caja se quedaba figurando en la bodega de origen, que
+ * quedaba con cero unidades y una caja encima que ya no se podía abrir. Acá se
+ * mueven las dos cosas juntas, que es lo que pasa en la realidad cuando
+ * alguien carga la caja en el camión.
+ */
+export class TransferUnitsDto {
+  @ApiProperty({ type: [String], description: 'Bultos a trasladar' })
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsUUID('4', { each: true })
+  ids: string[];
+
+  @ApiProperty({ description: 'Bodega a la que llega la mercancía' })
+  @IsUUID()
+  toWarehouseId: string;
+
+  @ApiPropertyOptional({ description: 'Estante dentro de la bodega destino' })
+  @IsOptional()
+  @IsUUID()
+  toStandId?: string;
+
+  @ApiPropertyOptional({ description: 'Por qué se traslada' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  notes?: string;
+}

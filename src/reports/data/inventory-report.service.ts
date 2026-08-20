@@ -415,7 +415,7 @@ export class InventoryReportService {
     const warnings = rows.length
       ? []
       : [
-          'No hay bultos etiquetados. La ubicación por estantería y stand solo ' +
+          'No hay cajas ni pares etiquetados. La ubicación por estantería y stand solo ' +
             'aplica al inventario que se maneja por cajas con código propio ' +
             '(se activa por producto). El resto del inventario se ve agrupado ' +
             'por bodega.',
@@ -437,7 +437,7 @@ export class InventoryReportService {
       ],
       rows,
       totals: [
-        { key: 'bultos', label: 'Bultos', type: 'number', value: rows.length },
+        { key: 'bultos', label: 'Cajas y pares', type: 'number', value: rows.length },
         { key: 'cajas', label: 'Cajas cerradas', type: 'number', value: cajas },
         {
           key: 'unidades',

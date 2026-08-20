@@ -17,6 +17,7 @@ import { Stock } from '../inventory/entities/stock.entity.js';
 import { StockMovement } from '../inventory/entities/stock-movement.entity.js';
 import {
   StockUnit,
+  StockUnitKind,
   StockUnitStatus,
 } from '../inventory/entities/stock-unit.entity.js';
 import {
@@ -323,10 +324,10 @@ export class StreetService {
             const unit = await unitRepo.findOne({
               where: { id: line.stockUnitId, tenantId },
             });
-            if (!unit) throw new NotFoundException('El bulto no existe');
+            if (!unit) throw new NotFoundException('El código no existe');
             if (unit.status !== StockUnitStatus.IN_STOCK) {
               throw new BadRequestException(
-                `El bulto ${unit.barcode} ya no está disponible.`,
+                `${unit.kind === StockUnitKind.BOX ? 'La caja' : 'El par'} ${unit.barcode} ya no está disponible.`,
               );
             }
             await unitRepo.update(

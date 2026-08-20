@@ -14,6 +14,7 @@ import { UserId } from '../common/decorators/user-id.decorator.js';
 import {
   ReceiveBoxesDto,
   IntakeBoxesDto,
+  TransferUnitsDto,
   MarkPrintedDto,
   UpdateBoxContentsDto,
 } from './dto/stock-unit.dto.js';
@@ -29,7 +30,7 @@ export class StockUnitsController {
   constructor(private readonly units: StockUnitsService) {}
 
   @Get('by-barcode/:barcode')
-  @ApiOperation({ summary: 'Buscar un bulto por su código de barras' })
+  @ApiOperation({ summary: 'Buscar una caja o un par por su código de barras' })
   findByBarcode(
     @Param('barcode') barcode: string,
     @TenantId() tenantId: string,
@@ -77,7 +78,7 @@ export class StockUnitsController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'Bultos de un renglón de compra' })
+  @ApiOperation({ summary: 'Cajas y pares de un renglón de compra' })
   findByBoxLine(
     @Query('boxLineId', ParseUUIDPipe) boxLineId: string,
     @TenantId() tenantId: string,
@@ -87,7 +88,7 @@ export class StockUnitsController {
 
   @Post('receive/:boxLineId')
   @ApiOperation({
-    summary: 'Recibir cajas de un renglón: crea los bultos y suma inventario',
+    summary: 'Recibir cajas de un renglón: las crea con su código y suma inventario',
   })
   receive(
     @Param('boxLineId', ParseUUIDPipe) boxLineId: string,
@@ -108,6 +109,18 @@ export class StockUnitsController {
     @TenantId() tenantId: string,
   ) {
     return this.units.intakeBoxes(dto, userId, tenantId);
+  }
+
+  @Post('transfer')
+  @ApiOperation({
+    summary: 'Trasladar cajas o pares a otra bodega, con su inventario',
+  })
+  transfer(
+    @Body() dto: TransferUnitsDto,
+    @UserId() userId: string,
+    @TenantId() tenantId: string,
+  ) {
+    return this.units.transferUnits(dto, userId, tenantId);
   }
 
   @Post(':id/split')

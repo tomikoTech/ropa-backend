@@ -6,7 +6,7 @@ import { tryLogin } from './helpers/login';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { isValidBarcode } from '../src/inventory/barcode.util';
 
-describe('Recepción por cajas y apertura de bultos (e2e)', () => {
+describe('Recepción por cajas y apertura de cajas (e2e)', () => {
   let app: INestApplication;
   let token: string;
   let orderId: string;
@@ -155,7 +155,7 @@ describe('Recepción por cajas y apertura de bultos (e2e)', () => {
     await app.close();
   });
 
-  it('recibe parte de las cajas y crea un bulto por caja', async () => {
+  it('recibe parte de las cajas y crea una fila por caja', async () => {
     const res = await request(app.getHttpServer())
       .post(`/api/stock-units/receive/${boxLineId}`)
       .set(auth())
@@ -233,7 +233,7 @@ describe('Recepción por cajas y apertura de bultos (e2e)', () => {
     expect(String(res.body.message)).toMatch(/no hay cajas pendientes/i);
   });
 
-  it('encuentra un bulto por su código de barras', async () => {
+  it('encuentra una caja por su código de barras', async () => {
     const list = await request(app.getHttpServer())
       .get(`/api/stock-units?boxLineId=${boxLineId}`)
       .set(auth());
@@ -915,7 +915,7 @@ describe('Recepción por cajas y apertura de bultos (e2e)', () => {
     expect(adjusted.body.isFullyPaid).toBe(true);
   });
 
-  it('genera las etiquetas en ZPL, una por bulto', async () => {
+  it('genera las etiquetas en ZPL, una por caja', async () => {
     const res = await request(app.getHttpServer())
       .post('/api/labels/zpl')
       .set(auth())
@@ -983,7 +983,7 @@ describe('Recepción por cajas y apertura de bultos (e2e)', () => {
         payments: [{ method: 'EFECTIVO', amount: 500000 }],
       });
     expect(partial.status).toBe(400);
-    expect(String(partial.body.message)).toMatch(/se vende completo/i);
+    expect(String(partial.body.message)).toMatch(/se vende completa/i);
 
     await request(app.getHttpServer())
       .post('/api/pos/sales')
@@ -1295,7 +1295,7 @@ describe('Recepción por cajas y apertura de bultos (e2e)', () => {
       expect(cajas.body.data[0].childCount).toBeGreaterThan(0);
     });
 
-    it('rechaza un tipo de bulto que no existe', async () => {
+    it('rechaza un tipo que no existe', async () => {
       await request(app.getHttpServer())
         .get('/api/stock-units/search')
         .query({ kind: 'PALETA' })
@@ -1396,6 +1396,319 @@ describe('Recepción por cajas y apertura de bultos (e2e)', () => {
         (u: { orderNumber: string | null }) => u.orderNumber === null,
       );
       expect(sinOrden.length).toBeGreaterThanOrEqual(3);
+    });
+  });
+
+  /**
+   * El traslado de siempre movía el inventario agregado y **no tocaba el
+   * bulto**: la caja seguía figurando en la bodega de origen, que quedaba en
+   * cero con una caja encima, y al intentar abrirla saltaba «el stock
+   * agregado de la caja no alcanza».
+   */
+  describe('trasladar cajas a otra bodega', () => {
+    const stockDeVariante = async (variantId: string, warehouseId: string) => {
+      const res = await request(app.getHttpServer())
+        .get(`/api/inventory/stock/warehouse/${warehouseId}`)
+        .set(auth())
+        .expect(200);
+      const fila = res.body.find(
+        (row: { variant: { id: string } }) => row.variant.id === variantId,
+      );
+      return Number(fila?.quantity ?? 0);
+    };
+
+    const ingresarCaja = async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/stock-units/intake')
+        .set(auth())
+        .send({ productId, sizeCurveId: curveId, boxes: 1, warehouseId })
+        .expect(201);
+      return res.body[0] as {
+        id: string;
+        barcode: string;
+        variantId: string;
+        quantity: number;
+      };
+    };
+
+    it('mueve la caja y su inventario juntos', async () => {
+      const caja = await ingresarCaja();
+      const antesOrigen = await stockDeVariante(caja.variantId, warehouseId);
+      const antesDestino = await stockDeVariante(
+        caja.variantId,
+        returnWarehouseId,
+      );
+
+      const res = await request(app.getHttpServer())
+        .post('/api/stock-units/transfer')
+        .set(auth())
+        .send({
+          ids: [caja.id],
+          toWarehouseId: returnWarehouseId,
+          notes: 'Se llevó el camión',
+        })
+        .expect(201);
+      expect(res.body[0].warehouseId).toBe(returnWarehouseId);
+      // Sigue disponible: un traslado directo llega en el mismo acto, no va
+      // «en camino» como una remisión con confirmación.
+      expect(res.body[0].status).toBe('IN_STOCK');
+
+      expect(await stockDeVariante(caja.variantId, warehouseId)).toBe(
+        antesOrigen - caja.quantity,
+      );
+      expect(await stockDeVariante(caja.variantId, returnWarehouseId)).toBe(
+        antesDestino + caja.quantity,
+      );
+
+      // Y queda contado como traslado en las dos bodegas.
+      const historial = await request(app.getHttpServer())
+        .get(`/api/inventory/products/${productId}/history?limit=100`)
+        .set(auth())
+        .expect(200);
+      const movimientos = historial.body.movements.filter(
+        (m: { referenceType: string | null }) =>
+          m.referenceType === 'STOCK_UNIT_TRANSFER',
+      );
+      expect(movimientos.length).toBeGreaterThanOrEqual(2);
+      expect(
+        movimientos.some((m: { notes: string }) =>
+          m.notes.includes('Se llevó el camión'),
+        ),
+      ).toBe(true);
+    });
+
+    it('la caja trasladada se puede abrir en su nueva bodega', async () => {
+      // Ésta es la prueba de que se acabó el descuadre: antes el inventario se
+      // quedaba en la bodega vieja y abrirla era imposible.
+      const caja = await ingresarCaja();
+      await request(app.getHttpServer())
+        .post('/api/stock-units/transfer')
+        .set(auth())
+        .send({ ids: [caja.id], toWarehouseId: returnWarehouseId })
+        .expect(201);
+
+      const abierta = await request(app.getHttpServer())
+        .post(`/api/stock-units/${caja.id}/split`)
+        .set(auth())
+        .expect(201);
+      expect(abierta.body.units.length).toBe(caja.quantity);
+      for (const par of abierta.body.units) {
+        expect(par.warehouseId).toBe(returnWarehouseId);
+      }
+    });
+
+    it('no deja trasladar a la bodega en la que ya está', async () => {
+      const caja = await ingresarCaja();
+      const res = await request(app.getHttpServer())
+        .post('/api/stock-units/transfer')
+        .set(auth())
+        .send({ ids: [caja.id], toWarehouseId: warehouseId })
+        .expect(400);
+      expect(res.body.message).toMatch(/ya está en esa bodega/i);
+    });
+
+    it('explica por qué una caja abierta no se traslada', async () => {
+      const caja = await ingresarCaja();
+      await request(app.getHttpServer())
+        .post(`/api/stock-units/${caja.id}/split`)
+        .set(auth())
+        .expect(201);
+
+      const res = await request(app.getHttpServer())
+        .post('/api/stock-units/transfer')
+        .set(auth())
+        .send({ ids: [caja.id], toWarehouseId: returnWarehouseId })
+        .expect(400);
+      expect(res.body.message).toMatch(/ya se abrió|sus pares/i);
+    });
+
+    it('no manda la caja a un estante de otra bodega', async () => {
+      const caja = await ingresarCaja();
+      const shelf = await request(app.getHttpServer())
+        .post(`/api/inventory/warehouses/${warehouseId}/shelves`)
+        .set(auth())
+        .send({ name: `Estante origen ${ts}` });
+      const stand = await request(app.getHttpServer())
+        .post(`/api/inventory/shelves/${shelf.body.id}/stands`)
+        .set(auth())
+        .send({ name: `A${ts.toString().slice(-4)}` });
+
+      const res = await request(app.getHttpServer())
+        .post('/api/stock-units/transfer')
+        .set(auth())
+        .send({
+          ids: [caja.id],
+          toWarehouseId: returnWarehouseId,
+          toStandId: stand.body.id,
+        })
+        .expect(400);
+      expect(res.body.message).toMatch(/no pertenece a la bodega destino/i);
+    });
+  });
+
+  /**
+   * «El cálculo bueno del precio según los pares y cantidades de la caja, y
+   * que se diferencie de los productos normales». Antes la caja se cobraba a
+   * precio de mostrador y la línea guardaba la talla de la variante
+   * equivalente: una caja 36-39 quedaba facturada como «talla 36».
+   */
+  describe('vender una caja: precio y descripción', () => {
+    const ingresarCaja = async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/stock-units/intake')
+        .set(auth())
+        .send({ productId, sizeCurveId: curveId, boxes: 1, warehouseId })
+        .expect(201);
+      return res.body[0] as { id: string; barcode: string; quantity: number };
+    };
+
+    it('cobra la caja al por mayor y por todos sus pares', async () => {
+      await request(app.getHttpServer())
+        .patch(`/api/products/${productId}`)
+        .set(auth())
+        .send({ basePrice: 100000, wholesalePrice: 70000 })
+        .expect(200);
+      const caja = await ingresarCaja();
+
+      const scan = await request(app.getHttpServer())
+        .get(`/api/pos/scan/${caja.barcode}`)
+        .set(auth())
+        .expect(200);
+
+      expect(scan.body.kind).toBe('BOX');
+      expect(scan.body.priceSource).toBe('WHOLESALE');
+      expect(scan.body.unitPrice).toBe(70000);
+      expect(scan.body.quantity).toBe(caja.quantity);
+      // El total de la línea: precio por par × pares de la caja.
+      expect(scan.body.suggestedPrice).toBe(70000 * caja.quantity);
+      // Y dice qué trae, para que el cajero sepa qué está entregando.
+      expect(scan.body.contents.length).toBeGreaterThan(1);
+      expect(
+        scan.body.contents.reduce(
+          (suma: number, fila: { quantity: number }) => suma + fila.quantity,
+          0,
+        ),
+      ).toBe(caja.quantity);
+    });
+
+    it('la factura dice el surtido, no una talla que no existe', async () => {
+      const caja = await ingresarCaja();
+      const scan = await request(app.getHttpServer())
+        .get(`/api/pos/scan/${caja.barcode}`)
+        .set(auth())
+        .expect(200);
+
+      const venta = await request(app.getHttpServer())
+        .post('/api/pos/sales')
+        .set(auth())
+        .send({
+          warehouseId,
+          items: [
+            {
+              variantId: scan.body.variantId,
+              stockUnitId: caja.id,
+              quantity: caja.quantity,
+              unitPrice: scan.body.unitPrice,
+            },
+          ],
+          payments: [
+            {
+              method: 'EFECTIVO',
+              amount: scan.body.unitPrice * caja.quantity,
+            },
+          ],
+        })
+        .expect(201);
+
+      const linea = venta.body.items[0];
+      expect(linea.unitKind).toBe('BOX');
+      // Ni «36» ni ninguna talla suelta: es un surtido.
+      expect(linea.variantSize).toMatch(/^Surtido /);
+      expect(linea.boxContents.length).toBeGreaterThan(1);
+      expect(
+        linea.boxContents.reduce(
+          (suma: number, fila: { quantity: number }) => suma + fila.quantity,
+          0,
+        ),
+      ).toBe(caja.quantity);
+    });
+
+    it('editar la factura no le borra el surtido a la caja', async () => {
+      const caja = await ingresarCaja();
+      const scan = await request(app.getHttpServer())
+        .get(`/api/pos/scan/${caja.barcode}`)
+        .set(auth())
+        .expect(200);
+      const venta = await request(app.getHttpServer())
+        .post('/api/pos/sales')
+        .set(auth())
+        .send({
+          warehouseId,
+          items: [
+            {
+              variantId: scan.body.variantId,
+              stockUnitId: caja.id,
+              quantity: caja.quantity,
+              unitPrice: 50000,
+            },
+          ],
+          payments: [{ method: 'EFECTIVO', amount: 50000 * caja.quantity }],
+        })
+        .expect(201);
+
+      const editada = await request(app.getHttpServer())
+        .patch(`/api/pos/sales/${venta.body.id}`)
+        .set(auth())
+        .send({
+          items: [
+            {
+              variantId: scan.body.variantId,
+              quantity: caja.quantity,
+              unitPrice: 45000,
+            },
+          ],
+        })
+        .expect(200);
+
+      const linea = editada.body.items[0];
+      expect(linea.stockUnitId).toBe(caja.id);
+      expect(linea.unitKind).toBe('BOX');
+      expect(linea.boxContents.length).toBeGreaterThan(1);
+    });
+
+    it('un producto suelto no se disfraza de caja', async () => {
+      const detalle = await request(app.getHttpServer())
+        .get(`/api/products/${productId}`)
+        .set(auth())
+        .expect(200);
+      const variante = detalle.body.variants[0];
+      await request(app.getHttpServer())
+        .post('/api/inventory/adjust')
+        .set(auth())
+        .send({
+          variantId: variante.id,
+          warehouseId,
+          movementType: 'IN',
+          quantity: 5,
+          notes: 'Para vender suelto',
+        });
+
+      const venta = await request(app.getHttpServer())
+        .post('/api/pos/sales')
+        .set(auth())
+        .send({
+          warehouseId,
+          items: [
+            { variantId: variante.id, quantity: 1, unitPrice: 100000 },
+          ],
+          payments: [{ method: 'EFECTIVO', amount: 100000 }],
+        })
+        .expect(201);
+
+      const linea = venta.body.items[0];
+      expect(linea.unitKind).toBeNull();
+      expect(linea.boxContents).toBeNull();
+      expect(linea.variantSize).not.toMatch(/Surtido/);
     });
   });
 });

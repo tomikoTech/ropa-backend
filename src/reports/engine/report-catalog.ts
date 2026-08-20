@@ -92,7 +92,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     description:
       'Qué hay, dónde está y cuánto vale. Se agrupa como haga falta: por ' +
       'referencia, por producto, por bodega, por categoría, por marca o por ' +
-      'la ubicación física del bulto.',
+      'la ubicación física de la caja o el par.',
     absorbs: [
       'Inventario General',
       'Inventario por bodega',
@@ -103,7 +103,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     notes: [
       'El valor de venta usa el precio de hoy, no el de cuando entró la mercancía.',
       'Agrupado por ubicación solo aparece lo que tiene código de barras propio ' +
-        '(bultos etiquetados); el inventario suelto no tiene stand.',
+        '(cajas y pares etiquetados); el inventario suelto no tiene stand.',
     ],
     filters: [
       search('Producto, SKU o código de barras'),
@@ -118,7 +118,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
           { value: 'bodega', label: 'Bodega' },
           { value: 'categoria', label: 'Categoría' },
           { value: 'marca', label: 'Marca' },
-          { value: 'ubicacion', label: 'Ubicación física (bultos)' },
+          { value: 'ubicacion', label: 'Ubicación física (cajas y pares)' },
         ],
       },
       fBodega,

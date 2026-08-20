@@ -35,7 +35,7 @@ export class PosController {
   @Get('scan/:barcode')
   @ApiOperation({
     summary:
-      'Resuelve un código escaneado: bulto etiquetado (caja/par) o variante',
+      'Resuelve un código escaneado: una caja, un par etiquetado o un producto suelto',
   })
   scan(@Param('barcode') barcode: string, @TenantId() tenantId: string) {
     return this.scanService.resolve(barcode, tenantId);

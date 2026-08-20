@@ -30,7 +30,7 @@ export class LabelsService {
       relations: { product: true, color: true, size: true },
     });
     if (units.length === 0) {
-      throw new NotFoundException('No se encontraron bultos para etiquetar');
+      throw new NotFoundException('No se encontraron cajas ni pares para etiquetar');
     }
     const settings = await this.settingsRepo.findOne({ where: { tenantId } });
     const showSequence = !!settings?.showBoxPairSequenceOnLabels;
