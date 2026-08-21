@@ -101,6 +101,20 @@ const EQUIVALENCIAS: Record<string, { plantilla: string; alcance: number }> = {
   externo: { plantilla: 'consulta', alcance: 5 },
 };
 
+/**
+ * Cuentas que en demachine no tienen ningún rol asignado, pero cuyo **nombre**
+ * dice para qué son.
+ *
+ * `bodega` y `cajero` en AMAWAD son de esas. Sin esto quedarían pudiendo todo,
+ * que es justo el agujero que este importador viene a cerrar. Es una
+ * suposición y por eso vive aquí, a la vista y en una sola línea, en vez de
+ * escondida en una heurística que adivine a partir del nombre de cualquiera.
+ */
+const POR_NOMBRE_DE_CUENTA: Record<string, string[]> = {
+  bodega: ['jefe de bodega'],
+  cajero: ['cajero'],
+};
+
 /** Sin tildes, sin mayúsculas y sin espacios de más: para cruzar por nombre. */
 function normalizar(s: string): string {
   return (s || '')
@@ -365,8 +379,19 @@ async function main() {
       stats.actualizados++;
     }
 
-    // Todos los roles que tenía en demachine, de mayor a menor alcance.
-    const suyos = [...new Set(rolesDeUsuario.get(claveNombre) ?? [])]
+    // Todos los roles que tenía en demachine, de mayor a menor alcance. Si allá
+    // no tenía ninguno, se mira si el nombre de la cuenta lo dice.
+    const declarados = rolesDeUsuario.get(claveNombre) ?? [];
+    const supuestos = declarados.length
+      ? []
+      : (POR_NOMBRE_DE_CUENTA[claveNombre] ?? []);
+    if (supuestos.length) {
+      console.log(
+        `  aviso: "${nombre}" no tenía rol en demachine; se le da ` +
+          `${supuestos.join(' + ')} por el nombre de la cuenta.`,
+      );
+    }
+    const suyos = [...new Set([...declarados, ...supuestos])]
       .filter((c) => !!EQUIVALENCIAS[c])
       .sort((a, b) => EQUIVALENCIAS[b].alcance - EQUIVALENCIAS[a].alcance);
     const esAdministrador = suyos.includes('administrador');
