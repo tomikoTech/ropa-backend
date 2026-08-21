@@ -26,6 +26,7 @@ import { TransferStockDto } from './dto/transfer-stock.dto.js';
 import { MovementType } from '../common/enums/movement-type.enum.js';
 import { ProductVariant } from '../products/entities/product-variant.entity.js';
 import { Product } from '../products/entities/product.entity.js';
+import { User } from '../users/entities/user.entity.js';
 import {
   desdeInicioDelDia,
   hastaFinDelDia,
@@ -33,6 +34,56 @@ import {
 } from './movement-delta.js';
 import { RecipeService } from '../products/services/recipe.service.js';
 import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
+
+/** Una remisión con todo lo que hace falta para entenderla sin preguntar. */
+export interface TrasladoConContexto {
+  id: string;
+  type: string;
+  status: string;
+  quantity: number;
+  returnedQuantity: number;
+  pendingReturn: number;
+  notes: string | null;
+  reason: string | null;
+  createdAt: Date;
+  receivedAt: Date | null;
+  closedAt: Date | null;
+  createdByName: string | null;
+  receivedByName: string | null;
+  closedByName: string | null;
+  variantId: string;
+  productId: string | null;
+  productName: string | null;
+  productCode: string | null;
+  variantSku: string | null;
+  barcode: string | null;
+  size: string | null;
+  color: string | null;
+  fromWarehouseId: string;
+  fromWarehouseName: string | null;
+  toWarehouseId: string;
+  toWarehouseName: string | null;
+  returnOfTransferId: string | null;
+  returns: {
+    id: string;
+    quantity: number;
+    status: string;
+    createdAt: Date;
+  }[];
+}
+
+/**
+ * Los estados de una remisión, dichos como los diría la tienda.
+ *
+ * Los mensajes de error decían «La remisión ya está en estado CANCELLED».
+ */
+const DESCRIPCION_DE_TRASLADO: Record<string, string> = {
+  PENDING: 'en tránsito',
+  RECEIVED: 'recibida',
+  RETURNED: 'devuelta',
+  CANCELLED: 'cancelada',
+  REJECTED: 'rechazada por el destino',
+};
 
 /** Un movimiento con todo lo que la pantalla necesita para explicarlo. */
 export interface MovimientoConContexto {
@@ -43,6 +94,16 @@ export interface MovimientoConContexto {
   productId: string | null;
   productName: string;
   variantSku: string;
+  /**
+   * La referencia impresa en la caja y el código que lee el escáner.
+   *
+   * «El zapato trae un código; siempre que se haga un movimiento, mostrar el
+   * nombre pero también el código». Con solo el nombre y la talla no se puede
+   * ir a la bodega a buscar la caja ni confirmar por teléfono que se está
+   * hablando del mismo par.
+   */
+  productCode: string | null;
+  barcode: string | null;
   variantLabel: string;
   warehouseName: string;
   referenceType: string | null;
@@ -487,7 +548,7 @@ export class InventoryService {
     dto: TransferStockDto,
     userId: string,
     tenantId: string,
-  ): Promise<{ from: Stock; to: Stock } | StockTransfer> {
+  ): Promise<{ from: Stock; to: Stock; transfer: StockTransfer } | StockTransfer> {
     if (dto.fromWarehouseId === dto.toWarehouseId) {
       throw new BadRequestException(
         'La bodega origen y destino deben ser diferentes',
@@ -516,6 +577,7 @@ export class InventoryService {
     return this.dataSource.transaction(async (manager) => {
       const stockRepo = manager.getRepository(Stock);
       const movementRepo = manager.getRepository(StockMovement);
+      const transferRepo = manager.getRepository(StockTransfer);
 
       // Get or create source stock
       const fromStock = await stockRepo.findOne({
@@ -557,6 +619,31 @@ export class InventoryService {
       await stockRepo.save(fromStock);
       await stockRepo.save(toStock);
 
+      // El traslado inmediato también queda registrado.
+      //
+      // Antes no dejaba fila en `stock_transfers`: la remisión solo existía si
+      // la tienda tenía activada la confirmación de recepción. Para todas las
+      // demás no había historial de traslados en absoluto —solo dos movimientos
+      // sueltos cuyo `referenceId` era una **bodega**, así que ni siquiera se
+      // podían emparejar la salida con su entrada—. Se registra ya recibido,
+      // que es lo que de verdad pasó: salió y llegó en el mismo acto.
+      const ahora = new Date();
+      const transfer = await transferRepo.save(
+        transferRepo.create({
+          type: 'TRANSFER',
+          status: 'RECEIVED',
+          variantId: dto.variantId,
+          fromWarehouseId: dto.fromWarehouseId,
+          toWarehouseId: dto.toWarehouseId,
+          quantity: dto.quantity,
+          notes: dto.notes ?? null,
+          createdById: userId,
+          receivedById: userId,
+          receivedAt: ahora,
+          tenantId,
+        }),
+      );
+
       // Record movements
       const outMovement = movementRepo.create({
         variantId: dto.variantId,
@@ -564,8 +651,8 @@ export class InventoryService {
         tenantId,
         movementType: MovementType.TRANSFER,
         quantity: -dto.quantity,
-        referenceType: 'TRANSFER',
-        referenceId: dto.toWarehouseId,
+        referenceType: 'TRANSFER_OUT',
+        referenceId: transfer.id,
         notes: dto.notes || `Traslado a bodega destino`,
         createdById: userId,
       });
@@ -576,8 +663,8 @@ export class InventoryService {
         tenantId,
         movementType: MovementType.TRANSFER,
         quantity: dto.quantity,
-        referenceType: 'TRANSFER',
-        referenceId: dto.fromWarehouseId,
+        referenceType: 'TRANSFER_IN',
+        referenceId: transfer.id,
         notes: dto.notes || `Traslado desde bodega origen`,
         createdById: userId,
       });
@@ -593,7 +680,7 @@ export class InventoryService {
         relations: ['variant', 'variant.product', 'warehouse'],
       });
 
-      return { from: from!, to: to! };
+      return { from: from!, to: to!, transfer };
     });
   }
 
@@ -737,11 +824,20 @@ export class InventoryService {
     return this.findTransfer(id, tenantId);
   }
 
-  // Cancela una remisión PENDING: devuelve el stock al origen.
-  async cancelTransfer(
+  /**
+   * Cierra una remisión en tránsito devolviendo el stock al origen.
+   *
+   * Sirve a dos casos que mueven el inventario igual pero **no significan lo
+   * mismo**: el origen se arrepintió (`CANCELLED`) o el destino no la aceptó
+   * (`REJECTED`). Guardarlos bajo la misma palabra obligaba a preguntar por
+   * WhatsApp qué había pasado con una remisión que nunca llegó.
+   */
+  private async closePendingTransfer(
     id: string,
     userId: string,
     tenantId: string,
+    status: 'CANCELLED' | 'REJECTED',
+    reason?: string,
   ): Promise<StockTransfer> {
     await this.dataSource.transaction(async (manager) => {
       const transferRepo = manager.getRepository(StockTransfer);
@@ -757,7 +853,7 @@ export class InventoryService {
       }
       if (transfer.status !== 'PENDING') {
         throw new BadRequestException(
-          `La remisión ya está en estado ${transfer.status}`,
+          `La remisión ya está en estado ${DESCRIPCION_DE_TRASLADO[transfer.status]}`,
         );
       }
 
@@ -771,6 +867,7 @@ export class InventoryService {
       fromStock.quantity += transfer.quantity;
       await stockRepo.save(fromStock);
 
+      const motivo = reason?.trim() || null;
       await movementRepo.save(
         movementRepo.create({
           variantId: transfer.variantId,
@@ -778,17 +875,144 @@ export class InventoryService {
           tenantId,
           movementType: MovementType.TRANSFER,
           quantity: transfer.quantity,
-          referenceType: 'TRANSFER_CANCEL',
+          referenceType:
+            status === 'REJECTED' ? 'TRANSFER_REJECT' : 'TRANSFER_CANCEL',
           referenceId: transfer.id,
-          notes: 'Cancelación de remisión (devuelto a origen)',
+          notes:
+            motivo ??
+            (status === 'REJECTED'
+              ? 'El destino no aceptó la remisión (devuelto a origen)'
+              : 'Cancelación de remisión (devuelto a origen)'),
           createdById: userId,
         }),
       );
 
-      transfer.status = 'CANCELLED';
+      transfer.status = status;
+      transfer.reason = motivo;
+      transfer.closedById = userId;
+      transfer.closedAt = new Date();
       await transferRepo.save(transfer);
     });
     return this.findTransfer(id, tenantId);
+  }
+
+  // El origen se arrepiente: la remisión no sale.
+  async cancelTransfer(
+    id: string,
+    userId: string,
+    tenantId: string,
+    reason?: string,
+  ): Promise<StockTransfer> {
+    return this.closePendingTransfer(id, userId, tenantId, 'CANCELLED', reason);
+  }
+
+  // El destino no acepta lo que le mandaron: vuelve al origen y queda escrito
+  // por qué. Sin el motivo, la mercancía regresaba y nadie sabía si fue porque
+  // llegó rota, incompleta o porque simplemente no era lo que pidieron.
+  async rejectTransfer(
+    id: string,
+    userId: string,
+    tenantId: string,
+    reason?: string,
+  ): Promise<StockTransfer> {
+    return this.closePendingTransfer(id, userId, tenantId, 'REJECTED', reason);
+  }
+
+  /**
+   * Devuelve al origen mercancía de un traslado **ya recibido**.
+   *
+   * El caso, tal cual lo contaron: «hicimos el traslado pero no se vendió el
+   * zapato, entonces para hacer las devoluciones». Hasta ahora la única salida
+   * era un traslado nuevo en sentido contrario, suelto: el inventario quedaba
+   * bien pero nadie podía ver que esos pares eran los que habían ido.
+   *
+   * La devolución es una remisión propia —con su número, su responsable y su
+   * fecha— apuntando a la original con `returnOfTransferId`. Se devuelve por
+   * partes porque así ocurre: se mandaron seis, se vendieron cuatro, vuelven
+   * dos.
+   *
+   * `requireConfirmation` decide si la vuelta viaja en tránsito (el origen
+   * confirma que le llegó) o si se aplica de una.
+   */
+  async returnTransfer(
+    id: string,
+    input: { quantity?: number; reason?: string; requireConfirmation?: boolean },
+    userId: string,
+    tenantId: string,
+  ): Promise<StockTransfer> {
+    const original = await this.findTransfer(id, tenantId);
+    if (original.type !== 'TRANSFER') {
+      throw new BadRequestException(
+        'Los préstamos se cierran con Retornar, no con una devolución',
+      );
+    }
+    if (original.status !== 'RECEIVED') {
+      throw new BadRequestException(
+        'Solo se devuelve un traslado que el destino ya recibió. ' +
+          (original.status === 'PENDING'
+            ? 'Este sigue en tránsito: recházalo o cancélalo.'
+            : `Este está ${DESCRIPCION_DE_TRASLADO[original.status]}.`),
+      );
+    }
+    if (original.returnOfTransferId) {
+      throw new BadRequestException(
+        'Esta remisión ya es una devolución: no se devuelve una devolución.',
+      );
+    }
+
+    const pendiente = original.quantity - (original.returnedQuantity ?? 0);
+    if (pendiente <= 0) {
+      throw new BadRequestException(
+        'De este traslado ya se devolvió todo lo que se había enviado.',
+      );
+    }
+    const cantidad = input.quantity ?? pendiente;
+    if (!Number.isInteger(cantidad) || cantidad < 1) {
+      throw new BadRequestException('La cantidad a devolver debe ser mayor a 0');
+    }
+    if (cantidad > pendiente) {
+      throw new BadRequestException(
+        `Solo quedan ${pendiente} por devolver de este traslado ` +
+          `(se enviaron ${original.quantity} y ya volvieron ${original.returnedQuantity ?? 0}).`,
+      );
+    }
+
+    // La devolución va en sentido contrario: sale del destino y vuelve al
+    // origen. Reusa el mismo camino que un traslado normal para que el stock,
+    // los movimientos y el bloqueo de fila se comporten igual.
+    const dto: TransferStockDto = {
+      variantId: original.variantId,
+      fromWarehouseId: original.toWarehouseId,
+      toWarehouseId: original.fromWarehouseId,
+      quantity: cantidad,
+      notes:
+        input.reason?.trim() ||
+        `Devolución del traslado ${original.id.slice(0, 8)}`,
+      requireConfirmation: input.requireConfirmation,
+    };
+    const resultado = await this.transferStock(dto, userId, tenantId);
+
+    // `transferStock` devuelve la remisión si va en tránsito, y los stocks más
+    // la remisión si se aplicó de una. En ambos casos sale la fila exacta: no
+    // hay que buscarla «por la última», que con dos personas devolviendo a la
+    // vez podría entregar la del otro.
+    const devolucion = 'transfer' in resultado ? resultado.transfer : resultado;
+
+    devolucion.returnOfTransferId = original.id;
+    devolucion.reason = input.reason?.trim() || null;
+    await this.transferRepository.save(devolucion);
+
+    original.returnedQuantity = (original.returnedQuantity ?? 0) + cantidad;
+    // Solo se marca RETURNED cuando volvió todo: si volvió una parte, el
+    // traslado sigue siendo un traslado recibido con una devolución parcial.
+    if (original.returnedQuantity >= original.quantity) {
+      original.status = 'RETURNED';
+      original.closedById = userId;
+      original.closedAt = new Date();
+    }
+    await this.transferRepository.save(original);
+
+    return this.findTransfer(devolucion.id, tenantId);
   }
 
   // F4: préstamo rápido. Mueve el stock INMEDIATO al destino (para que puedan
@@ -972,10 +1196,40 @@ export class InventoryService {
     return transfer;
   }
 
+  /**
+   * El historial de traslados: qué se movió, quién lo mandó, quién lo recibió
+   * y qué pasó con él.
+   *
+   * La pantalla anterior mostraba producto, bodegas, cantidad y estado. Al
+   * revisar un traslado de hace dos semanas faltaba justo lo que se pregunta:
+   * **quién** lo hizo, **cuándo**, con **qué código** —el que trae el zapato,
+   * no un uuid— y, si nunca llegó, **por qué**.
+   *
+   * También trae la devolución: cuánto de lo enviado ya volvió, para no tener
+   * que cruzar dos remisiones a ojo.
+   */
   async listTransfers(
     tenantId: string,
-    filters?: { type?: string; status?: string; warehouseId?: string },
-  ): Promise<StockTransfer[]> {
+    filters?: {
+      type?: string;
+      status?: string;
+      warehouseId?: string;
+      q?: string;
+      from?: string;
+      to?: string;
+      page?: number;
+      limit?: number;
+    },
+  ): Promise<{
+    data: TrasladoConContexto[];
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  }> {
+    const limit = Math.min(Math.max(filters?.limit ?? 50, 1), 200);
+    const page = Math.max(filters?.page ?? 1, 1);
+
     const qb = this.transferRepository
       .createQueryBuilder('t')
       .leftJoinAndSelect('t.variant', 'v')
@@ -985,6 +1239,7 @@ export class InventoryService {
       .leftJoinAndSelect('t.fromWarehouse', 'fw')
       .leftJoinAndSelect('t.toWarehouse', 'tw')
       .where('t.tenant_id = :tenantId', { tenantId });
+
     if (filters?.type) qb.andWhere('t.type = :type', { type: filters.type });
     if (filters?.status)
       qb.andWhere('t.status = :status', { status: filters.status });
@@ -993,7 +1248,159 @@ export class InventoryService {
         wh: filters.warehouseId,
       });
     }
-    return qb.orderBy('t.created_at', 'DESC').getMany();
+    // Buscar por lo que la tienda tiene a mano: el nombre o el código pegado
+    // en la caja. Va en un solo `andWhere` porque mezclar `orWhere` con
+    // `andWhere` rompe la agrupación del SQL.
+    const q = filters?.q?.trim();
+    if (q) {
+      qb.andWhere(
+        '(p.name ILIKE :q OR p.sku_prefix ILIKE :q OR v.sku ILIKE :q OR v.barcode ILIKE :q)',
+        { q: `%${q}%` },
+      );
+    }
+    if (filters?.from) {
+      qb.andWhere('t.created_at >= :from', {
+        from: desdeInicioDelDia(filters.from),
+      });
+    }
+    if (filters?.to) {
+      qb.andWhere('t.created_at <= :to', { to: hastaFinDelDia(filters.to) });
+    }
+
+    const [filas, total] = await qb
+      // La **propiedad**, no la columna: al paginar, TypeORM reescribe la
+      // consulta con una subconsulta de ids y necesita poder mapear el orden.
+      // Con `t.created_at` revienta con «Cannot read properties of undefined».
+      .orderBy('t.createdAt', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getManyAndCount();
+
+    // Los responsables. Se resuelven en una consulta aparte, y no con un JOIN,
+    // porque de un usuario aquí solo se muestra el nombre: traer la entidad
+    // entera arrastraría su hash de contraseña hasta esta pantalla.
+    const nombrePorUsuario = await this.nombresDeUsuarios(
+      filas.flatMap((f) => [f.createdById, f.receivedById, f.closedById]),
+      tenantId,
+    );
+
+    // Cuánto de cada traslado ya volvió y en qué remisión. Una sola consulta
+    // para todo el lote: pedirlo fila por fila era N+1 en la pantalla que más
+    // se abre del módulo.
+    const ids = filas.map((f) => f.id);
+    const devoluciones = ids.length
+      ? await this.transferRepository.find({
+          where: { tenantId, returnOfTransferId: In(ids) },
+          order: { createdAt: 'ASC' },
+        })
+      : [];
+    const porOriginal = new Map<string, StockTransfer[]>();
+    for (const d of devoluciones) {
+      const clave = d.returnOfTransferId!;
+      porOriginal.set(clave, [...(porOriginal.get(clave) ?? []), d]);
+    }
+
+    return {
+      data: filas.map((t) =>
+        this.describirTraslado(t, porOriginal, nombrePorUsuario),
+      ),
+      total,
+      page,
+      limit,
+      totalPages: Math.max(Math.ceil(total / limit), 1),
+    };
+  }
+
+  /** El detalle de una remisión, con la misma forma que la lista. */
+  async getTransferDetail(
+    id: string,
+    tenantId: string,
+  ): Promise<TrasladoConContexto> {
+    const t = await this.findTransfer(id, tenantId);
+    const devoluciones = await this.transferRepository.find({
+      where: { tenantId, returnOfTransferId: id },
+      order: { createdAt: 'ASC' },
+    });
+    const nombres = await this.nombresDeUsuarios(
+      [t.createdById, t.receivedById, t.closedById],
+      tenantId,
+    );
+    return this.describirTraslado(
+      t,
+      new Map([[id, devoluciones]]),
+      nombres,
+    );
+  }
+
+  /** Nombre legible de cada usuario, por id. Ignora los nulos y repetidos. */
+  private async nombresDeUsuarios(
+    ids: (string | null | undefined)[],
+    tenantId: string,
+  ): Promise<Map<string, string>> {
+    const unicos = [...new Set(ids.filter((x): x is string => !!x))];
+    if (!unicos.length) return new Map();
+    const usuarios = await this.dataSource.getRepository(User).find({
+      where: { id: In(unicos), tenantId },
+      select: ['id', 'firstName', 'lastName', 'email'],
+    });
+    return new Map(
+      usuarios.map((u) => [
+        u.id,
+        [u.firstName, u.lastName].filter(Boolean).join(' ').trim() || u.email,
+      ]),
+    );
+  }
+
+  /** Traduce una fila de remisión a lo que la pantalla necesita mostrar. */
+  private describirTraslado(
+    t: StockTransfer,
+    porOriginal: Map<string, StockTransfer[]>,
+    nombres: Map<string, string>,
+  ): TrasladoConContexto {
+    const nombre = (id?: string | null) =>
+      (id && nombres.get(id)) || null;
+    const propias = porOriginal.get(t.id) ?? [];
+    const devuelto = t.returnedQuantity ?? 0;
+    return {
+      id: t.id,
+      type: t.type,
+      status: t.status,
+      quantity: t.quantity,
+      returnedQuantity: devuelto,
+      // Lo que todavía está en el destino. Es la cifra que se mira para
+      // decidir si queda algo por devolver.
+      pendingReturn: t.status === 'RECEIVED' ? t.quantity - devuelto : 0,
+      notes: t.notes ?? null,
+      reason: t.reason ?? null,
+      createdAt: t.createdAt,
+      receivedAt: t.receivedAt ?? null,
+      closedAt: t.closedAt ?? null,
+      createdByName: nombre(t.createdById),
+      receivedByName: nombre(t.receivedById),
+      closedByName: nombre(t.closedById),
+      variantId: t.variantId,
+      productId: t.variant?.product?.id ?? null,
+      productName: t.variant?.product?.name ?? null,
+      // Los tres códigos que identifican lo que se movió: la referencia del
+      // producto —la que va impresa en la caja—, el SKU de la talla exacta y
+      // el código de barras que lee el escáner.
+      productCode: t.variant?.product?.skuPrefix ?? null,
+      variantSku: t.variant?.sku ?? null,
+      barcode: t.variant?.barcode ?? null,
+      size: t.variant?.sizeName ?? null,
+      color: t.variant?.colorName ?? null,
+      fromWarehouseId: t.fromWarehouseId,
+      fromWarehouseName: t.fromWarehouse?.name ?? null,
+      toWarehouseId: t.toWarehouseId,
+      toWarehouseName: t.toWarehouse?.name ?? null,
+      returnOfTransferId: t.returnOfTransferId ?? null,
+      returns: propias.map((d) => ({
+        id: d.id,
+        quantity: d.quantity,
+        status: d.status,
+        createdAt: d.createdAt,
+      })),
+    };
   }
 
   // getOrCreateStock dentro de una transacción (usa el manager).
@@ -1151,6 +1558,8 @@ export class InventoryService {
       productId: m.variant?.product?.id ?? null,
       productName: m.variant?.product?.name ?? '',
       variantSku: m.variant?.sku ?? '',
+      productCode: m.variant?.product?.skuPrefix ?? null,
+      barcode: m.variant?.barcode ?? null,
       variantLabel:
         [m.variant?.size, m.variant?.color].filter(Boolean).join(' / ') || '',
       warehouseName: m.warehouse?.name ?? '',
@@ -1311,6 +1720,8 @@ export class InventoryService {
         balance: saldo,
         quantity: m.quantity,
         variantId: m.variantId,
+        variantSku: m.variant?.sku ?? null,
+        barcode: m.variant?.barcode ?? null,
         variantLabel: [m.variant?.size, m.variant?.color]
           .filter(Boolean)
           .join(' / '),

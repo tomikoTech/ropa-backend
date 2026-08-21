@@ -17,6 +17,7 @@ import { Payment } from './payment.entity.js';
 import { AccountsReceivable } from './accounts-receivable.entity.js';
 import { SaleStatus } from '../../common/enums/sale-status.enum.js';
 import { SaleChannel } from '../../common/enums/sale-channel.enum.js';
+import { PaymentMethod } from '../../common/enums/payment-method.enum.js';
 import { TenantAwareEntity } from '../../common/entities/tenant-aware.entity.js';
 
 @Entity('sales')
@@ -107,6 +108,17 @@ export class Sale extends TenantAwareEntity {
   // Las de crédito quedan is_paid=true (su deuda se gestiona en cartera/CxC).
   @Column({ name: 'is_paid', default: true })
   isPaid: boolean;
+
+  // Con qué se acordó pagar una venta que quedó pendiente. No es plata todavía:
+  // la fila de `payments` —la que suma al banco y a los reportes— nace cuando
+  // alguien confirma el pago. Existe porque el método elegido al vender se
+  // perdía, y al confirmar había que volver a preguntarlo.
+  @Column({
+    name: 'intended_payment_method',
+    type: 'varchar',
+    nullable: true,
+  })
+  intendedPaymentMethod: PaymentMethod | null;
 
   @Column({ nullable: true })
   notes: string;

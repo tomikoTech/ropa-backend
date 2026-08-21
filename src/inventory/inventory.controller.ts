@@ -19,7 +19,12 @@ import { InventoryService } from './inventory.service.js';
 import { CreateWarehouseDto } from './dto/create-warehouse.dto.js';
 import { UpdateWarehouseDto } from './dto/update-warehouse.dto.js';
 import { AdjustStockDto } from './dto/adjust-stock.dto.js';
+import { parsePositiveInt } from '../common/utils/query-number.util.js';
 import { TransferStockDto } from './dto/transfer-stock.dto.js';
+import {
+  CloseTransferDto,
+  ReturnTransferDto,
+} from './dto/transfer-actions.dto.js';
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
 import { TenantId } from '../common/decorators/tenant-id.decorator.js';
 import { User } from '../users/entities/user.entity.js';
@@ -177,25 +182,49 @@ export class InventoryController {
   // ─── Remisiones (traslados con confirmación) y préstamos ───
 
   @Get('transfers')
-  @ApiOperation({ summary: 'Listar remisiones/préstamos' })
+  @ApiOperation({ summary: 'Historial de traslados, remisiones y préstamos' })
   @ApiQuery({ name: 'type', required: false })
   @ApiQuery({ name: 'status', required: false })
   @ApiQuery({ name: 'warehouseId', required: false })
+  @ApiQuery({ name: 'q', required: false, description: 'Nombre, referencia, SKU o código de barras' })
+  @ApiQuery({ name: 'from', required: false })
+  @ApiQuery({ name: 'to', required: false })
+  @ApiQuery({ name: 'page', required: false })
+  @ApiQuery({ name: 'limit', required: false })
   listTransfers(
     @TenantId() tenantId: string,
     @Query('type') type?: string,
     @Query('status') status?: string,
     @Query('warehouseId') warehouseId?: string,
+    @Query('q') q?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
   ) {
     return this.inventoryService.listTransfers(tenantId, {
       type,
       status,
       warehouseId,
+      q,
+      from,
+      to,
+      page: parsePositiveInt(page),
+      limit: parsePositiveInt(limit, { max: 200 }),
     });
   }
 
+  @Get('transfers/:id')
+  @ApiOperation({ summary: 'Detalle de una remisión con sus devoluciones' })
+  getTransfer(
+    @Param('id', ParseUUIDPipe) id: string,
+    @TenantId() tenantId: string,
+  ) {
+    return this.inventoryService.getTransferDetail(id, tenantId);
+  }
+
   @Post('transfers/:id/receive')
-  @ApiOperation({ summary: 'Recibir una remisión (traslado)' })
+  @ApiOperation({ summary: 'Aceptar una remisión (el destino la recibe)' })
   receiveTransfer(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: User,
@@ -204,14 +233,51 @@ export class InventoryController {
     return this.inventoryService.receiveTransfer(id, user.id, tenantId);
   }
 
-  @Post('transfers/:id/cancel')
-  @ApiOperation({ summary: 'Cancelar una remisión pendiente' })
-  cancelTransfer(
+  @Post('transfers/:id/reject')
+  @ApiOperation({
+    summary: 'No aceptar una remisión: vuelve al origen con el motivo',
+  })
+  rejectTransfer(
     @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CloseTransferDto,
     @CurrentUser() user: User,
     @TenantId() tenantId: string,
   ) {
-    return this.inventoryService.cancelTransfer(id, user.id, tenantId);
+    return this.inventoryService.rejectTransfer(
+      id,
+      user.id,
+      tenantId,
+      dto?.reason,
+    );
+  }
+
+  @Post('transfers/:id/cancel')
+  @ApiOperation({ summary: 'Cancelar una remisión pendiente (la anula el origen)' })
+  cancelTransfer(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CloseTransferDto,
+    @CurrentUser() user: User,
+    @TenantId() tenantId: string,
+  ) {
+    return this.inventoryService.cancelTransfer(
+      id,
+      user.id,
+      tenantId,
+      dto?.reason,
+    );
+  }
+
+  @Post('transfers/:id/return')
+  @ApiOperation({
+    summary: 'Devolver al origen mercancía de un traslado ya recibido',
+  })
+  returnTransfer(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReturnTransferDto,
+    @CurrentUser() user: User,
+    @TenantId() tenantId: string,
+  ) {
+    return this.inventoryService.returnTransfer(id, dto ?? {}, user.id, tenantId);
   }
 
   @Post('loans')

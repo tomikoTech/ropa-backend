@@ -315,6 +315,15 @@ export class PosService {
         // No exige cubrir el total ni registra pagos; se marca luego desde Ventas.
         const isPending = dto.markAsPaid === false && totalCredit === 0;
 
+        // Con qué se iba a pagar. Solo se guarda si la venta queda pendiente:
+        // cuando se paga de una, el método ya vive en la fila de `payments`.
+        // Una tienda cobró por transferencia, la factura salió «Sin pagar» y al
+        // confirmarla el sistema volvió a preguntar el método, porque al no
+        // crear `payments` lo elegido se perdía.
+        const intendedPaymentMethod = isPending
+          ? (regularPayments[0]?.method ?? null)
+          : null;
+
         if (!isPending && totalRegular + totalCredit < saleTotals.total) {
           throw new BadRequestException(
             `Pago insuficiente. Total: $${saleTotals.total}, Pagado: $${totalRegular + totalCredit}`,
@@ -360,6 +369,7 @@ export class PosService {
           status: SaleStatus.COMPLETED,
           saleChannel: dto.saleChannel || SaleChannel.POS,
           isPaid: !isPending,
+          intendedPaymentMethod,
           notes: dto.notes,
           tenantId,
         });
@@ -1529,7 +1539,7 @@ export class PosService {
   async markSalePaid(
     id: string,
     dto: {
-      method: PaymentMethod;
+      method?: PaymentMethod;
       bankId?: string;
       reference?: string;
       receiptImageUrl?: string;
@@ -1546,7 +1556,14 @@ export class PosService {
       if (sale.isPaid) {
         throw new BadRequestException('La venta ya está pagada');
       }
-      if (dto.method === PaymentMethod.CREDITO) {
+
+      // Si quien confirma no dice el método, vale el que se eligió al vender.
+      // Sin esto había que responder dos veces la misma pregunta, y la segunda
+      // respuesta —tomada de un desplegable con «Efectivo» arriba— podía
+      // contradecir a la primera sin que nadie lo notara.
+      const method =
+        dto.method ?? sale.intendedPaymentMethod ?? PaymentMethod.EFECTIVO;
+      if (method === PaymentMethod.CREDITO) {
         throw new BadRequestException('Método de pago inválido');
       }
 
@@ -1554,7 +1571,7 @@ export class PosService {
       await manager.getRepository(Payment).save(
         manager.getRepository(Payment).create({
           saleId: sale.id,
-          method: dto.method,
+          method,
           amount: total,
           reference: dto.reference,
           bankId: dto.bankId ?? null,
@@ -1566,6 +1583,8 @@ export class PosService {
       );
 
       sale.isPaid = true;
+      // Ya no es una intención: el método vive en la fila de `payments`.
+      sale.intendedPaymentMethod = null;
       await saleRepo.save(sale);
     });
     // Leer fuera de la transacción para devolver el estado ya confirmado.
