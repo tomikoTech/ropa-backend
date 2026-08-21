@@ -199,6 +199,16 @@ export class UpdateStoreSettingsDto {
   quickLoanEnabled?: boolean;
 
   @ApiPropertyOptional({
+    example: true,
+    description:
+      'El POS marca la venta como pagada al cerrarla. Apágalo en tiendas que ' +
+      'facturan primero y cobran después.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  posMarkPaidDefault?: boolean;
+
+  @ApiPropertyOptional({
     enum: ['MANUAL', 'FIFO'],
     description:
       'MANUAL abona una factura elegida; FIFO distribuye el abono al saldo desde la factura más antigua',

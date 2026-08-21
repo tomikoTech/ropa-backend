@@ -114,6 +114,8 @@ export class StoreSettingsService {
       settings.transferConfirmationEnabled = dto.transferConfirmationEnabled;
     if (dto.quickLoanEnabled !== undefined)
       settings.quickLoanEnabled = dto.quickLoanEnabled;
+    if (dto.posMarkPaidDefault !== undefined)
+      settings.posMarkPaidDefault = dto.posMarkPaidDefault;
     if (dto.arPaymentAllocationMode !== undefined)
       settings.arPaymentAllocationMode = dto.arPaymentAllocationMode;
     if (dto.unitTrackingEnabled !== undefined)

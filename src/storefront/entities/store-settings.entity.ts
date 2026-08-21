@@ -353,6 +353,18 @@ export class StoreSettings extends TenantAwareEntity {
   @Column({ name: 'quick_loan_enabled', default: false })
   quickLoanEnabled: boolean;
 
+  /**
+   * ¿El POS da por cobrada la venta al cerrarla?
+   *
+   * On por defecto: en un mostrador se paga en el momento y dejar a deber es la
+   * excepción. Distri Amber trabaja al revés —factura primero y cobra después—,
+   * así que ahí el toggle arranca apagado y la venta nace pendiente.
+   *
+   * Es solo el valor inicial de la casilla: el vendedor la cambia por venta.
+   */
+  @Column({ name: 'pos_mark_paid_default', default: true })
+  posMarkPaidDefault: boolean;
+
   // Cartera: MANUAL conserva el abono por factura. FIFO permite registrar un
   // abono al saldo total del cliente y lo reparte desde la factura más antigua.
   @Column({
