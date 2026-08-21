@@ -66,6 +66,11 @@ interface PayloadProduct {
   brand: string | null;
   gender: string;
   base_price: number;
+  wholesale_price?: number;
+  cost_price?: number;
+  box_price?: number;
+  lote?: string | null;
+  in_report?: boolean;
   image_url: string | null;
   variants: PayloadVariant[];
   stock_by_warehouse: PayloadStockRow[];
@@ -114,7 +119,10 @@ async function main() {
   console.log(`  productos=${payload.products.length} bodegas=${payload.warehouses.length} staff=${payload.staff.length}`);
 
   const host = process.env.DB_HOST || 'localhost';
-  const isLocal = host === 'localhost' || host === '127.0.0.1';
+  // Un socket Unix ('/tmp') siempre es local: en esta máquina Postgres no
+  // responde por TCP, así que sin esto las pruebas locales intentaban SSL.
+  const isLocal =
+    host === 'localhost' || host === '127.0.0.1' || host.startsWith('/');
   const dataSource = new DataSource({
     type: 'postgres',
     host,
@@ -149,6 +157,7 @@ async function main() {
     stockRows: 0,
     skippedExisting: 0,
     reconciledProducts: 0,
+    fieldsUpdated: 0,
     stockAdjustments: 0,
     variantsAddedToExisting: 0,
     staleStockAdjustments: 0,
@@ -252,6 +261,48 @@ async function main() {
       .replace(/[^A-Z0-9]+/g, '')
       .slice(0, 12) || 'NA';
 
+  /**
+   * Pone al día la ficha de un producto que ya existe.
+   *
+   * La primera migración se alimentó del reporte de inventario, que no trae
+   * precio mayorista, costo ni lote; y dejaba en UNISEX todo lo que no dijera
+   * DAMA/HOMBRE. Esos cuatro campos llegan ahora desde /api/products/index.
+   *
+   * Solo escribe lo que demachine afirma: un 0 allá no borra lo que alguien
+   * haya puesto acá a mano.
+   */
+  const updateExistingFields = async (product: Product, p: PayloadProduct) => {
+    const cambios: string[] = [];
+    const gen = genderOf(p.gender);
+    if (p.base_price && Number(product.basePrice) !== p.base_price) {
+      product.basePrice = p.base_price;
+      cambios.push('precio');
+    }
+    if (p.cost_price && Number(product.costPrice || 0) !== p.cost_price) {
+      product.costPrice = p.cost_price;
+      cambios.push('costo');
+    }
+    if (p.wholesale_price && Number(product.wholesalePrice || 0) !== p.wholesale_price) {
+      product.wholesalePrice = p.wholesale_price;
+      cambios.push('mayorista');
+    }
+    if (p.lote && product.lote !== p.lote) {
+      product.lote = p.lote;
+      cambios.push('lote');
+    }
+    if (p.brand && product.brand !== p.brand) {
+      product.brand = p.brand;
+      cambios.push('marca');
+    }
+    if (product.gender !== gen) {
+      product.gender = gen;
+      cambios.push('género');
+    }
+    if (!cambios.length) return;
+    if (!DRY_RUN) await productRepo.save(product);
+    stats.fieldsUpdated++;
+  };
+
   const reconcileExistingProduct = async (product: Product, p: PayloadProduct) => {
     const variants = await variantRepo.find({ where: { tenantId, productId: product.id } });
     const byKey = new Map<string, ProductVariant>();
@@ -329,6 +380,7 @@ async function main() {
     const existing = await productRepo.findOne({ where: { tenantId, sourceRef } });
     if (existing) {
       stats.skippedExisting++;
+      await updateExistingFields(existing, p);
       if (RECONCILE_STOCK) await reconcileExistingProduct(existing, p);
       continue;
     }
@@ -366,7 +418,9 @@ async function main() {
             skuPrefix,
             slug,
             basePrice: p.base_price || 0,
-            costPrice: 0,
+            costPrice: p.cost_price || 0,
+            wholesalePrice: p.wholesale_price || null,
+            lote: p.lote || undefined,
             gender: genderOf(p.gender),
             brand: p.brand || undefined,
             sourceRef,
