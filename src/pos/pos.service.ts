@@ -469,6 +469,8 @@ export class PosService {
             variantId: data.variant.id,
             productName: data.variant.product.name,
             variantSku: data.variant.sku,
+            productCode: data.variant.product.skuPrefix ?? null,
+            variantBarcode: data.variant.barcode ?? null,
             variantSize,
             variantColor: data.variant.colorName,
             unitKind: soldUnit?.kind ?? null,
@@ -1213,6 +1215,10 @@ export class PosService {
                 variantId: variant.id,
                 productName: previous?.productName ?? variant.product.name,
                 variantSku: previous?.variantSku ?? variant.sku,
+                productCode:
+                  previous?.productCode ?? variant.product.skuPrefix ?? null,
+                variantBarcode:
+                  previous?.variantBarcode ?? variant.barcode ?? null,
                 variantSize: previous?.variantSize ?? variant.sizeName,
                 variantColor: previous?.variantColor ?? variant.colorName,
                 quantity: item.quantity,

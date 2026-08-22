@@ -38,6 +38,7 @@ import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
 /** Una remisión con todo lo que hace falta para entenderla sin preguntar. */
 export interface TrasladoConContexto {
   id: string;
+  transferNumber: string | null;
   type: string;
   status: string;
   quantity: number;
@@ -66,6 +67,7 @@ export interface TrasladoConContexto {
   returnOfTransferId: string | null;
   returns: {
     id: string;
+    transferNumber: string | null;
     quantity: number;
     status: string;
     createdAt: Date;
@@ -630,6 +632,7 @@ export class InventoryService {
       const ahora = new Date();
       const transfer = await transferRepo.save(
         transferRepo.create({
+          transferNumber: await this.siguienteNumeroDeTraslado(manager, tenantId),
           type: 'TRANSFER',
           status: 'RECEIVED',
           variantId: dto.variantId,
@@ -738,6 +741,7 @@ export class InventoryService {
 
       const transfer = await transferRepo.save(
         transferRepo.create({
+          transferNumber: await this.siguienteNumeroDeTraslado(manager, tenantId),
           type: 'TRANSFER',
           status: 'PENDING',
           variantId: dto.variantId,
@@ -987,7 +991,7 @@ export class InventoryService {
       quantity: cantidad,
       notes:
         input.reason?.trim() ||
-        `Devolución del traslado ${original.id.slice(0, 8)}`,
+        `Devolución del traslado ${original.transferNumber ?? original.id.slice(0, 8)}`,
       requireConfirmation: input.requireConfirmation,
     };
     const resultado = await this.transferStock(dto, userId, tenantId);
@@ -1065,6 +1069,7 @@ export class InventoryService {
 
       const loan = await transferRepo.save(
         transferRepo.create({
+          transferNumber: await this.siguienteNumeroDeTraslado(manager, tenantId),
           type: 'LOAN',
           status: 'PENDING',
           variantId: dto.variantId,
@@ -1254,7 +1259,8 @@ export class InventoryService {
     const q = filters?.q?.trim();
     if (q) {
       qb.andWhere(
-        '(p.name ILIKE :q OR p.sku_prefix ILIKE :q OR v.sku ILIKE :q OR v.barcode ILIKE :q)',
+        '(p.name ILIKE :q OR p.sku_prefix ILIKE :q OR v.sku ILIKE :q ' +
+          'OR v.barcode ILIKE :q OR t.transfer_number ILIKE :q)',
         { q: `%${q}%` },
       );
     }
@@ -1363,6 +1369,7 @@ export class InventoryService {
     const devuelto = t.returnedQuantity ?? 0;
     return {
       id: t.id,
+      transferNumber: t.transferNumber ?? null,
       type: t.type,
       status: t.status,
       quantity: t.quantity,
@@ -1396,11 +1403,39 @@ export class InventoryService {
       returnOfTransferId: t.returnOfTransferId ?? null,
       returns: propias.map((d) => ({
         id: d.id,
+        transferNumber: d.transferNumber ?? null,
         quantity: d.quantity,
         status: d.status,
         createdAt: d.createdAt,
       })),
     };
+  }
+
+  /**
+   * El siguiente número de remisión del tenant: «TR-00042».
+   *
+   * Se toma el máximo y se suma uno, no un COUNT: borrar una fila haría que el
+   * COUNT repitiera un número que ya se usó, y el índice único lo rechazaría.
+   * El `advisory lock` evita que dos traslados simultáneos pidan el mismo —el
+   * mismo patrón que ya usan las solicitudes internas—.
+   */
+  private async siguienteNumeroDeTraslado(
+    manager: import('typeorm').EntityManager,
+    tenantId: string,
+  ): Promise<string> {
+    await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+      `stock-transfer-number:${tenantId}`,
+    ]);
+    const fila = await manager
+      .getRepository(StockTransfer)
+      .createQueryBuilder('t')
+      .select(
+        "MAX(CAST(substring(t.transfer_number FROM '^TR-0*([0-9]+)$') AS integer))",
+        'max',
+      )
+      .where('t.tenant_id = :tenantId', { tenantId })
+      .getRawOne<{ max: string | null }>();
+    return `TR-${String(Number(fila?.max ?? 0) + 1).padStart(5, '0')}`;
   }
 
   // getOrCreateStock dentro de una transacción (usa el manager).

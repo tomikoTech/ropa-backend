@@ -32,6 +32,17 @@ export class StockTransfer extends TenantAwareEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  /**
+   * El número que la gente dice en voz alta: «TR-00042».
+   *
+   * En el sistema anterior es «RC-2277» y así se habla de una remisión por
+   * teléfono o en el papel que viaja con la mercancía. El uuid no sirve para
+   * eso. Nullable porque las filas viejas se numeraron en la migración y
+   * TypeORM no puede prometer lo contrario.
+   */
+  @Column({ name: 'transfer_number', type: 'varchar', nullable: true })
+  transferNumber: string | null;
+
   @Column({ type: 'varchar', default: 'TRANSFER' })
   type: StockTransferType;
 

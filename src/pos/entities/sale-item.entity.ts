@@ -78,6 +78,19 @@ export class SaleItem extends TenantAwareEntity {
   @Column({ name: 'variant_sku' })
   variantSku: string;
 
+  /**
+   * Los otros dos códigos con los que se identifica lo vendido: la referencia
+   * impresa en la caja y el código de barras del escáner.
+   *
+   * Snapshot como el resto: si mañana se renumera la referencia, esta factura
+   * debe seguir diciendo con qué código se vendió.
+   */
+  @Column({ name: 'product_code', type: 'varchar', nullable: true })
+  productCode: string | null;
+
+  @Column({ name: 'variant_barcode', type: 'varchar', nullable: true })
+  variantBarcode: string | null;
+
   @Column({ name: 'variant_size' })
   variantSize: string;
 
