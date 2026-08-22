@@ -122,6 +122,11 @@ export class StoreSettingsService {
       settings.arPaymentAllocationMode = dto.arPaymentAllocationMode;
     if (dto.unitTrackingEnabled !== undefined)
       settings.unitTrackingEnabled = dto.unitTrackingEnabled;
+    if (dto.comprobanteTransferenciaObligatorio !== undefined)
+      settings.comprobanteTransferenciaObligatorio =
+        dto.comprobanteTransferenciaObligatorio;
+    if (dto.cierreDeCajaEnabled !== undefined)
+      settings.cierreDeCajaEnabled = dto.cierreDeCajaEnabled;
     if (dto.autoReplenishEnabled !== undefined)
       settings.autoReplenishEnabled = dto.autoReplenishEnabled;
     if (dto.autoReplenishThreshold !== undefined)

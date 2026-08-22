@@ -38,6 +38,7 @@ import {
 } from './movement-delta.js';
 import { RecipeService } from '../products/services/recipe.service.js';
 import { StockLedgerService } from './ledger/stock-ledger.service.js';
+import { CajaService } from '../caja/caja.service.js';
 import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
 
 /** Una remisión con todo lo que hace falta para entenderla sin preguntar. */
@@ -164,6 +165,7 @@ export class InventoryService {
     // El único camino por el que se mueve inventario: mantiene el agregado y
     // los bultos cuadrados en la misma transacción.
     private readonly ledger: StockLedgerService,
+    private readonly caja: CajaService,
   ) {}
 
   // ─── Warehouses ───
@@ -971,6 +973,10 @@ export class InventoryService {
     userId: string,
     tenantId: string,
   ): Promise<StockTransfer> {
+    // «No puede vender ni prestar»: prestar mercancía de un local con el turno
+    // ya cerrado es exactamente lo que el cierre viene a evitar, porque sale
+    // del inventario que se acaba de cuadrar.
+    await this.caja.exigirTurnoAbierto(tenantId, userId, dto.fromWarehouseId);
     if (dto.fromWarehouseId === dto.toWarehouseId) {
       throw new BadRequestException(
         'La bodega origen y destino deben ser diferentes',

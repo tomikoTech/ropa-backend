@@ -26,6 +26,7 @@ import { CreateSaleDto } from './dto/create-sale.dto.js';
 import { UpdateSaleDto } from './dto/update-sale.dto.js';
 import { RecordArPaymentDto } from './dto/record-ar-payment.dto.js';
 import { StockLedgerService } from '../inventory/ledger/stock-ledger.service.js';
+import { CajaService } from '../caja/caja.service.js';
 import { ReposicionAutomaticaService } from '../inventory/reposicion-automatica.service.js';
 import { pendienteTotal, repartirAbono } from './ar-allocation.js';
 import { precioDeLinea, type ReglaDePrecio } from './precio-de-linea.js';
@@ -71,6 +72,7 @@ export class PosService {
     private readonly invoiceEmailService: InvoiceEmailService,
     private readonly ledger: StockLedgerService,
     private readonly reposicion: ReposicionAutomaticaService,
+    private readonly caja: CajaService,
   ) {}
 
   /**
@@ -87,6 +89,11 @@ export class PosService {
     userId: string,
     tenantId: string,
   ): Promise<Sale> {
+    // Las dos reglas del cuadre se comprueban ANTES de abrir la transacción:
+    // rechazar acá cuesta una consulta; rechazar adentro obliga a deshacer el
+    // descuento de inventario y el consecutivo de factura.
+    await this.caja.exigirTurnoAbierto(tenantId, userId, dto.warehouseId);
+    await this.caja.exigirComprobante(tenantId, dto.payments);
     // El consecutivo de venta/factura se calcula leyendo el último existente:
     // dos cajas vendiendo a la vez pueden elegir el mismo número y chocar contra
     // el índice único. Reintentar la transacción completa (rollback + recálculo)
@@ -1807,6 +1814,14 @@ export class PosService {
       if (method === PaymentMethod.CREDITO) {
         throw new BadRequestException('Método de pago inválido');
       }
+      // Se comprueba con el método ya resuelto, no con el del DTO: quien
+      // confirma puede no mandarlo, y entonces vale el que se eligió al
+      // vender —que es justo el caso de la transferencia sin foto—.
+      await this.caja.exigirComprobante(
+        tenantId,
+        [{ method, receiptImageUrl: dto.receiptImageUrl }],
+        manager,
+      );
 
       const total = Number(sale.total);
       await manager.getRepository(Payment).save(
@@ -2172,7 +2187,11 @@ export class PosService {
     arId: string,
     dto: RecordArPaymentDto,
     tenantId: string,
+    // Quién está cobrando. El cuadre del día pregunta por vendedor, y quien
+    // recibe el abono no tiene por qué ser quien vendió meses atrás.
+    cobradoPor?: string,
   ): Promise<AccountsReceivable> {
+    await this.caja.exigirComprobante(tenantId, [dto]);
     return this.dataSource.transaction(async (manager) => {
       const arRepo = manager.getRepository(AccountsReceivable);
       const arPayRepo = manager.getRepository(AccountsReceivablePayment);
@@ -2218,6 +2237,7 @@ export class PosService {
         bankId: dto.bankId ?? null,
         receiptImageUrl: dto.receiptImageUrl,
         notes: dto.notes,
+        userId: cobradoPor ?? null,
         tenantId,
       });
       await arPayRepo.save(payment);
@@ -2275,6 +2295,7 @@ export class PosService {
     cuentas: AccountsReceivable[],
     dto: RecordArPaymentDto,
     tenantId: string,
+    cobradoPor?: string,
     descartadas = 0,
   ): Promise<{
     batchId: string;
@@ -2340,6 +2361,7 @@ export class PosService {
           receiptImageUrl: dto.receiptImageUrl,
           notes: dto.notes,
           allocationBatchId: batchId,
+          userId: cobradoPor ?? null,
           tenantId,
         }),
       );
@@ -2370,6 +2392,7 @@ export class PosService {
     accountIds: string[],
     dto: RecordArPaymentDto,
     tenantId: string,
+    cobradoPor?: string,
   ): Promise<{
     batchId: string;
     amount: number;
@@ -2383,6 +2406,7 @@ export class PosService {
       isFullyPaid: boolean;
     }[];
   }> {
+    await this.caja.exigirComprobante(tenantId, [dto]);
     const ids = [...new Set(accountIds)];
     if (!ids.length) {
       throw new BadRequestException('No se eligió ninguna cuenta por cobrar.');
@@ -2421,7 +2445,14 @@ export class PosService {
       // Se dice cuáles se cayeron en vez de cobrar en silencio de menos: quien
       // cobra tiene el dinero en la mano y necesita saber a qué se aplicó.
       const descartadas = ids.length - abiertas.length;
-      return this.aplicarAbono(manager, abiertas, dto, tenantId, descartadas);
+      return this.aplicarAbono(
+        manager,
+        abiertas,
+        dto,
+        tenantId,
+        cobradoPor,
+        descartadas,
+      );
     });
   }
 
@@ -2429,6 +2460,7 @@ export class PosService {
     clientId: string,
     dto: RecordArPaymentDto,
     tenantId: string,
+    cobradoPor?: string,
   ): Promise<{
     batchId: string;
     amount: number;
@@ -2442,6 +2474,7 @@ export class PosService {
       isFullyPaid: boolean;
     }[];
   }> {
+    await this.caja.exigirComprobante(tenantId, [dto]);
     return this.dataSource.transaction(async (manager) => {
       const settings = await manager.getRepository(StoreSettings).findOne({
         where: { tenantId },
@@ -2479,7 +2512,13 @@ export class PosService {
       }
       // El mismo reparto que usa el cobro por selección: una sola aritmética,
       // para que un arreglo en una no deje la otra atrás.
-      return this.aplicarAbono(manager, openAccounts, dto, tenantId);
+      return this.aplicarAbono(
+        manager,
+        openAccounts,
+        dto,
+        tenantId,
+        cobradoPor,
+      );
     });
   }
 

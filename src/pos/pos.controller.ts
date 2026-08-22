@@ -29,6 +29,7 @@ import {
 import { SendInvoiceDto } from './dto/send-invoice.dto.js';
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
 import { TenantId } from '../common/decorators/tenant-id.decorator.js';
+import { UserId } from '../common/decorators/user-id.decorator.js';
 import { SaleStatus } from '../common/enums/sale-status.enum.js';
 
 @ApiTags('pos')
@@ -157,8 +158,9 @@ export class PosController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: RecordArPaymentDto,
     @TenantId() tenantId: string,
+    @UserId() cobradoPor: string,
   ) {
-    return this.posService.recordArPayment(id, dto, tenantId);
+    return this.posService.recordArPayment(id, dto, tenantId, cobradoPor);
   }
 
   @Post('accounts-receivable/collect')
@@ -172,12 +174,14 @@ export class PosController {
   collectAccountsReceivable(
     @Body() dto: CollectAccountsDto,
     @TenantId() tenantId: string,
+    @UserId() cobradoPor: string,
   ) {
     const { accountIds, ...pago } = dto;
     return this.posService.collectAccountsReceivable(
       accountIds,
       pago,
       tenantId,
+      cobradoPor,
     );
   }
 
@@ -189,8 +193,14 @@ export class PosController {
     @Param('clientId', ParseUUIDPipe) clientId: string,
     @Body() dto: RecordArPaymentDto,
     @TenantId() tenantId: string,
+    @UserId() cobradoPor: string,
   ) {
-    return this.posService.recordClientBalancePayment(clientId, dto, tenantId);
+    return this.posService.recordClientBalancePayment(
+      clientId,
+      dto,
+      tenantId,
+      cobradoPor,
+    );
   }
 
   @Get('clients/:clientId/account-summary')

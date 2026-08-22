@@ -40,6 +40,16 @@ export class AccountsReceivablePayment extends TenantAwareEntity {
   @Column({ name: 'receipt_image_url', nullable: true })
   receiptImageUrl: string;
 
+  /**
+   * Quién recibió el abono.
+   *
+   * No es el vendedor de la factura: la deuda la cobra quien está en el
+   * mostrador ese día, y el cuadre pregunta por vendedor. Nulo en las filas
+   * anteriores a que existiera la columna.
+   */
+  @Column({ name: 'user_id', type: 'uuid', nullable: true })
+  userId: string | null;
+
   @Column({ nullable: true })
   notes: string;
 

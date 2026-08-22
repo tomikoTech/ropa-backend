@@ -126,6 +126,14 @@ export const MODULES: ModuleDef[] = [
   },
 
   // ── Finanzas ──────────────────────────────────────────────────────────────
+  {
+    key: 'caja',
+    label: 'Cuadre y cierre de caja',
+    group: 'Finanzas',
+    hint:
+      '"Ver" es el cuadre del día (efectivo, transferencias y comprobantes) · ' +
+      '"Crear" es cerrar un turno · "Editar" es reabrirlo',
+  },
   { key: 'incomes', label: 'Ingresos', group: 'Finanzas' },
   { key: 'expenses', label: 'Egresos y caja menor', group: 'Finanzas' },
   { key: 'banks', label: 'Bancos', group: 'Finanzas' },
@@ -217,6 +225,11 @@ const ROUTE_MODULES: Record<string, string> = {
   consignments: 'consignments',
   reservations: 'reservations',
   production: 'production',
+  // El cuadre y el cierre del turno. `caja/cierres` va aparte para que reabrir
+  // (POST sobre algo que ya existe) cuente como EDITAR y no como CREAR: quien
+  // puede cerrar su turno no debería poder reabrirlo solo.
+  'caja/cierres': 'caja',
+  caja: 'caja',
   incomes: 'incomes',
   expenses: 'expenses',
   banks: 'banks',
@@ -269,6 +282,11 @@ const ALWAYS_ALLOWED: Record<string, string> = {
   // lectura del catálogo —nombre, foto y existencias, sin costos— y lo que
   // se haga después sí pasa por la matriz.
   'GET products/search/pos-catalog': 'Buscador de productos compartido',
+  // Si el cajero tiene el turno cerrado, el POS se lo dice antes de que arme
+  // el carrito. Atarlo al permiso de Caja escondía el aviso justo de quien lo
+  // necesita —el cajero, que casi nunca tiene ese permiso— y lo dejaba
+  // enterándose al cobrar, con el cliente enfrente.
+  'GET caja/turno': 'Estado del propio turno',
 };
 
 export const ALWAYS_ALLOWED_ROUTES = ALWAYS_ALLOWED;

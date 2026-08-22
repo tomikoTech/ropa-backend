@@ -318,6 +318,24 @@ export class UpdateStoreSettingsDto {
   @IsBoolean()
   unitTrackingEnabled?: boolean;
 
+  // ─── Cuadre y cierre de caja ───
+
+  @ApiPropertyOptional({
+    description:
+      'Exige la foto del comprobante al cobrar por transferencia (venta y abono)',
+  })
+  @IsOptional()
+  @IsBoolean()
+  comprobanteTransferenciaObligatorio?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'Permite cerrar el turno de un vendedor en un local: mientras esté cerrado no vende ni presta',
+  })
+  @IsOptional()
+  @IsBoolean()
+  cierreDeCajaEnabled?: boolean;
+
   // ─── Reposición automática ───
 
   @ApiPropertyOptional({

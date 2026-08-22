@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { StockLedgerModule } from './ledger/stock-ledger.module.js';
+import { CajaModule } from '../caja/caja.module.js';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { InventoryService } from './inventory.service.js';
 import { LocationsService } from './locations.service.js';
@@ -55,6 +56,8 @@ import { SaleItem } from '../pos/entities/sale-item.entity.js';
     ]),
     ProductsModule,
     StockLedgerModule,
+    // Prestar mercancía con el turno cerrado es lo que el cierre evita.
+    CajaModule,
   ],
   controllers: [
     InventoryController,

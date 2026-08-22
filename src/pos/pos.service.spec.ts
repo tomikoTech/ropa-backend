@@ -51,6 +51,7 @@ describe('PosService.findAll', () => {
       unused,
       unused,
       unused,
+      unused,
     );
     return { service, qb, find };
   };

@@ -30,6 +30,7 @@ import { ProductionModule } from './production/production.module.js';
 import { AdminModule } from './admin/admin.module.js';
 import { BanksModule } from './banks/banks.module.js';
 import { IncomesModule } from './incomes/incomes.module.js';
+import { CajaModule } from './caja/caja.module.js';
 import { QuotationsModule } from './quotations/quotations.module.js';
 import { ReservationsModule } from './reservations/reservations.module.js';
 import { CommonModule } from './common/common.module.js';
@@ -80,6 +81,7 @@ import { WarehouseScopeGuard } from './access/warehouse-scope.guard.js';
     AdminModule,
     BanksModule,
     IncomesModule,
+    CajaModule,
     QuotationsModule,
     ReservationsModule,
     CommonModule,

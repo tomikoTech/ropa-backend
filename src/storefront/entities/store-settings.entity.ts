@@ -410,6 +410,28 @@ export class StoreSettings extends TenantAwareEntity {
   })
   leftoverCommissionValue: number;
 
+  // ─── Cuadre y cierre de caja ───
+
+  /**
+   * Exigir la foto del comprobante al cobrar por transferencia.
+   *
+   * «Yo al final del día entro a transferencias, entro a la foto, corroboro
+   * que haya entrado esa plata». Apagado por defecto: exigirlo frena el cobro
+   * con el cliente enfrente, y eso lo decide cada tienda, no nosotros.
+   */
+  @Column({ name: 'comprobante_transferencia_obligatorio', default: false })
+  comprobanteTransferenciaObligatorio: boolean;
+
+  /**
+   * Cerrar el turno del vendedor al terminar el día.
+   *
+   * «Los vendedores estaban vendiendo y liquidando a las 10 de la noche».
+   * Apagado por defecto: deja a alguien sin poder vender, y ninguna tienda
+   * debe amanecer con eso encendido sin haberlo pedido.
+   */
+  @Column({ name: 'cierre_de_caja_enabled', default: false })
+  cierreDeCajaEnabled: boolean;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 

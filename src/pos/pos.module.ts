@@ -24,6 +24,7 @@ import { StockUnitContent } from '../inventory/entities/stock-unit-content.entit
 import { StockUnitEvent } from '../inventory/entities/stock-unit-event.entity.js';
 import { StockLedgerModule } from '../inventory/ledger/stock-ledger.module.js';
 import { ReposicionAutomaticaModule } from '../inventory/reposicion-automatica.module.js';
+import { CajaModule } from '../caja/caja.module.js';
 
 @Module({
   imports: [
@@ -47,6 +48,9 @@ import { ReposicionAutomaticaModule } from '../inventory/reposicion-automatica.m
     ClientsModule,
     StockLedgerModule,
     ReposicionAutomaticaModule,
+    // El POS le pregunta dos cosas antes de cobrar: si el turno sigue abierto
+    // y si esta tienda exige comprobante para la transferencia.
+    CajaModule,
   ],
   controllers: [PosController],
   providers: [

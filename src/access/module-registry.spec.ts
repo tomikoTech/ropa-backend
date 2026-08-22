@@ -48,6 +48,7 @@ describe('catálogo de módulos', () => {
       'suppliers',
       'purchases',
       'purchases/accounts-payable',
+      'caja',
       'incomes',
       'expenses',
       'banks',
