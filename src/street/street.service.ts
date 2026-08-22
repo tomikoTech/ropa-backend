@@ -14,7 +14,6 @@ import {
 import { StreetDispatchItem } from './entities/street-dispatch-item.entity.js';
 import { ProductVariant } from '../products/entities/product-variant.entity.js';
 import { Stock } from '../inventory/entities/stock.entity.js';
-import { StockMovement } from '../inventory/entities/stock-movement.entity.js';
 import {
   StockUnit,
   StockUnitKind,
@@ -29,12 +28,12 @@ import { Bank } from '../banks/entities/bank.entity.js';
 import { Sale } from '../pos/entities/sale.entity.js';
 import { SaleItem } from '../pos/entities/sale-item.entity.js';
 import { Payment } from '../pos/entities/payment.entity.js';
-import { MovementType } from '../common/enums/movement-type.enum.js';
 import { SaleStatus } from '../common/enums/sale-status.enum.js';
 import { SaleChannel } from '../common/enums/sale-channel.enum.js';
 import { PaymentMethod } from '../common/enums/payment-method.enum.js';
 import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
 import { InvoiceService } from '../pos/services/invoice.service.js';
+import { StockLedgerService } from '../inventory/ledger/stock-ledger.service.js';
 import {
   buildSellerCode,
   settlementSummary,
@@ -65,6 +64,7 @@ export class StreetService {
     private readonly itemRepo: Repository<StreetDispatchItem>,
     private readonly dataSource: DataSource,
     private readonly invoiceService: InvoiceService,
+    private readonly ledger: StockLedgerService,
   ) {}
 
   // ── Patinadores ──────────────────────────────────────────────────────────
@@ -301,27 +301,15 @@ export class StreetService {
             );
           }
 
-          // Sale del inventario: está en la calle, no en la bodega.
-          stock!.quantity = disponible - line.quantity;
-          await manager.getRepository(Stock).save(stock!);
-
-          await manager.getRepository(StockMovement).save(
-            manager.getRepository(StockMovement).create({
-              variantId: line.variantId,
-              warehouseId: dto.warehouseId,
-              movementType: MovementType.OUT,
-              quantity: line.quantity,
-              referenceType: REF_DISPATCH,
-              referenceId: dispatch.id,
-              notes: `Remisión rápida ${dispatch.dispatchNumber} a ${seller.name}`,
-              createdById: userId,
-              tenantId,
-            }),
-          );
-
+          // Sale del inventario: está en la calle, no en la bodega. Los
+          // códigos salen con él; antes se quedaban figurando disponibles y
+          // alguien iba a buscar en la bodega un par que andaba en un carro.
+          // El código escaneado es **el que sale**. Se valida antes de mover:
+          // si se dejaba que el ledger eligiera por antigüedad, salía un par
+          // distinto del que el patinador se llevaba, y quedaban dos bultos
+          // fuera del inventario por una sola unidad de existencia.
           if (line.stockUnitId) {
-            const unitRepo = manager.getRepository(StockUnit);
-            const unit = await unitRepo.findOne({
+            const unit = await manager.getRepository(StockUnit).findOne({
               where: { id: line.stockUnitId, tenantId },
             });
             if (!unit) throw new NotFoundException('El código no existe');
@@ -330,27 +318,22 @@ export class StreetService {
                 `${unit.kind === StockUnitKind.BOX ? 'La caja' : 'El par'} ${unit.barcode} ya no está disponible.`,
               );
             }
-            await unitRepo.update(
-              { id: unit.id, tenantId },
-              { status: StockUnitStatus.CONSIGNED },
-            );
-            await manager.getRepository(StockUnitEvent).save(
-              manager.getRepository(StockUnitEvent).create({
-                stockUnitId: unit.id,
-                eventType: StockUnitEventType.CONSIGNED,
-                fromStatus: StockUnitStatus.IN_STOCK,
-                toStatus: StockUnitStatus.CONSIGNED,
-                referenceType: REF_DISPATCH,
-                referenceId: dispatch.id,
-                userId,
-                metadata: {
-                  dispatchNumber: dispatch.dispatchNumber,
-                  seller: seller.name,
-                },
-                tenantId,
-              }),
-            );
           }
+
+          // Sale del inventario: está en la calle, no en la bodega. Los
+          // códigos salen con él; antes se quedaban figurando disponibles y
+          // alguien iba a buscar en la bodega un par que andaba en un carro.
+          await this.ledger.mover(manager, {
+            variantId: line.variantId,
+            warehouseId: dto.warehouseId,
+            cantidad: -line.quantity,
+            motivo: 'STREET',
+            referenciaId: dispatch.id,
+            notas: `Remisión rápida ${dispatch.dispatchNumber} a ${seller.name}`,
+            usuarioId: userId,
+            unidades: line.stockUnitId ? [line.stockUnitId] : undefined,
+            tenantId,
+          });
 
           const precio =
             line.unitPrice ??
@@ -550,52 +533,48 @@ export class StreetService {
               { quantitySold: line.sold, quantityReturned: line.returned },
             );
 
-          if (line.returned > 0) {
-            const stockRepo = manager.getRepository(Stock);
-            let stock = await stockRepo.findOne({
-              where: {
-                variantId: item.variantId,
-                warehouseId: dispatch.warehouseId,
-                tenantId,
-              },
-              lock: { mode: 'pessimistic_write' },
-            });
-            if (!stock) {
-              stock = stockRepo.create({
-                variantId: item.variantId,
-                warehouseId: dispatch.warehouseId,
-                quantity: 0,
-                tenantId,
-              });
-            }
-            stock.quantity = Number(stock.quantity) + line.returned;
-            await stockRepo.save(stock);
+          // Vuelve entero, sale entero, o se rompió por el camino.
+          //
+          // Un renglón puede ser una caja de seis. Si el patinador vendió
+          // cuatro y trajo dos, esa caja ya no existe como bulto: reponerla
+          // completa metería seis códigos por dos unidades de existencia.
+          const volvioEntero = line.returned === item.quantity;
+          const seRompio =
+            !!item.stockUnitId && line.returned > 0 && !volvioEntero;
 
-            await manager.getRepository(StockMovement).save(
-              manager.getRepository(StockMovement).create({
-                variantId: item.variantId,
-                warehouseId: dispatch.warehouseId,
-                movementType: MovementType.IN,
-                quantity: line.returned,
-                referenceType: REF_DISPATCH,
-                referenceId: dispatch.id,
-                notes:
-                  `Devolución de ${dispatch.dispatchNumber} ` +
-                  `(${dispatch.seller.name})`,
-                createdById: userId,
-                tenantId,
-              }),
-            );
+          // Lo que volvió entra a la bodega con su código: el mismo par que
+          // salió, no uno nuevo.
+          if (line.returned > 0) {
+            await this.ledger.mover(manager, {
+              variantId: item.variantId,
+              warehouseId: dispatch.warehouseId,
+              cantidad: line.returned,
+              motivo: 'STREET',
+              referenciaId: dispatch.id,
+              notas:
+                `Devolución de ${dispatch.dispatchNumber} ` +
+                `(${dispatch.seller.name})` +
+                (seRompio
+                  ? ' · el bulto volvió partido: se repone la existencia sin código'
+                  : ''),
+              usuarioId: userId,
+              unidades:
+                volvioEntero && item.stockUnitId
+                  ? [item.stockUnitId]
+                  : undefined,
+              tenantId,
+            });
           }
 
-          // El bulto etiquetado: vendido si se vendió, de vuelta si volvió.
-          if (item.stockUnitId) {
+          // El bulto etiquetado que no volvió entero: vendido si se vendió
+          // todo, dado de baja si se partió o si no volvió ni se vendió. El
+          // que volvió completo ya lo puso el ledger arriba, en el mismo
+          // movimiento que repuso la existencia.
+          if (item.stockUnitId && !volvioEntero) {
             const nextStatus =
-              line.sold > 0
+              line.sold > 0 && line.returned === 0
                 ? StockUnitStatus.SOLD
-                : line.returned > 0
-                  ? StockUnitStatus.IN_STOCK
-                  : StockUnitStatus.WRITTEN_OFF;
+                : StockUnitStatus.WRITTEN_OFF;
             await manager.getRepository(StockUnit).update(
               { id: item.stockUnitId, tenantId },
               {
@@ -608,9 +587,7 @@ export class StreetService {
                 eventType:
                   nextStatus === StockUnitStatus.SOLD
                     ? StockUnitEventType.SOLD
-                    : nextStatus === StockUnitStatus.IN_STOCK
-                      ? StockUnitEventType.RETURNED
-                      : StockUnitEventType.WRITTEN_OFF,
+                    : StockUnitEventType.WRITTEN_OFF,
                 fromStatus: StockUnitStatus.CONSIGNED,
                 toStatus: nextStatus,
                 referenceType: REF_DISPATCH,
@@ -782,64 +759,17 @@ export class StreetService {
       await this.lockDispatch(manager, dispatch.id, tenantId);
 
       for (const item of dispatch.items) {
-        const stockRepo = manager.getRepository(Stock);
-        let stock = await stockRepo.findOne({
-          where: {
-            variantId: item.variantId,
-            warehouseId: dispatch.warehouseId,
-            tenantId,
-          },
-          lock: { mode: 'pessimistic_write' },
+        await this.ledger.mover(manager, {
+          variantId: item.variantId,
+          warehouseId: dispatch.warehouseId,
+          cantidad: item.quantity,
+          motivo: 'STREET',
+          referenciaId: dispatch.id,
+          notas: `Anulación de ${dispatch.dispatchNumber}`,
+          usuarioId: userId,
+          unidades: item.stockUnitId ? [item.stockUnitId] : undefined,
+          tenantId,
         });
-        if (!stock) {
-          stock = stockRepo.create({
-            variantId: item.variantId,
-            warehouseId: dispatch.warehouseId,
-            quantity: 0,
-            tenantId,
-          });
-        }
-        stock.quantity = Number(stock.quantity) + item.quantity;
-        await stockRepo.save(stock);
-
-        await manager.getRepository(StockMovement).save(
-          manager.getRepository(StockMovement).create({
-            variantId: item.variantId,
-            warehouseId: dispatch.warehouseId,
-            movementType: MovementType.IN,
-            quantity: item.quantity,
-            referenceType: REF_DISPATCH,
-            referenceId: dispatch.id,
-            notes: `Anulación de ${dispatch.dispatchNumber}`,
-            createdById: userId,
-            tenantId,
-          }),
-        );
-
-        if (item.stockUnitId) {
-          await manager
-            .getRepository(StockUnit)
-            .update(
-              { id: item.stockUnitId, tenantId },
-              { status: StockUnitStatus.IN_STOCK },
-            );
-          await manager.getRepository(StockUnitEvent).save(
-            manager.getRepository(StockUnitEvent).create({
-              stockUnitId: item.stockUnitId,
-              eventType: StockUnitEventType.RETURNED,
-              fromStatus: StockUnitStatus.CONSIGNED,
-              toStatus: StockUnitStatus.IN_STOCK,
-              referenceType: REF_DISPATCH,
-              referenceId: dispatch.id,
-              userId,
-              metadata: {
-                reason: 'DISPATCH_CANCELLED',
-                dispatchNumber: dispatch.dispatchNumber,
-              },
-              tenantId,
-            }),
-          );
-        }
       }
 
       await manager

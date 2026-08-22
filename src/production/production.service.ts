@@ -13,6 +13,7 @@ import { ProductVariant } from '../products/entities/product-variant.entity.js';
 import { RecipeService } from '../products/services/recipe.service.js';
 import { MovementType } from '../common/enums/movement-type.enum.js';
 import { CreateProductionDto } from './dto/create-production.dto.js';
+import { StockLedgerService } from '../inventory/ledger/stock-ledger.service.js';
 
 @Injectable()
 export class ProductionService {
@@ -21,6 +22,7 @@ export class ProductionService {
     private readonly productionRepo: Repository<Production>,
     private readonly recipeService: RecipeService,
     private readonly dataSource: DataSource,
+    private readonly ledger: StockLedgerService,
   ) {}
 
   async create(
@@ -116,22 +118,16 @@ export class ProductionService {
               `Esencia "${variant.sku}": stock insuficiente (disponible ${available} g, requerido ${item.quantity} g)`,
             );
           }
-          stock!.quantity = available - item.quantity;
-          await stockRepo.save(stock!);
-
-          await movementRepo.save(
-            movementRepo.create({
-              variantId: item.variantId,
-              warehouseId: dto.warehouseId,
-              movementType: MovementType.OUT,
-              quantity: item.quantity,
-              referenceType: 'PRODUCTION',
-              referenceId: saved.id,
-              notes: 'Consumo de esencia (producción)',
-              createdById: userId,
-              tenantId,
-            }),
-          );
+          await this.ledger.mover(manager, {
+            variantId: item.variantId,
+            warehouseId: dto.warehouseId,
+            cantidad: -item.quantity,
+            motivo: 'PRODUCTION',
+            referenciaId: saved.id,
+            notas: 'Consumo de esencia (producción)',
+            usuarioId: userId,
+            tenantId,
+          });
 
           await itemRepo.save(
             itemRepo.create({
@@ -169,22 +165,16 @@ export class ProductionService {
             minStock: 0,
           });
         }
-        stock.quantity = Number(stock.quantity) + dto.producedQuantity;
-        await stockRepo.save(stock);
-
-        await movementRepo.save(
-          movementRepo.create({
-            variantId: dto.producedVariantId,
-            warehouseId: dto.warehouseId,
-            movementType: MovementType.IN,
-            quantity: dto.producedQuantity,
-            referenceType: 'PRODUCTION',
-            referenceId: saved.id,
-            notes: 'Producción de loción',
-            createdById: userId,
-            tenantId,
-          }),
-        );
+        await this.ledger.mover(manager, {
+          variantId: dto.producedVariantId,
+          warehouseId: dto.warehouseId,
+          cantidad: dto.producedQuantity,
+          motivo: 'PRODUCTION',
+          referenciaId: saved.id,
+          notas: 'Producción de loción',
+          usuarioId: userId,
+          tenantId,
+        });
       }
 
       const full = await productionRepo.findOne({

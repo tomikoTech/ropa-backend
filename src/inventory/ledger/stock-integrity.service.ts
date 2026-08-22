@@ -180,9 +180,9 @@ export class StockIntegrityService {
    * ¿Quedó cuadrada esta variante y bodega?
    *
    * Lo llama el `StockLedger` **dentro** de la transacción, justo antes de
-   * confirmar. Si no cuadra, la operación completa se deshace: es preferible
-   * que una venta falle a que el inventario quede mintiendo, porque un
-   * descuadre no avisa y se descubre semanas después contando a mano.
+   * confirmar. No frena nada: deja el descuadre anotado en el movimiento y en
+   * el log, para que se vea en vez de descubrirse semanas después contando a
+   * mano.
    */
   async verificarPunto(
     manager: EntityManager,
@@ -225,7 +225,7 @@ export class StockIntegrityService {
                            AND su.status = 'IN_STOCK'), 0) AS etiquetadas
          FROM product_variants pv
          JOIN products p ON p.id = pv.product_id
-         JOIN warehouses w ON w.id = $3
+         JOIN warehouses w ON w.id = $3 AND w.tenant_id = $1
         WHERE pv.id = $2 AND pv.tenant_id = $1
         LIMIT 1`,
       [tenantId, variantId, warehouseId],

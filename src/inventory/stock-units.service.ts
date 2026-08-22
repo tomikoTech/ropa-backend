@@ -18,7 +18,6 @@ import {
   StockUnitStatus,
 } from './entities/stock-unit.entity.js';
 import { Stock } from './entities/stock.entity.js';
-import { StockMovement } from './entities/stock-movement.entity.js';
 import { PurchaseBoxLine } from '../purchases/entities/purchase-box-line.entity.js';
 import { PurchaseOrder } from '../purchases/entities/purchase-order.entity.js';
 import { PurchaseOrderItem } from '../purchases/entities/purchase-order-item.entity.js';
@@ -45,9 +44,10 @@ import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
 import { Shelf } from './entities/shelf.entity.js';
 import { sortSizes } from './box-description.js';
 import {
-  IntakeBoxesDto,
-  TransferUnitsDto,
-} from './dto/stock-unit.dto.js';
+  StockLedgerService,
+  type MotivoMovimiento,
+} from './ledger/stock-ledger.service.js';
+import { IntakeBoxesDto, TransferUnitsDto } from './dto/stock-unit.dto.js';
 
 /** Identificadores que llegan por query string: se validan antes de consultar. */
 /**
@@ -58,9 +58,6 @@ const INTAKE_ORDER_SEQUENCE = 0;
 
 /** Origen de los movimientos y eventos del ingreso directo. */
 const INTAKE_REFERENCE = 'STOCK_UNIT_INTAKE';
-
-/** Origen de los movimientos y eventos del traslado de bultos. */
-const TRANSFER_REFERENCE = 'STOCK_UNIT_TRANSFER';
 
 /** Por qué un código no se puede mover, en palabras de la bodega. */
 const DESCRIPCION_DE_ESTADO: Record<StockUnitStatus, string> = {
@@ -89,6 +86,7 @@ export class StockUnitsService {
     @InjectRepository(SaleItem)
     private readonly saleItemRepo: Repository<SaleItem>,
     private readonly dataSource: DataSource,
+    private readonly ledger: StockLedgerService,
   ) {}
 
   /**
@@ -280,6 +278,11 @@ export class StockUnitsService {
             quantity: toReceive * line.unitsPerBox,
             userId,
             tenantId,
+            // Sin esto el movimiento quedaba como «ajuste» y sin referencia:
+            // en el historial, una compra recibida por cajas no se distinguía
+            // de una corrección hecha a mano.
+            referenceType: 'PURCHASE_BOX_LINE',
+            referenceId: line.id,
             notes: `Recepción de ${toReceive} caja(s) · renglón #${line.consecutive}`,
           },
           MovementType.IN,
@@ -584,9 +587,6 @@ export class StockUnitsService {
         );
       }
 
-      const stockRepo = m.getRepository(Stock);
-      const movementRepo = m.getRepository(StockMovement);
-      const eventRepo = m.getRepository(StockUnitEvent);
       const motivo = dto.notes?.trim();
 
       for (const unit of units) {
@@ -609,98 +609,45 @@ export class StockUnitsService {
         const origenId = unit.warehouseId;
         const cantidad = Number(unit.quantity);
 
-        const origen = await stockRepo
-          .createQueryBuilder('stock')
-          .setLock('pessimistic_write')
-          .where('stock.variantId = :variantId', { variantId: unit.variantId })
-          .andWhere('stock.warehouseId = :warehouseId', {
-            warehouseId: origenId,
-          })
-          .andWhere('stock.tenantId = :tenantId', { tenantId })
-          .getOne();
-        if (!origen || Number(origen.quantity) < cantidad) {
-          throw new BadRequestException(
-            `El inventario de la bodega de origen no alcanza para mover ${unit.barcode} (${cantidad} unidades). Cuadra el inventario antes de trasladar.`,
-          );
-        }
-        let llegada = await stockRepo.findOne({
-          where: {
-            variantId: unit.variantId,
-            warehouseId: dto.toWarehouseId,
-            tenantId,
-          },
-        });
-        if (!llegada) {
-          llegada = stockRepo.create({
-            variantId: unit.variantId,
-            warehouseId: dto.toWarehouseId,
-            quantity: 0,
-            tenantId,
-          });
-        }
-        origen.quantity = Number(origen.quantity) - cantidad;
-        llegada.quantity = Number(llegada.quantity) + cantidad;
-        await stockRepo.save(origen);
-        await stockRepo.save(llegada);
-
-        // Dos filas, como cualquier traslado: el signo dice de qué bodega
-        // salió y a cuál entró.
+        // Mover este bulto es un traslado como cualquier otro: la existencia
+        // y el código viajan juntos, y el código se conserva. El ledger
+        // bloquea la fila de origen y rechaza el traslado si no alcanza.
         const nota = motivo
           ? `Traslado de ${unit.barcode} · ${motivo}`
           : `Traslado de ${unit.barcode}`;
-        await movementRepo.save([
-          movementRepo.create({
-            variantId: unit.variantId,
-            warehouseId: origenId,
-            movementType: MovementType.TRANSFER,
-            quantity: -cantidad,
-            referenceType: TRANSFER_REFERENCE,
-            referenceId: unit.id,
-            notes: nota,
-            createdById: userId,
-            tenantId,
-          }),
-          movementRepo.create({
-            variantId: unit.variantId,
-            warehouseId: dto.toWarehouseId,
-            movementType: MovementType.TRANSFER,
-            quantity: cantidad,
-            referenceType: TRANSFER_REFERENCE,
-            referenceId: unit.id,
-            notes: nota,
-            createdById: userId,
-            tenantId,
-          }),
-        ]);
+        await this.ledger.trasladar(m, {
+          variantId: unit.variantId,
+          desdeWarehouseId: origenId,
+          hastaWarehouseId: dto.toWarehouseId,
+          cantidad,
+          motivo: 'STOCK_UNIT_TRANSFER',
+          motivos: {
+            salida: 'STOCK_UNIT_TRANSFER',
+            entrada: 'STOCK_UNIT_TRANSFER',
+          },
+          referenciaId: unit.id,
+          notas: nota,
+          usuarioId: userId,
+          unidades: [unit.id],
+          tenantId,
+        });
 
         // El estante viejo es de la otra bodega: se limpia salvo que digan a
-        // cuál llega.
-        unit.warehouseId = dto.toWarehouseId;
-        unit.standId = dto.toStandId ?? null;
-        await unitRepo.save(unit);
-
-        await eventRepo.save(
-          eventRepo.create({
-            stockUnitId: unit.id,
-            eventType: StockUnitEventType.TRANSFERRED,
-            fromStatus: StockUnitStatus.IN_STOCK,
-            toStatus: StockUnitStatus.IN_STOCK,
-            referenceType: TRANSFER_REFERENCE,
-            referenceId: unit.id,
-            userId,
-            metadata: {
-              fromWarehouseId: origenId,
-              toWarehouseId: dto.toWarehouseId,
-              standId: dto.toStandId ?? null,
-              quantity: cantidad,
-              notes: motivo ?? null,
-            },
-            tenantId,
-          }),
-        );
+        // cuál llega. La bodega ya la movió el ledger.
+        if (dto.toStandId !== undefined) {
+          await unitRepo.update(
+            { id: unit.id, tenantId },
+            { standId: dto.toStandId ?? null },
+          );
+        }
       }
 
-      return units;
+      // Se releen: el ledger movió la bodega con un UPDATE, así que los
+      // objetos cargados arriba todavía dicen la de origen, y quien imprime
+      // etiquetas con esta respuesta imprimiría la bodega equivocada.
+      return unitRepo.find({
+        where: { id: In(units.map((u) => u.id)), tenantId },
+      });
     });
   }
 
@@ -987,17 +934,21 @@ export class StockUnitsService {
           deltas.set(variantId, (deltas.get(variantId) ?? 0) + quantity);
         }
         for (const [variantId, delta] of deltas) {
-          let stock = stockByVariant.get(variantId);
-          if (!stock) {
-            stock = stockRepo.create({
-              variantId,
-              warehouseId: box.warehouseId,
-              quantity: 0,
-              tenantId,
-            });
-          }
-          stock.quantity = Number(stock.quantity) + delta;
-          await stockRepo.save(stock);
+          if (delta === 0) continue;
+          // Los bultos los crea y marca este mismo bloque —la caja pasa a
+          // SPLIT y nacen sus pares—, así que el ledger solo mueve el
+          // agregado; si además creara códigos, el inventario se duplicaría.
+          await this.ledger.mover(m, {
+            variantId,
+            warehouseId: box.warehouseId,
+            cantidad: delta,
+            motivo: 'STOCK_UNIT',
+            referenciaId: box.id,
+            notas: `Apertura de la caja ${box.barcode}`,
+            usuarioId: userId,
+            bultosYaMovidos: true,
+            tenantId,
+          });
         }
 
         const saved = await unitRepo.save(units);
@@ -1259,25 +1210,22 @@ export class StockUnitsService {
           'El stock agregado no alcanza para registrar esta diferencia.',
         );
       }
-      stock.quantity = adjustedStock;
-      await stockRepo.save(stock);
-
       if (delta !== 0) {
-        await m.getRepository(StockMovement).save(
-          m.getRepository(StockMovement).create({
-            variantId: box.variantId,
-            warehouseId: box.warehouseId,
-            tenantId,
-            movementType: MovementType.ADJUSTMENT,
-            quantity: adjustedStock,
-            referenceType: 'StockUnit',
-            referenceId: box.id,
-            createdById: userId,
-            notes: `Detalle físico de caja ${box.barcode}: ${box.quantity} -> ${newQuantity} (${delta > 0 ? '+' : ''}${delta})`,
-          }),
-        );
+        // La caja es un solo bulto y su cantidad cambia abajo: el ledger mueve
+        // el agregado para que las dos cuentas sigan dando lo mismo.
+        await this.ledger.mover(m, {
+          variantId: box.variantId,
+          warehouseId: box.warehouseId,
+          cantidad: delta,
+          motivo: 'STOCK_UNIT',
+          referenciaId: box.id,
+          notas: `Detalle físico de caja ${box.barcode}: ${box.quantity} -> ${newQuantity} (${delta > 0 ? '+' : ''}${delta})`,
+          usuarioId: userId,
+          bultosYaMovidos: true,
+          tenantId,
+        });
       }
-      box.quantity = newQuantity;
+      box.quantity = newQuantity; // ledger-exento: es un bulto, no la existencia
       await unitRepo.save(box);
       await m.getRepository(StockUnitEvent).save(
         m.getRepository(StockUnitEvent).create({
@@ -1309,7 +1257,10 @@ export class StockUnitsService {
       where: { barcode, tenantId },
       relations: { product: true, color: true, size: true, stand: true },
     });
-    if (!unit) throw new NotFoundException('No existe ninguna caja ni par con ese código');
+    if (!unit)
+      throw new NotFoundException(
+        'No existe ninguna caja ni par con ese código',
+      );
     return unit;
   }
 
@@ -1501,7 +1452,10 @@ export class StockUnitsService {
           relations: { size: true },
         })
       : [];
-    const contentsByBox = new Map<string, { size: string; quantity: number }[]>();
+    const contentsByBox = new Map<
+      string,
+      { size: string; quantity: number }[]
+    >();
     for (const row of contentRows) {
       if (Number(row.actualQuantity) <= 0) continue;
       const actual = contentsByBox.get(row.boxUnitId) ?? [];
@@ -1623,13 +1577,8 @@ export class StockUnitsService {
       );
     }
     const kind = params.kind?.trim().toUpperCase();
-    if (
-      kind &&
-      !Object.values(StockUnitKind).includes(kind as StockUnitKind)
-    ) {
-      throw new BadRequestException(
-        'Tipo inválido: solo cajas o pares.',
-      );
+    if (kind && !Object.values(StockUnitKind).includes(kind as StockUnitKind)) {
+      throw new BadRequestException('Tipo inválido: solo cajas o pares.');
     }
     if (
       params.status &&
@@ -1795,38 +1744,23 @@ export class StockUnitsService {
     });
     if (!variant) return;
 
-    const stockRepo = m.getRepository(Stock);
-    let stock = await stockRepo.findOne({
-      where: {
-        variantId: variant.id,
-        warehouseId: params.warehouseId,
-        tenantId: params.tenantId,
-      },
-    });
-    if (!stock) {
-      stock = stockRepo.create({
-        variantId: variant.id,
-        warehouseId: params.warehouseId,
-        quantity: 0,
-        tenantId: params.tenantId,
-      });
-    }
     const delta = type === MovementType.IN ? params.quantity : -params.quantity;
-    stock.quantity += delta;
-    await stockRepo.save(stock);
-
-    await m.getRepository(StockMovement).save(
-      m.getRepository(StockMovement).create({
-        variantId: variant.id,
-        warehouseId: params.warehouseId,
-        movementType: type,
-        quantity: params.quantity,
-        createdById: params.userId,
-        notes: params.notes,
-        referenceType: params.referenceType,
-        referenceId: params.referenceId,
-        tenantId: params.tenantId,
-      }),
-    );
+    // Los códigos ya los creó (o los marcó) quien llama: este servicio es
+    // precisamente el que los maneja. El ledger mueve el agregado, deja el
+    // movimiento en el historial y comprueba que las dos cuentas cuadren.
+    await this.ledger.mover(m, {
+      variantId: variant.id,
+      warehouseId: params.warehouseId,
+      cantidad: delta,
+      // El origen que trae quien llama ya dice qué pasó —recepción por cajas,
+      // ingreso directo, movimiento de un bulto—: se conserva tal cual para
+      // que el historial siga nombrando las cosas por su nombre.
+      motivo: (params.referenceType as MotivoMovimiento) ?? 'ADJUSTMENT',
+      referenciaId: params.referenceId ?? null,
+      notas: params.notes ?? null,
+      usuarioId: params.userId ?? null,
+      bultosYaMovidos: true,
+      tenantId: params.tenantId,
+    });
   }
 }

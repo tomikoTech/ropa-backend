@@ -16,7 +16,11 @@ import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
 import { Category } from '../categories/entities/category.entity.js';
 import { Warehouse } from '../inventory/entities/warehouse.entity.js';
 import { Stock } from '../inventory/entities/stock.entity.js';
-import { StockUnit, StockUnitKind, StockUnitStatus } from '../inventory/entities/stock-unit.entity.js';
+import {
+  StockUnit,
+  StockUnitKind,
+  StockUnitStatus,
+} from '../inventory/entities/stock-unit.entity.js';
 import { CreateProductDto } from './dto/create-product.dto.js';
 import { UpdateProductDto } from './dto/update-product.dto.js';
 import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
@@ -114,15 +118,14 @@ export class ProductsService {
       .andWhere('LOWER(w.name) = :n', { n: 'frascos' })
       .getOne();
     if (frascosWh) {
-      await this.stockRepository.save(
-        this.stockRepository.create({
-          variantId: savedVariant.id,
-          warehouseId: frascosWh.id,
-          quantity: 0,
-          minStock: 0,
-          tenantId,
-        }),
-      );
+      const filaEnCero = this.stockRepository.create({
+        variantId: savedVariant.id,
+        warehouseId: frascosWh.id,
+        quantity: 0,
+        minStock: 0,
+        tenantId,
+      });
+      await this.stockRepository.save(filaEnCero); // ledger-exento: nace en cero
     }
 
     return savedVariant.id;
@@ -192,15 +195,14 @@ export class ProductsService {
       .andWhere('LOWER(w.name) = :n', { n: 'esencias' })
       .getOne();
     if (essenceWh) {
-      await this.stockRepository.save(
-        this.stockRepository.create({
-          variantId: savedVariant.id,
-          warehouseId: essenceWh.id,
-          quantity: 0,
-          minStock: 0,
-          tenantId,
-        }),
-      );
+      const filaEnCero = this.stockRepository.create({
+        variantId: savedVariant.id,
+        warehouseId: essenceWh.id,
+        quantity: 0,
+        minStock: 0,
+        tenantId,
+      });
+      await this.stockRepository.save(filaEnCero); // ledger-exento: nace en cero
     }
 
     // Vincular a la receta de la loción con 0 gramos (sin definir aún).
@@ -441,7 +443,8 @@ export class ProductsService {
         // Por defecto, lo que haga la tienda: si trabaja con códigos por par,
         // un producto nuevo también los lleva. Dejarlo en `false` era como se
         // colaban productos sin etiqueta en una tienda que sí las usa.
-        unitTracking: dto.unitTracking ?? (await this.tiendaUsaCodigos(tenantId)),
+        unitTracking:
+          dto.unitTracking ?? (await this.tiendaUsaCodigos(tenantId)),
         tenantId,
       });
 
@@ -1161,9 +1164,17 @@ export class ProductsService {
           imageUrl: product.imageUrl ?? null,
           categoryId: product.categoryId ?? null,
           gender: product.gender,
-          totalStock: productVariants.reduce((sum, variant) => sum + variant.availableStock, 0),
-          boxedStock: productVariants.reduce((sum, variant) => sum + variant.boxedStock, 0),
-          closedBoxCount: closedBoxes.filter((box) => box.productId === product.id).length,
+          totalStock: productVariants.reduce(
+            (sum, variant) => sum + variant.availableStock,
+            0,
+          ),
+          boxedStock: productVariants.reduce(
+            (sum, variant) => sum + variant.boxedStock,
+            0,
+          ),
+          closedBoxCount: closedBoxes.filter(
+            (box) => box.productId === product.id,
+          ).length,
           variants: productVariants,
         },
       ];

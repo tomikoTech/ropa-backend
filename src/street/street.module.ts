@@ -11,6 +11,7 @@ import { Sale } from '../pos/entities/sale.entity.js';
 import { SaleItem } from '../pos/entities/sale-item.entity.js';
 import { Payment } from '../pos/entities/payment.entity.js';
 import { StreetService } from './street.service.js';
+import { StockLedgerModule } from '../inventory/ledger/stock-ledger.module.js';
 import { StreetController } from './street.controller.js';
 import { InvoiceService } from '../pos/services/invoice.service.js';
 import { StockUnitEvent } from '../inventory/entities/stock-unit-event.entity.js';
@@ -37,6 +38,7 @@ import { StockUnitEvent } from '../inventory/entities/stock-unit-event.entity.js
       SaleItem,
       Payment,
     ]),
+    StockLedgerModule,
   ],
   controllers: [StreetController],
   providers: [StreetService, InvoiceService],

@@ -27,6 +27,7 @@ import { BotConfigService } from './bot-config.service.js';
 import { BotChatController } from './bot-chat.controller.js';
 import { BotChatService } from './bot-chat.service.js';
 import { TaxService } from '../pos/services/tax.service.js';
+import { StockLedgerModule } from '../inventory/ledger/stock-ledger.module.js';
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { TaxService } from '../pos/services/tax.service.js';
       BotConversation,
       BotMessage,
     ]),
+    StockLedgerModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],

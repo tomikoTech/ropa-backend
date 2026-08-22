@@ -459,7 +459,7 @@ export class InventoryService {
         quantity: 0,
         minStock: 0,
       });
-      stock = await this.stockRepository.save(stock);
+      stock = await this.stockRepository.save(stock); // ledger-exento: la crea en cero
     }
     return stock;
   }
@@ -1347,7 +1347,7 @@ export class InventoryService {
         quantity: 0,
         minStock: 0,
       });
-      stock = await stockRepo.save(stock);
+      stock = await stockRepo.save(stock); // ledger-exento: la crea en cero
     }
     return stock;
   }
@@ -1847,7 +1847,7 @@ export class InventoryService {
   ): Promise<Stock> {
     const stock = await this.getOrCreateStock(variantId, warehouseId, tenantId);
     stock.minStock = minStock;
-    return this.stockRepository.save(stock);
+    return this.stockRepository.save(stock); // ledger-exento: cambia el mínimo, no la existencia
   }
 
   /**

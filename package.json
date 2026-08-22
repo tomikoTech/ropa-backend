@@ -27,7 +27,8 @@
     "backfill:imperial-699-2": "nest build && node dist/seeds/add-imperial-invoice-699-2.js",
     "sync:imperial-abonos-2026-08-08": "nest build && node dist/seeds/sync-imperial-abonos-2026-08-08.js",
     "extract:amawad-stock-units": "python3 scripts/extract-amawad-stock-units.py",
-    "preview:amawad-stock-units": "nest build && node dist/seeds/import-amawad-stock-units.js"
+    "preview:amawad-stock-units": "nest build && node dist/seeds/import-amawad-stock-units.js",
+    "reconciliar:bultos": "nest build && node dist/seeds/reconciliar-bultos.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1103.0",

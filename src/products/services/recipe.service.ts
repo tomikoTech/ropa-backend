@@ -6,6 +6,7 @@ import { ProductVariant } from '../entities/product-variant.entity.js';
 import { Stock } from '../../inventory/entities/stock.entity.js';
 import { StockMovement } from '../../inventory/entities/stock-movement.entity.js';
 import { MovementType } from '../../common/enums/movement-type.enum.js';
+import { StockLedgerService } from '../../inventory/ledger/stock-ledger.service.js';
 
 export interface RecipeItemInput {
   essenceVariantId: string;
@@ -20,6 +21,7 @@ export class RecipeService {
   constructor(
     @InjectRepository(ProductEssence)
     private readonly essenceRepo: Repository<ProductEssence>,
+    private readonly ledger: StockLedgerService,
   ) {}
 
   // Receta actual de un producto (con la variante de esencia y su producto).
@@ -209,22 +211,16 @@ export class RecipeService {
         );
       }
 
-      stock!.quantity = available - grams;
-      await stockRepo.save(stock!);
-
-      await movementRepo.save(
-        movementRepo.create({
-          variantId: item.essenceVariantId,
-          warehouseId,
-          movementType: MovementType.OUT,
-          quantity: grams,
-          referenceType: 'PRODUCTION',
-          referenceId: params.referenceId ?? undefined,
-          notes: `Consumo de esencia por receta (${units} und)`,
-          createdById: userId ?? undefined,
-          tenantId,
-        }),
-      );
+      await this.ledger.mover(manager, {
+        variantId: item.essenceVariantId,
+        warehouseId,
+        cantidad: -grams,
+        motivo: 'PRODUCTION',
+        referenciaId: params.referenceId ?? null,
+        notas: `Consumo de esencia por receta (${units} und)`,
+        usuarioId: userId ?? null,
+        tenantId,
+      });
 
       consumed.push({ essenceVariantId: item.essenceVariantId, grams });
     }

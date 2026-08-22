@@ -15,18 +15,13 @@ import { InternalRequestShipment } from './entities/internal-request-shipment.en
 import { ProductVariant } from '../products/entities/product-variant.entity.js';
 import { Warehouse } from '../inventory/entities/warehouse.entity.js';
 import { Stock } from '../inventory/entities/stock.entity.js';
-import { StockMovement } from '../inventory/entities/stock-movement.entity.js';
 import { StockTransfer } from '../inventory/entities/stock-transfer.entity.js';
 import {
   StockUnit,
   StockUnitStatus,
 } from '../inventory/entities/stock-unit.entity.js';
-import {
-  StockUnitEvent,
-  StockUnitEventType,
-} from '../inventory/entities/stock-unit-event.entity.js';
-import { MovementType } from '../common/enums/movement-type.enum.js';
 import { AccessService } from '../access/access.service.js';
+import { StockLedgerService } from '../inventory/ledger/stock-ledger.service.js';
 
 interface CreateInput {
   destinationWarehouseId: string;
@@ -45,6 +40,7 @@ export class InternalRequestsService {
     private readonly repo: Repository<InternalRequest>,
     private readonly dataSource: DataSource,
     private readonly access: AccessService,
+    private readonly ledger: StockLedgerService,
   ) {}
 
   private async lock(manager: EntityManager, id: string, tenantId: string) {
@@ -326,8 +322,6 @@ export class InternalRequestsService {
             `Los códigos preparados de ${item.variant.sku} suman ${physicalQuantity}; remítelos juntos`,
           );
         }
-        stock.quantity -= row.quantity;
-        await stockRepo.save(stock);
         const transferRepo = manager.getRepository(StockTransfer);
         const transfer = await transferRepo.save(
           transferRepo.create({
@@ -342,41 +336,28 @@ export class InternalRequestsService {
             tenantId,
           }),
         );
-        await manager.getRepository(StockMovement).save(
-          manager.getRepository(StockMovement).create({
-            variantId: item.variantId,
-            warehouseId: request.sourceWarehouseId,
-            movementType: MovementType.TRANSFER,
-            quantity: -row.quantity,
-            referenceType: 'INTERNAL_REQUEST_OUT',
-            referenceId: request.id,
-            notes: `Remisión ${request.requestNumber}`,
-            createdById: userId,
-            tenantId,
-          }),
-        );
+        // La existencia y los códigos salen juntos: los preparados si los hay,
+        // y si no, por antigüedad.
+        await this.ledger.mover(manager, {
+          variantId: item.variantId,
+          warehouseId: request.sourceWarehouseId,
+          cantidad: -row.quantity,
+          motivo: 'INTERNAL_REQUEST_OUT',
+          // La referencia es **esta remisión**, no el pedido entero: un pedido
+          // puede salir en varios camiones, y al recibirlos el ledger tiene
+          // que saber qué bultos venían en cuál. Con el id del pedido, recibir
+          // el segundo camión reponía bultos que iban en el primero.
+          referenciaId: transfer.id,
+          notas: `Remisión ${request.requestNumber}`,
+          usuarioId: userId,
+          unidades: preparedUnits.length
+            ? preparedUnits.map((prepared) => prepared.stockUnitId)
+            : undefined,
+          tenantId,
+        });
         for (const prepared of preparedUnits) {
-          const unit = prepared.stockUnit;
-          unit.status = StockUnitStatus.TRANSFERRED;
-          await manager.getRepository(StockUnit).save(unit);
           prepared.transferId = transfer.id;
           await manager.getRepository(InternalRequestUnit).save(prepared);
-          await manager.getRepository(StockUnitEvent).save(
-            manager.getRepository(StockUnitEvent).create({
-              stockUnitId: unit.id,
-              eventType: StockUnitEventType.TRANSFERRED,
-              fromStatus: StockUnitStatus.IN_STOCK,
-              toStatus: StockUnitStatus.TRANSFERRED,
-              referenceType: 'InternalRequest',
-              referenceId: request.id,
-              userId,
-              metadata: {
-                requestNumber: request.requestNumber,
-                transferId: transfer.id,
-              },
-              tenantId,
-            }),
-          );
         }
         await manager.getRepository(InternalRequestShipment).save(
           manager.getRepository(InternalRequestShipment).create({
@@ -411,6 +392,10 @@ export class InternalRequestsService {
         .find({
           where: { requestId: id, receivedAt: IsNull(), tenantId },
           relations: { transfer: true },
+          // Orden explícito: sin él Postgres devuelve las filas como le
+          // convenga, y el resultado de recibir varias remisiones a la vez
+          // dependía del azar.
+          order: { createdAt: 'ASC', id: 'ASC' },
         });
       if (!shipments.length)
         throw new BadRequestException(
@@ -422,22 +407,6 @@ export class InternalRequestsService {
         const item = request.items.find(
           (candidate) => candidate.id === shipment.requestItemId,
         )!;
-        const stockRepo = manager.getRepository(Stock);
-        let stock = await stockRepo.findOneBy({
-          variantId: item.variantId,
-          warehouseId: request.destinationWarehouseId,
-          tenantId,
-        });
-        if (!stock)
-          stock = stockRepo.create({
-            variantId: item.variantId,
-            warehouseId: request.destinationWarehouseId,
-            quantity: 0,
-            minStock: 0,
-            tenantId,
-          });
-        stock.quantity += shipment.quantity;
-        await stockRepo.save(stock);
         shipment.transfer.status = 'RECEIVED';
         shipment.transfer.receivedById = userId;
         shipment.transfer.receivedAt = new Date();
@@ -446,41 +415,22 @@ export class InternalRequestsService {
           where: { transferId: shipment.transferId, tenantId },
           relations: { stockUnit: true },
         });
-        for (const prepared of units) {
-          const unit = prepared.stockUnit;
-          unit.status = StockUnitStatus.IN_STOCK;
-          unit.warehouseId = request.destinationWarehouseId;
-          await manager.getRepository(StockUnit).save(unit);
-          await manager.getRepository(StockUnitEvent).save(
-            manager.getRepository(StockUnitEvent).create({
-              stockUnitId: unit.id,
-              eventType: StockUnitEventType.TRANSFERRED,
-              fromStatus: StockUnitStatus.TRANSFERRED,
-              toStatus: StockUnitStatus.IN_STOCK,
-              referenceType: 'InternalRequest',
-              referenceId: request.id,
-              userId,
-              metadata: {
-                requestNumber: request.requestNumber,
-                received: true,
-              },
-              tenantId,
-            }),
-          );
-        }
-        await manager.getRepository(StockMovement).save(
-          manager.getRepository(StockMovement).create({
-            variantId: item.variantId,
-            warehouseId: request.destinationWarehouseId,
-            movementType: MovementType.TRANSFER,
-            quantity: shipment.quantity,
-            referenceType: 'INTERNAL_REQUEST_IN',
-            referenceId: request.id,
-            notes: `Recepción ${request.requestNumber}`,
-            createdById: userId,
-            tenantId,
-          }),
-        );
+        // Lo que llega al punto entra con **su** código, el que salió de la
+        // bodega: sin esto el ledger inventaría uno nuevo y la caja llegaría
+        // con una etiqueta impresa que ya no coincide con el sistema.
+        await this.ledger.mover(manager, {
+          variantId: item.variantId,
+          warehouseId: request.destinationWarehouseId,
+          cantidad: shipment.quantity,
+          motivo: 'INTERNAL_REQUEST_IN',
+          referenciaId: shipment.transferId,
+          notas: `Recepción ${request.requestNumber}`,
+          usuarioId: userId,
+          unidades: units.length
+            ? units.map((prepared) => prepared.stockUnitId)
+            : undefined,
+          tenantId,
+        });
         shipment.receivedAt = new Date();
         await manager.getRepository(InternalRequestShipment).save(shipment);
       }
@@ -501,6 +451,7 @@ export class InternalRequestsService {
         .find({
           where: { requestId: id, tenantId },
           relations: { transfer: true },
+          order: { createdAt: 'ASC', id: 'ASC' },
         });
       if (status === InternalRequestStatus.CANCELLED && shipments.length)
         throw new BadRequestException(
@@ -519,53 +470,25 @@ export class InternalRequestsService {
           const item = request.items.find(
             (candidate) => candidate.id === shipment.requestItemId,
           )!;
-          const stockRepo = manager.getRepository(Stock);
-          const stock = await stockRepo.findOneByOrFail({
-            variantId: item.variantId,
-            warehouseId: request.sourceWarehouseId!,
-            tenantId,
-          });
-          stock.quantity += shipment.quantity;
-          await stockRepo.save(stock);
           shipment.transfer.status = 'CANCELLED';
           await manager.getRepository(StockTransfer).save(shipment.transfer);
           const units = await manager.getRepository(InternalRequestUnit).find({
             where: { transferId: shipment.transferId, tenantId },
             relations: { stockUnit: true },
           });
-          for (const prepared of units) {
-            prepared.stockUnit.status = StockUnitStatus.IN_STOCK;
-            await manager.getRepository(StockUnit).save(prepared.stockUnit);
-            await manager.getRepository(StockUnitEvent).save(
-              manager.getRepository(StockUnitEvent).create({
-                stockUnitId: prepared.stockUnit.id,
-                eventType: StockUnitEventType.RETURNED,
-                fromStatus: StockUnitStatus.TRANSFERRED,
-                toStatus: StockUnitStatus.IN_STOCK,
-                referenceType: 'InternalRequest',
-                referenceId: request.id,
-                userId,
-                metadata: {
-                  requestNumber: request.requestNumber,
-                  returnedToSource: true,
-                },
-                tenantId,
-              }),
-            );
-          }
-          await manager.getRepository(StockMovement).save(
-            manager.getRepository(StockMovement).create({
-              variantId: item.variantId,
-              warehouseId: request.sourceWarehouseId!,
-              movementType: MovementType.TRANSFER,
-              quantity: shipment.quantity,
-              referenceType: 'INTERNAL_REQUEST_RETURN',
-              referenceId: request.id,
-              notes: `Devolución ${request.requestNumber}`,
-              createdById: userId,
-              tenantId,
-            }),
-          );
+          await this.ledger.mover(manager, {
+            variantId: item.variantId,
+            warehouseId: request.sourceWarehouseId!,
+            cantidad: shipment.quantity,
+            motivo: 'INTERNAL_REQUEST_RETURN',
+            referenciaId: shipment.transferId,
+            notas: `Devolución ${request.requestNumber}`,
+            usuarioId: userId,
+            unidades: units.length
+              ? units.map((prepared) => prepared.stockUnitId)
+              : undefined,
+            tenantId,
+          });
         }
       }
       request.status = status;

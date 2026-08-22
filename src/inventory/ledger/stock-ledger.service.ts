@@ -66,7 +66,10 @@ import { StockIntegrityService } from './stock-integrity.service.js';
  *    frenar una venta con el cliente enfrente por un problema de datos es peor
  *    que el problema de datos.
  * 4. Antes de confirmar se comprueba que la variante y bodega quedaron
- *    cuadradas. Si no, la operación entera se deshace.
+ *    cuadradas, y si no, **queda escrito**: en la nota del movimiento y en el
+ *    log. No se deshace la operación —sería contradecir la regla 3, y dejaría
+ *    a una tienda con descuadre viejo sin poder cobrar hasta repararlo—; el
+ *    reporte de integridad es el que lleva la cuenta.
  */
 
 /** De dónde viene el movimiento. Es lo que después se lee en el historial. */
@@ -83,7 +86,22 @@ export type MotivoMovimiento =
   | 'PRODUCTION'
   | 'ECOMMERCE_ORDER'
   | 'INTERNAL_REQUEST'
-  | 'STREET';
+  | 'INTERNAL_REQUEST_OUT'
+  | 'INTERNAL_REQUEST_IN'
+  | 'INTERNAL_REQUEST_RETURN'
+  | 'STREET'
+  /** El par que se entrega a cambio del devuelto. */
+  | 'RETURN_EXCHANGE'
+  /** Lo devuelto viaja a otra bodega (o al proveedor). */
+  | 'RETURN_REMITTANCE'
+  /** Recepción por cajas de una orden de compra. */
+  | 'PURCHASE_BOX_LINE'
+  /** Cajas que entran sin orden de compra. */
+  | 'STOCK_UNIT_INTAKE'
+  /** Una caja concreta cambia de bodega. */
+  | 'STOCK_UNIT_TRANSFER'
+  /** Abrir una caja, corregir su contenido: cosas de un bulto. */
+  | 'STOCK_UNIT';
 
 export interface OrdenDeMovimiento {
   variantId: string;
@@ -121,6 +139,19 @@ export interface OrdenDeMovimiento {
    * reventando.
    */
   permitirNegativo?: boolean;
+  /**
+   * Quien llama ya movió los bultos: aquí solo se mueve el agregado.
+   *
+   * Existe por un único caso legítimo: el servicio cuyo trabajo **es** manejar
+   * los bultos —crearlos al ingresar mercancía, partir una caja en sus pares—.
+   * Ahí los códigos ya se escribieron con toda su información (costo puesto en
+   * bodega, contenido, estante), y dejar que el ledger cree otros duplicaría
+   * el inventario.
+   *
+   * No es una puerta de atrás: el cuadre se comprueba igual al terminar, así
+   * que si quien llama se equivocó con los bultos, sale en el aviso.
+   */
+  bultosYaMovidos?: boolean;
 }
 
 export interface ResultadoMovimiento {
@@ -149,6 +180,43 @@ const REVERSAS = new Set<MotivoMovimiento>([
   'SALE_EDIT',
   'RETURN',
 ]);
+
+/**
+ * En qué queda un bulto cuando sale del inventario disponible.
+ *
+ * No da igual: es lo que va a leer quien busque ese par y no lo encuentre. Un
+ * ajuste a la baja los dejaba marcados «trasladados», como si estuvieran en
+ * camino a otra bodega, cuando lo que pasó es que se dieron de baja.
+ */
+const ESTADO_AL_SALIR: Partial<Record<MotivoMovimiento, StockUnitStatus>> = {
+  SALE: StockUnitStatus.SOLD,
+  ECOMMERCE_ORDER: StockUnitStatus.SOLD,
+  // Se fue a otro sitio y en algún momento llega.
+  TRANSFER_OUT: StockUnitStatus.TRANSFERRED,
+  INTERNAL_REQUEST: StockUnitStatus.TRANSFERRED,
+  INTERNAL_REQUEST_OUT: StockUnitStatus.TRANSFERRED,
+  // En la calle el par no está «en camino a otra bodega»: está en manos de un
+  // patinador, en consignación, y puede volver.
+  STREET: StockUnitStatus.CONSIGNED,
+  // Dejó de ser inventario: nadie lo va a encontrar en ninguna bodega.
+  RETURN_EXCHANGE: StockUnitStatus.SOLD,
+  RETURN_REMITTANCE: StockUnitStatus.TRANSFERRED,
+  STOCK_UNIT_TRANSFER: StockUnitStatus.TRANSFERRED,
+  ADJUSTMENT: StockUnitStatus.WRITTEN_OFF,
+  COUNT: StockUnitStatus.WRITTEN_OFF,
+  PRODUCTION: StockUnitStatus.WRITTEN_OFF,
+  // Deshacer una recepción de compra borra del mapa las etiquetas que esa
+  // recepción había creado.
+  PURCHASE: StockUnitStatus.WRITTEN_OFF,
+};
+
+/** El evento que corresponde a cada salida, para que el historial no mienta. */
+const EVENTO_AL_SALIR: Partial<Record<StockUnitStatus, StockUnitEventType>> = {
+  [StockUnitStatus.SOLD]: StockUnitEventType.SOLD,
+  [StockUnitStatus.TRANSFERRED]: StockUnitEventType.TRANSFERRED,
+  [StockUnitStatus.WRITTEN_OFF]: StockUnitEventType.WRITTEN_OFF,
+  [StockUnitStatus.CONSIGNED]: StockUnitEventType.CONSIGNED,
+};
 
 @Injectable()
 export class StockLedgerService {
@@ -194,7 +262,10 @@ export class StockLedgerService {
     // vende por gramos esto no aplica y el agregado es toda la verdad.
     let unidades: { id: string; barcode: string }[] = [];
     let sinEtiqueta = 0;
-    if (await this.llevaUnidades(manager, variantId, tenantId)) {
+    if (
+      !orden.bultosYaMovidos &&
+      (await this.llevaUnidades(manager, variantId, tenantId))
+    ) {
       const resultado =
         delta < 0
           ? await this.consumir(manager, orden, -delta)
@@ -234,6 +305,15 @@ export class StockLedgerService {
       cantidad: number;
       desdeWarehouseId: string;
       hastaWarehouseId: string;
+      /**
+       * Cómo se llama este traslado en el historial.
+       *
+       * Por defecto es un traslado a secas. Se cambia cuando el movimiento
+       * tiene nombre propio para la tienda —una remisión de devolución, por
+       * ejemplo—: en el historial no da igual leer «traslado» que leer de qué
+       * documento salió.
+       */
+      motivos?: { salida: MotivoMovimiento; entrada: MotivoMovimiento };
     },
   ): Promise<ResultadoMovimiento> {
     const { variantId, tenantId, cantidad } = orden;
@@ -293,13 +373,15 @@ export class StockLedgerService {
       unidades = elegidas.map((u) => ({ id: u.id, barcode: u.barcode }));
     }
 
+    const motivoSalida = orden.motivos?.salida ?? 'TRANSFER_OUT';
+    const motivoEntrada = orden.motivos?.entrada ?? 'TRANSFER_IN';
     for (const [warehouseId, delta, motivo] of [
-      [orden.desdeWarehouseId, -cantidad, 'TRANSFER_OUT'],
-      [orden.hastaWarehouseId, cantidad, 'TRANSFER_IN'],
+      [orden.desdeWarehouseId, -cantidad, motivoSalida],
+      [orden.hastaWarehouseId, cantidad, motivoEntrada],
     ] as const) {
       await this.registrarMovimiento(
         manager,
-        { ...orden, warehouseId, motivo: motivo as MotivoMovimiento },
+        { ...orden, warehouseId, motivo: motivo },
         delta,
         { antes: 0, despues: 0, sinEtiqueta, unidades },
       );
@@ -313,6 +395,71 @@ export class StockLedgerService {
     }
 
     return { saldo: destino.quantity, unidades, sinEtiqueta };
+  }
+
+  /**
+   * Qué bultos siguen siendo de este documento.
+   *
+   * La pregunta se hace desde varios sitios —anular una venta, editarla,
+   * recibir una devolución— y tiene una trampa: los eventos de un bulto no se
+   * borran nunca. Preguntar «¿tiene algún evento de este documento?» devuelve
+   * pares que ese documento soltó y que otro ya se llevó; devolverlos al
+   * inventario sería regalar mercancía que está en manos de otro cliente.
+   *
+   * Manda el **último** evento que cambió su estado. Si no tiene ninguno, el
+   * bulto es anterior a que se llevara esta historia y se acepta.
+   */
+  async unidadesDeLaReferencia(
+    manager: EntityManager,
+    referenciaId: string,
+    tenantId: string,
+    opciones: { extra?: string[]; estados?: StockUnitStatus[] } = {},
+  ): Promise<StockUnit[]> {
+    const estados = opciones.estados ?? [StockUnitStatus.SOLD];
+    const candidatos: { id: string }[] = await manager.query(
+      `SELECT DISTINCT e.stock_unit_id AS id
+         FROM stock_unit_events e
+        WHERE e.reference_id = $1 AND e.tenant_id = $2`,
+      [referenciaId, tenantId],
+    );
+    const ids = new Set(candidatos.map((fila) => fila.id));
+    for (const extra of opciones.extra ?? []) ids.add(extra);
+    if (ids.size === 0) return [];
+
+    const propias: { id: string }[] = await manager.query(
+      `SELECT u.id
+         FROM stock_units u
+        WHERE u.id = ANY($1::uuid[])
+          AND u.tenant_id = $2
+          AND u.status::text = ANY($4::text[])
+          AND (
+            -- El último evento que cambió su estado tiene que ser de ESTA
+            -- referencia. Antes se usaba COALESCE(..., $3) = $3, y un evento
+            -- con referencia nula —los deja el ajuste manual— pasaba el filtro:
+            -- una compra posterior «resucitaba» pares dados de baja a mano.
+            (SELECT e.reference_id
+               FROM stock_unit_events e
+              WHERE e.stock_unit_id = u.id
+                AND e.event_type IN
+                    ('SOLD', 'RETURNED', 'TRANSFERRED', 'WRITTEN_OFF')
+              ORDER BY e.created_at DESC, e.id DESC
+              LIMIT 1) = $3
+            -- O no tiene ninguno: el bulto es anterior a que se llevara esta
+            -- historia, y ahí quien pregunta es el único candidato.
+            OR NOT EXISTS (
+              SELECT 1 FROM stock_unit_events e
+               WHERE e.stock_unit_id = u.id
+                 AND e.event_type IN
+                     ('SOLD', 'RETURNED', 'TRANSFERRED', 'WRITTEN_OFF')
+            )
+          )`,
+      [[...ids], tenantId, referenciaId, estados],
+    );
+    if (propias.length === 0) return [];
+    return manager.getRepository(StockUnit).find({
+      where: { id: In(propias.map((f) => f.id)), tenantId },
+      order: { createdAt: 'ASC', id: 'ASC' },
+    });
   }
 
   // ─── Interior ───────────────────────────────────────────────────────────
@@ -463,18 +610,14 @@ export class StockLedgerService {
 
     if (elegidas.length) {
       const estado =
-        orden.motivo === 'SALE' || orden.motivo === 'ECOMMERCE_ORDER'
-          ? StockUnitStatus.SOLD
-          : StockUnitStatus.TRANSFERRED;
+        ESTADO_AL_SALIR[orden.motivo] ?? StockUnitStatus.TRANSFERRED;
       await manager
         .getRepository(StockUnit)
         .update({ id: In(elegidas.map((u) => u.id)) }, { status: estado });
       await this.anotarEventos(
         manager,
         elegidas,
-        estado === StockUnitStatus.SOLD
-          ? StockUnitEventType.SOLD
-          : StockUnitEventType.TRANSFERRED,
+        EVENTO_AL_SALIR[estado] ?? StockUnitEventType.TRANSFERRED,
         orden,
         {},
         estado,
@@ -501,12 +644,52 @@ export class StockLedgerService {
     unidades: { id: string; barcode: string }[];
     sinEtiqueta: number;
   }> {
-    // Si venían bultos concretos es una reversa —anular una venta, devolver—:
-    // se devuelven a disponible en vez de inventar códigos nuevos.
-    if (orden.unidades?.length) {
+    // Antes de inventar nada: ¿este mismo documento sacó bultos que ahora
+    // están volviendo?
+    //
+    // Una remisión en tránsito los sacó del origen y ahora entran al destino;
+    // deshacer una recepción de compra los dio de baja y re-aplicarla los
+    // trae. Sin esta pregunta, el ledger creaba **códigos nuevos** en el
+    // destino: la caja llegaba con su etiqueta impresa y el sistema le
+    // asignaba otra, mientras la vieja se quedaba marcada como salida para
+    // siempre.
+    let queVuelven = orden.unidades ?? [];
+    if (!queVuelven.length && orden.referenciaId) {
+      const salidas = await this.unidadesDeLaReferencia(
+        manager,
+        orden.referenciaId,
+        orden.tenantId,
+        {
+          estados: [
+            StockUnitStatus.TRANSFERRED,
+            StockUnitStatus.SOLD,
+            StockUnitStatus.WRITTEN_OFF,
+            StockUnitStatus.CONSIGNED,
+          ],
+        },
+      );
+      // Se cuentan **unidades**, no bultos: una caja de cinco pares vale por
+      // cinco. Cortar la lista por número de filas hacía volver una caja
+      // entera para reponer dos unidades, y el destino terminaba con tres de
+      // más.
+      let faltan = cantidad;
+      queVuelven = [];
+      for (const u of salidas) {
+        if (faltan <= 0) break;
+        if (u.variantId !== orden.variantId) continue;
+        // Una caja no se parte para reponer parte de su contenido.
+        if (u.quantity > faltan) continue;
+        queVuelven.push(u.id);
+        faltan -= u.quantity;
+      }
+    }
+
+    // Si hay bultos concretos que devolver, vuelven ellos: nada de códigos
+    // nuevos.
+    if (queVuelven.length) {
       const repo = manager.getRepository(StockUnit);
       const pedidas = await repo.find({
-        where: { id: In(orden.unidades), tenantId: orden.tenantId },
+        where: { id: In(queVuelven), tenantId: orden.tenantId },
       });
       // Solo vuelven las que están fuera. Una que ya está disponible no se
       // "devuelve" otra vez: repetirlo la duplicaría contra el agregado y
@@ -530,7 +713,7 @@ export class StockLedgerService {
       // código. Decir cero aquí silenciaba el hueco justo en la nota del
       // movimiento, que es donde va a mirar quien revise esa referencia.
       const cubierto = devolubles.reduce((n, u) => n + u.quantity, 0);
-      const faltantes = orden.unidades.filter(
+      const faltantes = queVuelven.filter(
         (id) => !pedidas.some((u) => u.id === id),
       );
       if (faltantes.length) {
@@ -539,10 +722,27 @@ export class StockLedgerService {
             `código(s) que la referencia decía tener.`,
         );
       }
-      return {
-        unidades: devolubles.map((u) => ({ id: u.id, barcode: u.barcode })),
-        sinEtiqueta: Math.max(0, cantidad - cubierto),
-      };
+      const porCubrir = Math.max(0, cantidad - cubierto);
+      const devueltas = devolubles.map((u) => ({
+        id: u.id,
+        barcode: u.barcode,
+      }));
+      // Si lo que volvió no alcanza para todo lo que entró, el resto es
+      // mercancía nueva y necesita etiqueta nueva.
+      //
+      // Antes se devolvía aquí con el hueco anotado y ya: subir de 5 a 8 pares
+      // en una compra ya recibida reponía los 5 códigos viejos y dejaba los 3
+      // que sí habían llegado sin etiqueta que imprimir. En una reversa no
+      // aplica —ahí lo que no se identificó no existe, y crear un código
+      // nuevo desincronizaría el papel impreso del par—.
+      if (porCubrir > 0 && !REVERSAS.has(orden.motivo)) {
+        const nuevas = await this.crearEtiquetas(manager, orden, porCubrir);
+        return {
+          unidades: [...devueltas, ...nuevas],
+          sinEtiqueta: 0,
+        };
+      }
+      return { unidades: devueltas, sinEtiqueta: porCubrir };
     }
 
     // Una reversa nunca inventa etiquetas.
@@ -562,6 +762,16 @@ export class StockLedgerService {
       return { unidades: [], sinEtiqueta: cantidad };
     }
 
+    const nuevas = await this.crearEtiquetas(manager, orden, cantidad);
+    return { unidades: nuevas, sinEtiqueta: 0 };
+  }
+
+  /** Etiquetas nuevas: una por unidad, cada una con su código. */
+  private async crearEtiquetas(
+    manager: EntityManager,
+    orden: OrdenDeMovimiento,
+    cantidad: number,
+  ): Promise<{ id: string; barcode: string }[]> {
     const variante = await manager.getRepository(ProductVariant).findOne({
       where: { id: orden.variantId, tenantId: orden.tenantId },
     });
@@ -606,10 +816,7 @@ export class StockLedgerService {
       StockUnitEventType.RECEIVED,
       orden,
     );
-    return {
-      unidades: guardadas.map((u) => ({ id: u.id, barcode: u.barcode })),
-      sinEtiqueta: 0,
-    };
+    return guardadas.map((u) => ({ id: u.id, barcode: u.barcode }));
   }
 
   /** El siguiente renglón del día para lo que entra sin orden de compra. */
@@ -647,6 +854,8 @@ export class StockLedgerService {
     [StockUnitEventType.TRANSFERRED]: StockUnitStatus.TRANSFERRED,
     [StockUnitEventType.RETURNED]: StockUnitStatus.IN_STOCK,
     [StockUnitEventType.RECEIVED]: StockUnitStatus.IN_STOCK,
+    [StockUnitEventType.WRITTEN_OFF]: StockUnitStatus.WRITTEN_OFF,
+    [StockUnitEventType.CONSIGNED]: StockUnitStatus.CONSIGNED,
   };
 
   private async anotarEventos(
@@ -733,11 +942,17 @@ export class StockLedgerService {
   }
 
   /**
-   * Comprueba que la variante y bodega quedaron cuadradas, o deshace todo.
+   * Comprueba que la variante y bodega quedaron cuadradas, y lo anota si no.
    *
-   * Es la red de seguridad: si un camino nuevo se salta una regla, la operación
-   * falla **aquí**, en desarrollo y con un mensaje que dice qué no cuadra, en
-   * vez de dejar el descuadre en producción para que aparezca semanas después.
+   * Deliberadamente **no** revienta. Un descuadre que ya existía antes no es
+   * culpa de esta operación, y frenarla obligaría a la tienda a reparar datos
+   * viejos antes de poder cobrar. Y cuando el descuadre sí lo abre esta
+   * operación, es por la regla 3 —salir sin etiqueta suficiente—, que existe
+   * justamente para no frenar una venta con el cliente enfrente.
+   *
+   * La red de seguridad de verdad es la prueba de arquitectura, que impide
+   * escribir el inventario por fuera de aquí, más el reporte de integridad,
+   * que hace visible lo que se acumule.
    */
   private async exigirCuadre(
     manager: EntityManager,
@@ -753,9 +968,6 @@ export class StockLedgerService {
       warehouseId,
     );
     if (!descuadre) return;
-    // Un descuadre que ya existía antes de esta operación no es culpa suya:
-    // se avisa y se sigue, porque bloquear la venta obligaría a la tienda a
-    // reparar datos viejos antes de poder cobrar.
     this.log.warn(
       `Descuadre en ${descuadre.sku} @ ${descuadre.warehouseName} tras ${orden.motivo}: ` +
         `agregado ${descuadre.agregado} vs etiquetadas ${descuadre.etiquetadas}.`,

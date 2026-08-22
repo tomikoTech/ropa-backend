@@ -18,6 +18,7 @@ import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
 import { Supplier } from '../suppliers/entities/supplier.entity.js';
 import { PurchasesService } from './purchases.service.js';
 import { PurchasesController } from './purchases.controller.js';
+import { StockLedgerModule } from '../inventory/ledger/stock-ledger.module.js';
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { PurchasesController } from './purchases.controller.js';
       StoreSettings,
       Supplier,
     ]),
+    StockLedgerModule,
   ],
   controllers: [PurchasesController, PurchaseBoxesController],
   providers: [PurchasesService, PurchaseBoxesService],

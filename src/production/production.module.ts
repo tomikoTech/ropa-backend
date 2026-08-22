@@ -8,6 +8,7 @@ import { Stock } from '../inventory/entities/stock.entity.js';
 import { StockMovement } from '../inventory/entities/stock-movement.entity.js';
 import { ProductVariant } from '../products/entities/product-variant.entity.js';
 import { ProductsModule } from '../products/products.module.js';
+import { StockLedgerModule } from '../inventory/ledger/stock-ledger.module.js';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { ProductsModule } from '../products/products.module.js';
       StockMovement,
       ProductVariant,
     ]),
+    StockLedgerModule,
     ProductsModule,
   ],
   controllers: [ProductionController],

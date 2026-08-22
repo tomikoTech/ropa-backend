@@ -11,16 +11,15 @@ import { PurchaseBoxLine } from './entities/purchase-box-line.entity.js';
 import { AccountsPayable } from './entities/accounts-payable.entity.js';
 import { AccountsPayablePayment } from './entities/accounts-payable-payment.entity.js';
 import { ProductVariant } from '../products/entities/product-variant.entity.js';
-import { Stock } from '../inventory/entities/stock.entity.js';
-import { StockMovement } from '../inventory/entities/stock-movement.entity.js';
 import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
 import { Supplier } from '../suppliers/entities/supplier.entity.js';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto.js';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto.js';
 import { ReceiveItemsDto } from './dto/receive-items.dto.js';
 import { PurchaseOrderStatus } from '../common/enums/purchase-order-status.enum.js';
-import { MovementType } from '../common/enums/movement-type.enum.js';
 import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
+import { StockLedgerService } from '../inventory/ledger/stock-ledger.service.js';
+import { StockUnitStatus } from '../inventory/entities/stock-unit.entity.js';
 
 @Injectable()
 export class PurchasesService {
@@ -40,6 +39,7 @@ export class PurchasesService {
     @InjectRepository(Supplier)
     private readonly supplierRepository: Repository<Supplier>,
     private readonly dataSource: DataSource,
+    private readonly ledger: StockLedgerService,
   ) {}
 
   /**
@@ -363,8 +363,6 @@ export class PurchasesService {
       const poItemRepo = manager.getRepository(PurchaseOrderItem);
       const apRepo = manager.getRepository(AccountsPayable);
       const variantRepo = manager.getRepository(ProductVariant);
-      const stockRepo = manager.getRepository(Stock);
-      const movementRepo = manager.getRepository(StockMovement);
 
       const po = await poRepo.findOne({
         where: { id, tenantId },
@@ -387,30 +385,43 @@ export class PurchasesService {
       if (wasReceived) {
         for (const item of po.items) {
           if (item.quantityReceived > 0) {
-            const stock = await stockRepo.findOne({
-              where: {
-                variantId: item.variantId,
-                warehouseId: oldWarehouseId,
-                tenantId,
-              },
-            });
-            if (stock) {
-              stock.quantity -= item.quantityReceived;
-              await stockRepo.save(stock);
-            }
-            await movementRepo.save(
-              movementRepo.create({
-                variantId: item.variantId,
-                warehouseId: oldWarehouseId,
-                movementType: MovementType.OUT,
-                quantity: item.quantityReceived,
-                referenceType: 'PURCHASE',
-                referenceId: po.id,
-                notes: `Reversión edición OC ${po.orderNumber}`,
-                createdById: userId,
-                tenantId,
-              }),
+            // Deshacer la recepción retira **las etiquetas que esta orden
+            // creó**, no las más antiguas de la bodega.
+            //
+            // Sin decírselo, el ledger elegía por antigüedad y se llevaba por
+            // delante pares de compras anteriores; y si además la edición
+            // cambiaba de bodega, la re-aplicación los reponía allá: tres
+            // pares que seguían físicamente en la bodega vieja quedaban
+            // registrados en la nueva.
+            const suyas = await this.ledger.unidadesDeLaReferencia(
+              manager,
+              po.id,
+              tenantId,
+              { estados: [StockUnitStatus.IN_STOCK] },
             );
+            const deEsteRenglon = suyas
+              .filter(
+                (u) =>
+                  u.variantId === item.variantId &&
+                  u.warehouseId === oldWarehouseId,
+              )
+              .map((u) => u.id);
+
+            await this.ledger.mover(manager, {
+              variantId: item.variantId,
+              warehouseId: oldWarehouseId,
+              cantidad: -item.quantityReceived,
+              motivo: 'PURCHASE',
+              referenciaId: po.id,
+              notas: `Reversión edición OC ${po.orderNumber}`,
+              usuarioId: userId,
+              unidades: deEsteRenglon.length ? deEsteRenglon : undefined,
+              // La orden pudo recibirse antes de que esto pasara por el
+              // ledger: puede haber existencia sin etiqueta que retirar. No se
+              // frena la edición por eso.
+              permitirNegativo: true,
+              tenantId,
+            });
           }
         }
       }
@@ -478,39 +489,16 @@ export class PurchasesService {
 
       if (wasReceived) {
         for (const i of effective) {
-          let stock = await stockRepo.findOne({
-            where: {
-              variantId: i.variantId,
-              warehouseId: po.warehouseId,
-              tenantId,
-            },
+          await this.ledger.mover(manager, {
+            variantId: i.variantId,
+            warehouseId: po.warehouseId,
+            cantidad: i.quantityOrdered,
+            motivo: 'PURCHASE',
+            referenciaId: po.id,
+            notas: `Re-aplicación edición OC ${po.orderNumber}`,
+            usuarioId: userId,
+            tenantId,
           });
-          if (stock) {
-            stock.quantity += i.quantityOrdered;
-            await stockRepo.save(stock);
-          } else {
-            stock = stockRepo.create({
-              variantId: i.variantId,
-              warehouseId: po.warehouseId,
-              quantity: i.quantityOrdered,
-              minStock: 3,
-              tenantId,
-            });
-            await stockRepo.save(stock);
-          }
-          await movementRepo.save(
-            movementRepo.create({
-              variantId: i.variantId,
-              warehouseId: po.warehouseId,
-              movementType: MovementType.IN,
-              quantity: i.quantityOrdered,
-              referenceType: 'PURCHASE',
-              referenceId: po.id,
-              notes: `Re-aplicación edición OC ${po.orderNumber}`,
-              createdById: userId,
-              tenantId,
-            }),
-          );
         }
         po.status = PurchaseOrderStatus.RECEIVED;
       }
@@ -568,8 +556,6 @@ export class PurchasesService {
     return this.dataSource.transaction(async (manager) => {
       const poRepo = manager.getRepository(PurchaseOrder);
       const poItemRepo = manager.getRepository(PurchaseOrderItem);
-      const stockRepo = manager.getRepository(Stock);
-      const movementRepo = manager.getRepository(StockMovement);
 
       const po = await poRepo.findOne({
         where: { id, tenantId },
@@ -607,42 +593,20 @@ export class PurchasesService {
         poItem.quantityReceived += receiveItem.quantityReceived;
         await poItemRepo.save(poItem);
 
-        // Add to stock
-        let stock = await stockRepo.findOne({
-          where: {
-            variantId: poItem.variantId,
-            warehouseId: po.warehouseId,
-            tenantId,
-          },
-        });
-
-        if (stock) {
-          stock.quantity += receiveItem.quantityReceived;
-          await stockRepo.save(stock);
-        } else {
-          stock = stockRepo.create({
-            variantId: poItem.variantId,
-            warehouseId: po.warehouseId,
-            quantity: receiveItem.quantityReceived,
-            minStock: 3,
-            tenantId,
-          });
-          await stockRepo.save(stock);
-        }
-
-        // Record stock movement
-        const movement = movementRepo.create({
+        // Recibir mercancía la mete al inventario **con su etiqueta**: una
+        // por par, cada una con su código. Antes solo subía el agregado, así
+        // que en una tienda que trabaja por códigos la existencia entraba y
+        // los códigos había que crearlos aparte —y casi nunca se creaban—.
+        await this.ledger.mover(manager, {
           variantId: poItem.variantId,
           warehouseId: po.warehouseId,
-          movementType: MovementType.IN,
-          quantity: receiveItem.quantityReceived,
-          referenceType: 'PURCHASE',
-          referenceId: po.id,
-          notes: `Recepción OC ${po.orderNumber}`,
-          createdById: userId,
+          cantidad: receiveItem.quantityReceived,
+          motivo: 'PURCHASE',
+          referenciaId: po.id,
+          notas: `Recepción OC ${po.orderNumber}`,
+          usuarioId: userId,
           tenantId,
         });
-        await movementRepo.save(movement);
       }
 
       // Update order status

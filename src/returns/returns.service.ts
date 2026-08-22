@@ -10,22 +10,16 @@ import { ReturnItem } from './entities/return-item.entity.js';
 import { CreditNote } from './entities/credit-note.entity.js';
 import { Sale } from '../pos/entities/sale.entity.js';
 import { SaleItem } from '../pos/entities/sale-item.entity.js';
-import { Stock } from '../inventory/entities/stock.entity.js';
-import { StockMovement } from '../inventory/entities/stock-movement.entity.js';
 import type { Paginated } from '../common/types/paginated.js';
 import { CreateReturnDto } from './dto/create-return.dto.js';
 import { ReturnStatus } from '../common/enums/return-status.enum.js';
 import { SaleStatus } from '../common/enums/sale-status.enum.js';
-import { MovementType } from '../common/enums/movement-type.enum.js';
+import { StockLedgerService } from '../inventory/ledger/stock-ledger.service.js';
 import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
 import {
   StockUnit,
   StockUnitStatus,
 } from '../inventory/entities/stock-unit.entity.js';
-import {
-  StockUnitEvent,
-  StockUnitEventType,
-} from '../inventory/entities/stock-unit-event.entity.js';
 import { Warehouse } from '../inventory/entities/warehouse.entity.js';
 import { User } from '../users/entities/user.entity.js';
 import { Bank } from '../banks/entities/bank.entity.js';
@@ -47,6 +41,7 @@ export class ReturnsService {
     @InjectRepository(CreditNote)
     private readonly creditNoteRepository: Repository<CreditNote>,
     private readonly dataSource: DataSource,
+    private readonly ledger: StockLedgerService,
   ) {}
 
   // Consecutivos por primer hueco libre, no por conteo: con registros borrados
@@ -96,8 +91,6 @@ export class ReturnsService {
         const returnRepo = manager.getRepository(Return);
         const returnItemRepo = manager.getRepository(ReturnItem);
         const creditNoteRepo = manager.getRepository(CreditNote);
-        const stockRepo = manager.getRepository(Stock);
-        const movementRepo = manager.getRepository(StockMovement);
 
         // La fila de venta serializa dos devoluciones concurrentes de la misma
         // factura. Sin este lock, ambas podrían leer el mismo saldo devolvible.
@@ -413,117 +406,50 @@ export class ReturnsService {
               `El código ${returnedUnit?.barcode} no tiene variante conciliada`,
             );
           }
-          let stock = await stockRepo.findOne({
-            where: {
-              variantId: returnedVariantId,
-              warehouseId: destinationWarehouseId,
+          // Qué código vuelve.
+          //
+          // Si el cliente trajo el par y se escaneó, ese. Si no, se toma de los
+          // que **esta venta** se llevó, por antigüedad: el par que vuelve es
+          // uno de ellos, y sin elegir alguno la existencia subiría sin código
+          // que la respalde —cada devolución sin escanear iría agrandando el
+          // descuadre, que es justo lo que este camino vino a cerrar—.
+          let codigosQueVuelven = returnedUnit ? [returnedUnit.id] : [];
+          if (!codigosQueVuelven.length) {
+            const candidatas = await this.ledger.unidadesDeLaReferencia(
+              manager,
+              sale.id,
               tenantId,
-            },
-            lock: { mode: 'pessimistic_write' },
-          });
-          if (!stock) {
-            stock = stockRepo.create({
-              variantId: returnedVariantId,
-              warehouseId: destinationWarehouseId,
-              quantity: 0,
-              minStock: 0,
-              tenantId,
-            });
+            );
+            codigosQueVuelven = candidatas
+              .filter((u) => u.variantId === returnedVariantId)
+              .slice(0, quantity)
+              .map((u) => u.id);
           }
-          stock.quantity = Number(stock.quantity) + quantity;
-          await stockRepo.save(stock);
 
-          // Record movement
-          const movement = movementRepo.create({
+          await this.ledger.mover(manager, {
             variantId: returnedVariantId,
             warehouseId: destinationWarehouseId,
-            movementType: MovementType.IN,
-            quantity,
-            referenceType: 'RETURN',
-            referenceId: savedReturn.id,
-            notes: `Devolución ${returnNumber}`,
-            createdById: userId,
+            cantidad: quantity,
+            motivo: 'RETURN',
+            referenciaId: savedReturn.id,
+            notas: `Devolución ${returnNumber}`,
+            usuarioId: userId,
+            unidades: codigosQueVuelven.length ? codigosQueVuelven : undefined,
             tenantId,
           });
-          await movementRepo.save(movement);
-
-          if (returnedUnit) {
-            returnedUnit.status = StockUnitStatus.IN_STOCK;
-            returnedUnit.warehouseId = destinationWarehouseId;
-            await manager.getRepository(StockUnit).save(returnedUnit);
-            await manager.getRepository(StockUnitEvent).save(
-              manager.getRepository(StockUnitEvent).create({
-                stockUnitId: returnedUnit.id,
-                eventType: StockUnitEventType.RETURNED,
-                fromStatus: StockUnitStatus.SOLD,
-                toStatus: StockUnitStatus.IN_STOCK,
-                referenceType: 'RETURN',
-                referenceId: savedReturn.id,
-                userId,
-                metadata: {
-                  saleId: sale.id,
-                  saleItemId: saleItem.id,
-                  destinationWarehouseId,
-                  receivedById,
-                  replacementStockUnitId: replacementUnit?.id ?? null,
-                },
-                tenantId,
-              }),
-            );
-          }
 
           if (replacementUnit?.variantId) {
-            const replacementStock = await stockRepo.findOne({
-              where: {
-                variantId: replacementUnit.variantId,
-                warehouseId: replacementUnit.warehouseId,
-                tenantId,
-              },
-              lock: { mode: 'pessimistic_write' },
+            await this.ledger.mover(manager, {
+              variantId: replacementUnit.variantId,
+              warehouseId: replacementUnit.warehouseId,
+              cantidad: -replacementUnit.quantity,
+              motivo: 'RETURN_EXCHANGE',
+              referenciaId: savedReturn.id,
+              notas: `Reemplazo en ${returnNumber}`,
+              usuarioId: userId,
+              unidades: [replacementUnit.id],
+              tenantId,
             });
-            if (
-              !replacementStock ||
-              Number(replacementStock.quantity) < replacementUnit.quantity
-            ) {
-              throw new BadRequestException(
-                `Stock agregado insuficiente para el reemplazo ${replacementUnit.barcode}`,
-              );
-            }
-            replacementStock.quantity =
-              Number(replacementStock.quantity) - replacementUnit.quantity;
-            await stockRepo.save(replacementStock);
-            await movementRepo.save(
-              movementRepo.create({
-                variantId: replacementUnit.variantId,
-                warehouseId: replacementUnit.warehouseId,
-                movementType: MovementType.OUT,
-                quantity: replacementUnit.quantity,
-                referenceType: 'RETURN_EXCHANGE',
-                referenceId: savedReturn.id,
-                notes: `Reemplazo en ${returnNumber}`,
-                createdById: userId,
-                tenantId,
-              }),
-            );
-            replacementUnit.status = StockUnitStatus.SOLD;
-            await manager.getRepository(StockUnit).save(replacementUnit);
-            await manager.getRepository(StockUnitEvent).save(
-              manager.getRepository(StockUnitEvent).create({
-                stockUnitId: replacementUnit.id,
-                eventType: StockUnitEventType.SOLD,
-                fromStatus: StockUnitStatus.IN_STOCK,
-                toStatus: StockUnitStatus.SOLD,
-                referenceType: 'RETURN',
-                referenceId: savedReturn.id,
-                userId,
-                metadata: {
-                  exchangeForStockUnitId: returnedUnit?.id ?? null,
-                  replacementPrice,
-                  priceDifference,
-                },
-                tenantId,
-              }),
-            );
           }
         }
 
@@ -738,10 +664,7 @@ export class ReturnsService {
         );
       }
 
-      const stockRepo = manager.getRepository(Stock);
-      const movementRepo = manager.getRepository(StockMovement);
       const unitRepo = manager.getRepository(StockUnit);
-      const eventRepo = manager.getRepository(StockUnitEvent);
       for (const item of tracked) {
         const unit = await unitRepo.findOne({
           where: { id: item.stockUnitId!, tenantId },
@@ -758,78 +681,22 @@ export class ReturnsService {
         }
         const sourceWarehouseId = unit.warehouseId;
         if (sourceWarehouseId !== destinationWarehouseId) {
-          const source = await stockRepo.findOne({
-            where: {
-              variantId: unit.variantId,
-              warehouseId: sourceWarehouseId,
-              tenantId,
+          await this.ledger.trasladar(manager, {
+            variantId: unit.variantId,
+            desdeWarehouseId: sourceWarehouseId,
+            hastaWarehouseId: destinationWarehouseId,
+            cantidad: unit.quantity,
+            motivo: 'RETURN_REMITTANCE',
+            motivos: {
+              salida: 'RETURN_REMITTANCE',
+              entrada: 'RETURN_REMITTANCE',
             },
-            lock: { mode: 'pessimistic_write' },
+            referenciaId: returnEntity.id,
+            notas: `Remisión de ${returnEntity.returnNumber} hacia ${destination.name}`,
+            usuarioId: userId,
+            unidades: [unit.id],
+            tenantId,
           });
-          if (!source || Number(source.quantity) < unit.quantity) {
-            throw new BadRequestException(
-              `Stock agregado insuficiente para remitir ${unit.barcode}`,
-            );
-          }
-          let target = await stockRepo.findOne({
-            where: {
-              variantId: unit.variantId,
-              warehouseId: destinationWarehouseId,
-              tenantId,
-            },
-            lock: { mode: 'pessimistic_write' },
-          });
-          if (!target) {
-            target = stockRepo.create({
-              variantId: unit.variantId,
-              warehouseId: destinationWarehouseId,
-              quantity: 0,
-              minStock: 0,
-              tenantId,
-            });
-          }
-          source.quantity = Number(source.quantity) - unit.quantity;
-          target.quantity = Number(target.quantity) + unit.quantity;
-          await stockRepo.save([source, target]);
-          await movementRepo.save([
-            movementRepo.create({
-              variantId: unit.variantId,
-              warehouseId: sourceWarehouseId,
-              tenantId,
-              movementType: MovementType.TRANSFER,
-              quantity: -unit.quantity,
-              referenceType: 'RETURN_REMITTANCE',
-              referenceId: returnEntity.id,
-              notes: `Salida de ${returnEntity.returnNumber} hacia ${destination.name}`,
-              createdById: userId,
-            }),
-            movementRepo.create({
-              variantId: unit.variantId,
-              warehouseId: destinationWarehouseId,
-              tenantId,
-              movementType: MovementType.TRANSFER,
-              quantity: unit.quantity,
-              referenceType: 'RETURN_REMITTANCE',
-              referenceId: returnEntity.id,
-              notes: `Entrada de ${returnEntity.returnNumber}`,
-              createdById: userId,
-            }),
-          ]);
-          unit.warehouseId = destinationWarehouseId;
-          await unitRepo.save(unit);
-          await eventRepo.save(
-            eventRepo.create({
-              stockUnitId: unit.id,
-              eventType: StockUnitEventType.TRANSFERRED,
-              fromStatus: StockUnitStatus.IN_STOCK,
-              toStatus: StockUnitStatus.IN_STOCK,
-              referenceType: 'RETURN',
-              referenceId: returnEntity.id,
-              userId,
-              metadata: { sourceWarehouseId, destinationWarehouseId },
-              tenantId,
-            }),
-          );
         }
       }
       returnEntity.remittanceWarehouseId = destinationWarehouseId;

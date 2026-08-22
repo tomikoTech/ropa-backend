@@ -645,7 +645,7 @@ export class PosService {
             for (const r of clientResv) {
               if (toConsume <= 0) break;
               const take = Math.min(Number(r.quantity), toConsume);
-              r.quantity = Number(r.quantity) - take; // no-es-stock: apartado
+              r.quantity = Number(r.quantity) - take; // ledger-exento: es un apartado, no existencia
               toConsume -= take;
               if (r.quantity <= 0) r.status = 'FULFILLED';
               await reservationRepo.save(r);
@@ -1730,53 +1730,23 @@ export class PosService {
     sale: Sale,
     tenantId: string,
   ): Promise<Map<string, string[]>> {
-    // Candidatos: los que la venta anotó en su línea y los que el ledger
-    // eligió por antigüedad.
-    const candidatos: { id: string }[] = await manager.query(
-      `SELECT DISTINCT e.stock_unit_id AS id
-         FROM stock_unit_events e
-        WHERE e.reference_type = 'SALE'
-          AND e.reference_id = $1
-          AND e.tenant_id = $2`,
-      [sale.id, tenantId],
+    // La pregunta «¿de quién es este bulto?» vive en el ledger: también la
+    // hace la devolución, y tenerla en dos sitios era garantía de que una de
+    // las dos copias se quedara sin el arreglo de la otra.
+    const unidades = await this.ledger.unidadesDeLaReferencia(
+      manager,
+      sale.id,
+      tenantId,
+      {
+        // Lo que la línea anotó al escanear: puede ser anterior a que el
+        // ledger dejara eventos.
+        extra: (sale.items ?? [])
+          .map((item) => item.stockUnitId)
+          .filter((id): id is string => !!id),
+      },
     );
-    const ids = new Set(candidatos.map((fila) => fila.id));
-    for (const item of sale.items ?? []) {
-      if (item.stockUnitId) ids.add(item.stockUnitId);
-    }
-    if (ids.size === 0) return new Map();
+    if (unidades.length === 0) return new Map();
 
-    // De esos, solo los que **siguen siendo de esta venta**.
-    //
-    // Los eventos no se borran, así que un par que esta venta soltó al
-    // editarse y que otra ya volvió a vender conserva el evento de esta.
-    // Reclamarlo lo devolvería al inventario estando en manos del cliente de
-    // la otra venta —y con la existencia ya descontada por ella—: justo el
-    // descuadre que este refactor vino a eliminar. Manda el **último** evento
-    // que cambió su estado; si no hay ninguno, el bulto es anterior a que se
-    // llevara esta historia y se acepta.
-    const propias: { id: string }[] = await manager.query(
-      `SELECT u.id
-         FROM stock_units u
-        WHERE u.id = ANY($1::uuid[])
-          AND u.tenant_id = $2
-          AND u.status = 'SOLD'
-          AND COALESCE(
-                (SELECT e.reference_id
-                   FROM stock_unit_events e
-                  WHERE e.stock_unit_id = u.id
-                    AND e.event_type IN ('SOLD', 'RETURNED', 'TRANSFERRED')
-                  ORDER BY e.created_at DESC, e.id DESC
-                  LIMIT 1),
-                $3
-              ) = $3`,
-      [[...ids], tenantId, sale.id],
-    );
-    if (propias.length === 0) return new Map();
-
-    const unidades = await manager.getRepository(StockUnit).find({
-      where: { id: In(propias.map((f) => f.id)), tenantId },
-    });
     const porPunto = new Map<string, string[]>();
     for (const unidad of unidades) {
       const clave = `${unidad.variantId}|${unidad.warehouseId}`;

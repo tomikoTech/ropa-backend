@@ -14,6 +14,7 @@ import { StockMovement } from '../inventory/entities/stock-movement.entity.js';
 import { StockUnit } from '../inventory/entities/stock-unit.entity.js';
 import { BrandsModule } from '../brands/brands.module.js';
 import { CatalogsModule } from '../catalogs/catalogs.module.js';
+import { StockLedgerModule } from '../inventory/ledger/stock-ledger.module.js';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { CatalogsModule } from '../catalogs/catalogs.module.js';
       StockMovement,
       StockUnit,
     ]),
+    StockLedgerModule,
     BrandsModule,
     CatalogsModule,
   ],

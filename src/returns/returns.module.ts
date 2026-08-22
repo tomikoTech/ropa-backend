@@ -16,6 +16,7 @@ import { IncomeEntry } from '../incomes/entities/income-entry.entity.js';
 import { AccountsReceivable } from '../pos/entities/accounts-receivable.entity.js';
 import { ReturnsService } from './returns.service.js';
 import { ReturnsController } from './returns.controller.js';
+import { StockLedgerModule } from '../inventory/ledger/stock-ledger.module.js';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { ReturnsController } from './returns.controller.js';
       IncomeEntry,
       AccountsReceivable,
     ]),
+    StockLedgerModule,
   ],
   controllers: [ReturnsController],
   providers: [ReturnsService],

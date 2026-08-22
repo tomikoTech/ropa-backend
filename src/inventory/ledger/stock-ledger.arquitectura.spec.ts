@@ -28,19 +28,11 @@ const RAIZ = join(process.cwd(), 'src');
  * esta lista no puede volver a entrar sin que alguien lo justifique.
  */
 const PENDIENTES_DE_MIGRAR: Record<string, string> = {
-  'inventory/inventory.service.ts':
-    'solo queda `getOrCreateStockTx`: ajuste, traslados y préstamos ya pasan por el ledger',
-  'inventory/stock-units.service.ts':
-    'ya mantiene las dos caras; se moverá al ledger para tener un solo camino',
-  'purchases/purchases.service.ts': 'recepción de compra',
-  'returns/returns.service.ts': 'devoluciones',
-  'street/street.service.ts': 'remisiones de calle',
-  'internal-requests/internal-requests.service.ts': 'solicitudes internas',
-  'storefront/store-settings.service.ts': 'pedidos de la tienda online',
-  'production/production.service.ts':
-    'perfumería: no lleva bultos, pero debería pasar igual por el ledger',
-  'products/services/recipe.service.ts': 'consumo de esencias por receta',
-  'products/products.service.ts': 'crea filas de stock en cero al alta',
+  // Vacía: los 21 caminos de la auditoría pasan por el ledger.
+  //
+  // Que esté vacía es el punto. Un archivo nuevo que escriba `stock.quantity`
+  // no tiene dónde esconderse: la primera prueba falla y quien lo escribió
+  // tiene que justificarlo aquí, a la vista de quien revise.
 };
 
 /** Los seeds e importadores cargan datos, no operan la tienda. */
@@ -78,12 +70,15 @@ describe('el inventario se mueve por un solo sitio', () => {
       const golpes = texto.split('\n').filter((l) => {
         const limpia = l.trim();
         if (limpia.startsWith('//') || limpia.startsWith('*')) return false;
-        // Escape con nombre y apellido. `.quantity =` también aparece en cosas
-        // que no son existencia —un apartado, una línea de compra— y que viven
-        // en archivos que sí importan `Stock`. Marcar la línea con
-        // `no-es-stock:` y su razón la deja pasar; el marcador es greppable, y
-        // usarlo para tapar una escritura de verdad se ve en la revisión.
-        if (limpia.includes('no-es-stock:')) return false;
+        // Escape con nombre y apellido.
+        //
+        // No todo lo que casa con el patrón mueve inventario: `.quantity =`
+        // también aparece en un apartado, y guardar una fila de stock **en
+        // cero** al dar de alta un producto es provisionar, no mover. Marcar
+        // la línea con `ledger-exento:` y su razón la deja pasar; el marcador
+        // es greppable, y usarlo para tapar una escritura de verdad se ve en
+        // la revisión.
+        if (limpia.includes('ledger-exento:')) return false;
         return escribe.test(limpia);
       }).length;
       if (golpes > 0) escrituras.set(relativa, golpes);

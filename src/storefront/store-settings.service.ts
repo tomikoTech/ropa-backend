@@ -18,6 +18,7 @@ import type { OrderEmailData } from '../common/services/order-notification-email
 import { EcommerceOrderStatus } from '../common/enums/ecommerce-order-status.enum.js';
 import { ShippingStatus } from '../common/enums/shipping-status.enum.js';
 import { MovementType } from '../common/enums/movement-type.enum.js';
+import { StockLedgerService } from '../inventory/ledger/stock-ledger.service.js';
 
 @Injectable()
 export class StoreSettingsService {
@@ -31,6 +32,7 @@ export class StoreSettingsService {
     private readonly dataSource: DataSource,
     private readonly invoiceEmailService: InvoiceEmailService,
     private readonly orderNotificationEmailService: OrderNotificationEmailService,
+    private readonly ledger: StockLedgerService,
   ) {}
 
   /** Build OrderEmailData from an EcommerceOrder with items loaded. */
@@ -404,23 +406,27 @@ export class StoreSettingsService {
           if (available <= 0) continue;
 
           const toDeduct = Math.min(available, remaining);
-          stock.quantity = available - toDeduct;
           remaining -= toDeduct;
 
-          await stockRepo.save(stock);
-
-          const movement = movementRepo.create({
+          await this.ledger.mover(manager, {
             variantId: item.variantId,
             warehouseId: stock.warehouseId,
-            movementType: MovementType.OUT,
-            quantity: -toDeduct,
-            referenceType: 'ECOMMERCE_ORDER',
-            referenceId: o.id,
-            notes: `Venta web finalizada ${o.orderNumber}`,
-            createdById: userId,
+            cantidad: -toDeduct,
+            motivo: 'ECOMMERCE_ORDER',
+            referenciaId: o.id,
+            notas: `Venta web finalizada ${o.orderNumber}`,
+            usuarioId: userId,
             tenantId,
           });
-          await movementRepo.save(movement);
+        }
+        if (remaining > 0) {
+          // La validación de arriba mira el total de la variante; si al
+          // repartirlo entre bodegas falta, la venta web quedaría cobrada con
+          // mercancía que el inventario no movió.
+          throw new BadRequestException(
+            `Stock insuficiente para "${item.productName}" ` +
+              `${item.variantSize}/${item.variantColor}: faltaron ${remaining}.`,
+          );
         }
       }
 

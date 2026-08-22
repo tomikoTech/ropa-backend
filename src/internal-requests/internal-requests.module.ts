@@ -13,6 +13,7 @@ import { StockMovement } from '../inventory/entities/stock-movement.entity.js';
 import { StockTransfer } from '../inventory/entities/stock-transfer.entity.js';
 import { StockUnit } from '../inventory/entities/stock-unit.entity.js';
 import { StockUnitEvent } from '../inventory/entities/stock-unit-event.entity.js';
+import { StockLedgerModule } from '../inventory/ledger/stock-ledger.module.js';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { StockUnitEvent } from '../inventory/entities/stock-unit-event.entity.js
       StockUnit,
       StockUnitEvent,
     ]),
+    StockLedgerModule,
   ],
   controllers: [InternalRequestsController],
   providers: [InternalRequestsService],
