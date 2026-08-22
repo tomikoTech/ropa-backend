@@ -17,16 +17,11 @@ import {
 } from './entities/inventory-count-scan.entity.js';
 import { Stock } from './entities/stock.entity.js';
 import { StockMovement } from './entities/stock-movement.entity.js';
-import {
-  StockUnit,
-  StockUnitKind,
-  StockUnitStatus,
-} from './entities/stock-unit.entity.js';
+import { StockUnit, StockUnitStatus } from './entities/stock-unit.entity.js';
 import {
   StockUnitEvent,
   StockUnitEventType,
 } from './entities/stock-unit-event.entity.js';
-import { StockUnitContent } from './entities/stock-unit-content.entity.js';
 import { ProductVariant } from '../products/entities/product-variant.entity.js';
 import { MovementType } from '../common/enums/movement-type.enum.js';
 
@@ -302,7 +297,7 @@ export class InventoryCountsService {
             ? InventoryCountScanResult.COUNTED
             : InventoryCountScanResult.SURPLUS;
 
-          const components = await this.componentsForUnit(manager, unit);
+          const components = this.componentsForUnit(unit);
           for (const component of components) {
             await this.incrementLine(
               manager,
@@ -337,24 +332,26 @@ export class InventoryCountsService {
     });
   }
 
-  private async componentsForUnit(
-    manager: EntityManager,
+  /**
+   * Contra qué variante cuenta un bulto escaneado.
+   *
+   * Siempre la suya, **también las cajas cerradas**. Parece contraintuitivo
+   * —una caja trae varias tallas— pero es dónde vive su stock: al recibirla se
+   * suma entero a una «variante equivalente», porque el inventario agregado
+   * necesita una variante y la caja todavía no se ha abierto.
+   *
+   * Antes se devolvía el desglose por talla, y el conteo terminaba hundiendo la
+   * existencia de la variante equivalente e inflando la de las demás tallas,
+   * con la caja aún disponible. Era el peor de los descuadres porque se
+   * disparaba justo en la operación que existe para cuadrar: contar el
+   * inventario lo dejaba peor que antes.
+   *
+   * Las tallas de adentro se vuelven stock real cuando la caja se abre, no
+   * cuando se cuenta.
+   */
+  private componentsForUnit(
     unit: StockUnit,
-  ): Promise<Array<{ variantId: string; quantity: number }>> {
-    if (unit.kind === StockUnitKind.BOX) {
-      const contents =
-        unit.contents ??
-        (await manager.getRepository(StockUnitContent).find({
-          where: { boxUnitId: unit.id, tenantId: unit.tenantId },
-        }));
-      const components = contents
-        .filter((content) => content.variantId && content.actualQuantity > 0)
-        .map((content) => ({
-          variantId: content.variantId as string,
-          quantity: content.actualQuantity,
-        }));
-      if (components.length > 0) return components;
-    }
+  ): Array<{ variantId: string; quantity: number }> {
     if (!unit.variantId) {
       throw new BadRequestException(
         `El código ${unit.barcode} no tiene variante asociada y requiere conciliación.`,
@@ -615,10 +612,17 @@ export class InventoryCountsService {
           .find({
             where: { countId, tenantId, result: In(SUCCESS_RESULTS) },
           });
+
+        // Dar de baja lo que no apareció solo tiene sentido si de verdad se
+        // pasó el lector por la bodega. En un conteo hecho a mano no se escanea
+        // nada, así que «no apareció» significa «no lo buscamos con el lector»
+        // — y el barrido daba de baja TODOS los bultos etiquetados de esa
+        // bodega. Contar una talla a mano borraba el rastro de todo lo demás.
+        const huboEscaneo = successfulScans.length > 0;
         const foundIds = new Set(
           successfulScans.map((scan) => scan.stockUnitId),
         );
-        for (const expected of expectedUnits) {
+        for (const expected of huboEscaneo ? expectedUnits : []) {
           if (foundIds.has(expected.stockUnitId)) continue;
           const unit = await manager.getRepository(StockUnit).findOne({
             where: { id: expected.stockUnitId, tenantId },
