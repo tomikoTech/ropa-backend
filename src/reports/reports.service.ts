@@ -21,6 +21,14 @@ export interface SalesReport {
 export interface TopProduct {
   productName: string;
   variantSku: string;
+  /**
+   * La referencia impresa en la caja y el código del escáner.
+   *
+   * Salen del snapshot de la línea de venta, no de un `join`: el reporte tiene
+   * que decir con qué código se vendió entonces, aunque hoy se haya renumerado.
+   */
+  productCode: string | null;
+  variantBarcode: string | null;
   size: string;
   color: string;
   totalQuantity: number;
@@ -160,6 +168,8 @@ export class ReportsService {
       .innerJoin('si.sale', 's')
       .select('si.product_name', 'productName')
       .addSelect('si.variant_sku', 'variantSku')
+      .addSelect('si.product_code', 'productCode')
+      .addSelect('si.variant_barcode', 'variantBarcode')
       .addSelect('si.variant_size', 'size')
       .addSelect('si.variant_color', 'color')
       .addSelect('SUM(si.quantity)', 'totalQuantity')
@@ -169,6 +179,8 @@ export class ReportsService {
       .andWhere('s.tenant_id = :tenantId', { tenantId })
       .groupBy('si.product_name')
       .addGroupBy('si.variant_sku')
+      .addGroupBy('si.product_code')
+      .addGroupBy('si.variant_barcode')
       .addGroupBy('si.variant_size')
       .addGroupBy('si.variant_color')
       .orderBy('"totalQuantity"', 'DESC')
@@ -178,6 +190,8 @@ export class ReportsService {
     return result.map((r) => ({
       productName: r.productName,
       variantSku: r.variantSku,
+      productCode: r.productCode ?? null,
+      variantBarcode: r.variantBarcode ?? null,
       size: r.size,
       color: r.color,
       totalQuantity: Number(r.totalQuantity),

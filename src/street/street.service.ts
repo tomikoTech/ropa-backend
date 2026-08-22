@@ -362,6 +362,9 @@ export class StreetService {
               variantId: variant.id,
               productName: variant.product.name,
               variantSku: variant.sku,
+              // El código del escáner viaja con el despacho: el patinador sale
+              // con la mercancía y el papel, y así se cuadra por código.
+              variantBarcode: variant.barcode ?? null,
               variantSize: variant.sizeName,
               variantColor: variant.colorName,
               stockUnitId: line.stockUnitId ?? null,
@@ -722,6 +725,7 @@ export class StreetService {
           variantId: original.variantId,
           productName: original.productName,
           variantSku: original.variantSku,
+          variantBarcode: original.variantBarcode ?? null,
           variantSize: original.variantSize,
           variantColor: original.variantColor,
           quantity: line.sold,

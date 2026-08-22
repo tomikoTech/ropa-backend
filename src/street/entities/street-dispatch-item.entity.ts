@@ -48,6 +48,16 @@ export class StreetDispatchItem extends TenantAwareEntity {
   @Column({ name: 'variant_sku' })
   variantSku: string;
 
+  /**
+   * El código del escáner, como snapshot igual que el SKU.
+   *
+   * El patinador sale con la mercancía y el papel, y al volver se cuadra por
+   * código. Si mañana la referencia se renumera, el despacho de ayer tiene que
+   * seguir diciendo con qué código salió.
+   */
+  @Column({ name: 'variant_barcode', type: 'varchar', nullable: true })
+  variantBarcode: string | null;
+
   @Column({ name: 'variant_size', default: '' })
   variantSize: string;
 
