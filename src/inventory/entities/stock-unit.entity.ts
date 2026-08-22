@@ -50,6 +50,8 @@ export enum StockUnitStatus {
 @Entity('stock_units')
 @Unique(['tenantId', 'barcode'])
 @Index(['tenantId', 'warehouseId', 'status'])
+// El cuadre se comprueba por variante y bodega, una vez por renglón de venta.
+@Index(['tenantId', 'variantId', 'warehouseId', 'status'])
 export class StockUnit extends TenantAwareEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;

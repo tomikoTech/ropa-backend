@@ -1713,7 +1713,14 @@ export class InventoryService {
     const idsDeCompra = new Set<string>();
     for (const m of movements) {
       if (!m.referenceId) continue;
-      if (m.referenceType === 'SALE' || m.referenceType === 'SALE_CANCEL') {
+      if (
+        m.referenceType === 'SALE' ||
+        m.referenceType === 'SALE_CANCEL' ||
+        // La reversión de una factura editada también cuelga de la venta. Sin
+        // esto salía en el historial como una entrada sin número de factura ni
+        // cliente, justo al lado de la salida que sí los tenía.
+        m.referenceType === 'SALE_EDIT'
+      ) {
         idsDeVenta.add(m.referenceId);
       } else if (m.referenceType === 'PURCHASE') {
         idsDeCompra.add(m.referenceId);

@@ -63,13 +63,18 @@ export class StockIntegrityService {
   /**
    * El descuadre de una tienda.
    *
-   * Solo mira las variantes que tienen o tuvieron bultos: en un producto que
-   * nunca se etiquetó no hay nada que comparar, y meterlo en el reporte lo
-   * llenaría de ceros.
+   * Solo mira las variantes que llevan bultos —por la marca del producto o
+   * por el ajuste de la tienda, la misma regla que aplica el ledger—: en un
+   * producto que nunca se etiquetó no hay nada que comparar, y meterlo en el
+   * reporte lo llenaría de ceros.
    */
   async revisar(
     tenantId: string,
-    opciones: { manager?: EntityManager; variantId?: string; warehouseId?: string } = {},
+    opciones: {
+      manager?: EntityManager;
+      variantId?: string;
+      warehouseId?: string;
+    } = {},
   ): Promise<ResumenIntegridad> {
     const manager = opciones.manager ?? this.dataSource.manager;
     const filas = await manager.query<
@@ -115,7 +120,22 @@ export class StockIntegrityService {
       JOIN product_variants pv ON pv.id = c.variant_id
       JOIN products p ON p.id = pv.product_id
       JOIN warehouses w ON w.id = c.warehouse_id
-      WHERE p.unit_tracking = true
+      -- La misma regla que usa el ledger para decidir si un producto lleva
+      -- bultos: la marca del producto **o** el ajuste de la tienda. Mirar solo
+      -- la del producto dejaba ciego el reporte justo en las tiendas que
+      -- encendieron el inventario por códigos después de cargar su catálogo:
+      -- el ledger sí movía las etiquetas, pero el descuadre no salía a la luz.
+      --
+      -- Con EXISTS y no con un JOIN: store_settings no tiene unicidad por
+      -- tenant, y un tenant con dos filas duplicaría cada combinación —y con
+      -- ella los totales del informe—.
+      WHERE (
+              p.unit_tracking
+              OR EXISTS (
+                SELECT 1 FROM store_settings ss
+                 WHERE ss.tenant_id = $1 AND ss.unit_tracking_enabled
+              )
+            )
         AND ($2::uuid IS NULL OR c.variant_id = $2::uuid)
         AND ($3::uuid IS NULL OR c.warehouse_id = $3::uuid)
       ORDER BY abs(c.agregado - c.etiquetadas) DESC, p.name
@@ -170,11 +190,63 @@ export class StockIntegrityService {
     variantId: string,
     warehouseId: string,
   ): Promise<Descuadre | null> {
-    const { descuadres } = await this.revisar(tenantId, {
-      manager,
+    // Consulta propia y no `revisar()` con filtros.
+    //
+    // `revisar()` agrupa **todos** los bultos del tenant y solo después filtra
+    // por variante y bodega: el FULL OUTER JOIN impide que Postgres empuje el
+    // filtro hacia adentro. Como esto corre dentro de la transacción de la
+    // venta, con la fila de stock bloqueada y una vez por renglón, una factura
+    // de veinte líneas agregaba veinte veces la tabla entera mientras la caja
+    // esperaba. Aquí solo se miran las dos filas que importan.
+    const filas = await manager.query<
+      {
+        sku: string;
+        barcode: string | null;
+        product_id: string;
+        product_name: string;
+        warehouse_name: string;
+        lleva: boolean;
+        agregado: string;
+        etiquetadas: string;
+      }[]
+    >(
+      `SELECT pv.sku, pv.barcode, p.id AS product_id, p.name AS product_name,
+              w.name AS warehouse_name,
+              (p.unit_tracking OR EXISTS (
+                 SELECT 1 FROM store_settings ss
+                  WHERE ss.tenant_id = $1 AND ss.unit_tracking_enabled
+               )) AS lleva,
+              COALESCE((SELECT s.quantity FROM stock s
+                         WHERE s.variant_id = $2 AND s.warehouse_id = $3
+                           AND s.tenant_id = $1), 0) AS agregado,
+              COALESCE((SELECT SUM(su.quantity) FROM stock_units su
+                         WHERE su.variant_id = $2 AND su.warehouse_id = $3
+                           AND su.tenant_id = $1
+                           AND su.status = 'IN_STOCK'), 0) AS etiquetadas
+         FROM product_variants pv
+         JOIN products p ON p.id = pv.product_id
+         JOIN warehouses w ON w.id = $3
+        WHERE pv.id = $2 AND pv.tenant_id = $1
+        LIMIT 1`,
+      [tenantId, variantId, warehouseId],
+    );
+    const fila = filas[0];
+    if (!fila || !fila.lleva) return null;
+
+    const agregado = Number(fila.agregado);
+    const etiquetadas = Number(fila.etiquetadas);
+    if (agregado === etiquetadas) return null;
+    return {
       variantId,
+      sku: fila.sku,
+      barcode: fila.barcode,
+      productId: fila.product_id,
+      productName: fila.product_name,
       warehouseId,
-    });
-    return descuadres[0] ?? null;
+      warehouseName: fila.warehouse_name,
+      agregado,
+      etiquetadas,
+      diferencia: agregado - etiquetadas,
+    };
   }
 }

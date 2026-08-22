@@ -4,6 +4,7 @@ import {
   Column,
   ManyToOne,
   JoinColumn,
+  Index,
   CreateDateColumn,
   BeforeInsert,
   BeforeUpdate,
@@ -15,6 +16,9 @@ import { MovementType } from '../../common/enums/movement-type.enum.js';
 import { TenantAwareEntity } from '../../common/entities/tenant-aware.entity.js';
 import { normalizeStoredQuantity } from '../movement-delta.js';
 
+// Cuánto sigue descontado por un documento: lo lee cada anulación y cada
+// edición de factura, dentro de la transacción y con el stock bloqueado.
+@Index(['tenantId', 'referenceType', 'referenceId'])
 @Entity('stock_movements')
 export class StockMovement extends TenantAwareEntity {
   @PrimaryGeneratedColumn('uuid')

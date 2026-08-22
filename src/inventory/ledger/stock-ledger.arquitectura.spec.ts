@@ -32,7 +32,6 @@ const PENDIENTES_DE_MIGRAR: Record<string, string> = {
     'solo queda `getOrCreateStockTx`: ajuste, traslados y préstamos ya pasan por el ledger',
   'inventory/stock-units.service.ts':
     'ya mantiene las dos caras; se moverá al ledger para tener un solo camino',
-  'pos/pos.service.ts': 'venta, anulación y edición de factura',
   'purchases/purchases.service.ts': 'recepción de compra',
   'returns/returns.service.ts': 'devoluciones',
   'street/street.service.ts': 'remisiones de calle',
@@ -79,6 +78,12 @@ describe('el inventario se mueve por un solo sitio', () => {
       const golpes = texto.split('\n').filter((l) => {
         const limpia = l.trim();
         if (limpia.startsWith('//') || limpia.startsWith('*')) return false;
+        // Escape con nombre y apellido. `.quantity =` también aparece en cosas
+        // que no son existencia —un apartado, una línea de compra— y que viven
+        // en archivos que sí importan `Stock`. Marcar la línea con
+        // `no-es-stock:` y su razón la deja pasar; el marcador es greppable, y
+        // usarlo para tapar una escritura de verdad se ve en la revisión.
+        if (limpia.includes('no-es-stock:')) return false;
         return escribe.test(limpia);
       }).length;
       if (golpes > 0) escrituras.set(relativa, golpes);

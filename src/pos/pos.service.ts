@@ -4,7 +4,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource, EntityManager, In, ILike, Not } from 'typeorm';
+import { Repository, DataSource, EntityManager, In, Not } from 'typeorm';
 import { Sale } from './entities/sale.entity.js';
 import { SaleItem } from './entities/sale-item.entity.js';
 import { Payment } from './entities/payment.entity.js';
@@ -16,21 +16,15 @@ import {
   StockUnitStatus,
 } from '../inventory/entities/stock-unit.entity.js';
 import { StockUnitContent } from '../inventory/entities/stock-unit-content.entity.js';
-import {
-  describeBoxSizes,
-  sortSizes,
-} from '../inventory/box-description.js';
-import {
-  StockUnitEvent,
-  StockUnitEventType,
-} from '../inventory/entities/stock-unit-event.entity.js';
-import { StockMovement } from '../inventory/entities/stock-movement.entity.js';
+import { describeBoxSizes, sortSizes } from '../inventory/box-description.js';
+import {} from '../inventory/entities/stock-unit-event.entity.js';
 import { Client } from '../clients/entities/client.entity.js';
 import { AccountsReceivable } from './entities/accounts-receivable.entity.js';
 import { AccountsReceivablePayment } from './entities/accounts-receivable-payment.entity.js';
 import { CreateSaleDto } from './dto/create-sale.dto.js';
 import { UpdateSaleDto } from './dto/update-sale.dto.js';
 import { RecordArPaymentDto } from './dto/record-ar-payment.dto.js';
+import { StockLedgerService } from '../inventory/ledger/stock-ledger.service.js';
 import { TaxService, LineCalculation } from './services/tax.service.js';
 import { InvoiceService } from './services/invoice.service.js';
 import { ProductStatus } from '../common/enums/product-status.enum.js';
@@ -41,7 +35,6 @@ import { Reservation } from '../reservations/entities/reservation.entity.js';
 import { SaleStatus } from '../common/enums/sale-status.enum.js';
 import { SaleChannel } from '../common/enums/sale-channel.enum.js';
 import { PaymentMethod } from '../common/enums/payment-method.enum.js';
-import { MovementType } from '../common/enums/movement-type.enum.js';
 import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
 import { Promoter } from '../promoters/promoter.entity.js';
 import { randomUUID } from 'node:crypto';
@@ -70,6 +63,7 @@ export class PosService {
     private readonly invoiceService: InvoiceService,
     private readonly receiptService: ReceiptService,
     private readonly invoiceEmailService: InvoiceEmailService,
+    private readonly ledger: StockLedgerService,
   ) {}
 
   /**
@@ -94,7 +88,6 @@ export class PosService {
       this.dataSource.transaction(async (manager) => {
         const variantRepo = manager.getRepository(ProductVariant);
         const stockRepo = manager.getRepository(Stock);
-        const movementRepo = manager.getRepository(StockMovement);
         const saleRepo = manager.getRepository(Sale);
         const saleItemRepo = manager.getRepository(SaleItem);
         const paymentRepo = manager.getRepository(Payment);
@@ -195,6 +188,9 @@ export class PosService {
           }
         }
 
+        /** Cuánto lleva pedido cada variante en los renglones ya validados. */
+        const pedidoPorVariante = new Map<string, number>();
+
         for (const item of dto.items) {
           const promoter = item.promoterId
             ? promotersById.get(item.promoterId)
@@ -242,7 +238,13 @@ export class PosService {
           const reservedOthers =
             (reservedTotal.get(item.variantId) ?? 0) -
             (reservedByClient.get(item.variantId) ?? 0);
-          const effectiveAvailable = totalAvailable - reservedOthers;
+          // Y lo que ya se llevaron los renglones anteriores de esta misma
+          // factura. La validación corre entera antes de descontar, así que dos
+          // líneas de la misma referencia —con distinto impulsador o distinto
+          // descuento, que es lo que las separa— se validaban las dos contra el
+          // total: la factura salía por cuatro pares y el inventario movía tres.
+          const yaPedido = pedidoPorVariante.get(item.variantId) ?? 0;
+          const effectiveAvailable = totalAvailable - reservedOthers - yaPedido;
           if (effectiveAvailable < item.quantity) {
             const reservedMsg =
               reservedOthers > 0 ? ` (${reservedOthers} apartado(s))` : '';
@@ -280,6 +282,7 @@ export class PosService {
             ivaMode,
           );
           lineCalcs.push(lineCalc);
+          pedidoPorVariante.set(item.variantId, yaPedido + item.quantity);
 
           variantData.push({
             variant,
@@ -380,6 +383,27 @@ export class PosService {
         const leftoverCommissionEnabled =
           !!storeSettings?.leftoverCommissionEnabled;
 
+        // Saldo por (variante, bodega) a medida que la venta lo consume.
+        //
+        // Las filas de `stock` se leen una sola vez, antes de descontar, y se
+        // comparten entre los renglones de la misma referencia. Antes el
+        // descuento las mutaba en memoria y el segundo renglón veía el saldo
+        // ya bajado; ahora el saldo lo devuelve el ledger, y sin este mapa ese
+        // renglón repartiría sobre cifras viejas.
+        const saldoEnMemoria = new Map<string, number>();
+        const disponible = (
+          variantId: string,
+          warehouseId: string,
+          fila: Stock,
+        ) =>
+          saldoEnMemoria.get(`${variantId}|${warehouseId}`) ??
+          Number(fila.quantity);
+        const anotarSaldo = (
+          variantId: string,
+          warehouseId: string,
+          saldo: number,
+        ) => saldoEnMemoria.set(`${variantId}|${warehouseId}`, saldo);
+
         // Create sale items
         for (const data of variantData) {
           let isLeftover = false;
@@ -444,12 +468,10 @@ export class PosService {
           // después y lo que se entrega es lo que la caja trae.
           let boxContents: { size: string; quantity: number }[] | null = null;
           if (soldUnit?.kind === StockUnitKind.BOX) {
-            const filas = await manager
-              .getRepository(StockUnitContent)
-              .find({
-                where: { boxUnitId: soldUnit.id, tenantId },
-                relations: { size: true },
-              });
+            const filas = await manager.getRepository(StockUnitContent).find({
+              where: { boxUnitId: soldUnit.id, tenantId },
+              relations: { size: true },
+            });
             const detalle = sortSizes(
               filas
                 .filter((fila) => Number(fila.actualQuantity) > 0)
@@ -460,9 +482,10 @@ export class PosService {
             );
             boxContents = detalle.length > 0 ? detalle : null;
           }
-          const variantSize = soldUnit?.kind === StockUnitKind.BOX
-            ? describeBoxSizes(boxContents ?? [])
-            : data.variant.sizeName;
+          const variantSize =
+            soldUnit?.kind === StockUnitKind.BOX
+              ? describeBoxSizes(boxContents ?? [])
+              : data.variant.sizeName;
 
           const saleItem = saleItemRepo.create({
             saleId: savedSale.id,
@@ -491,57 +514,76 @@ export class PosService {
           });
           await saleItemRepo.save(saleItem);
 
+          // Descontar el inventario. El bulto vendido —si la línea salió de
+          // escanear uno— se marca dentro del mismo movimiento: el ledger
+          // mueve el agregado y el código juntos, y antes eran dos escrituras
+          // que podían quedar desalineadas.
+          //
+          // Cuando hay bulto escaneado el descuento va **forzado a su bodega**.
+          // La cascada de abajo ordena por bodega de la venta y luego por
+          // cantidad, así que podía descontar de la bodega A el par que el
+          // cajero acababa de escanear en la B: el código quedaba vendido en
+          // un sitio y la existencia bajaba en otro, y las dos bodegas
+          // quedaban mal a la vez.
           if (soldUnit) {
-            await manager
-              .getRepository(StockUnit)
-              .update(
-                { id: soldUnit.id, tenantId },
-                { status: StockUnitStatus.SOLD },
-              );
-            await manager.getRepository(StockUnitEvent).save(
-              manager.getRepository(StockUnitEvent).create({
-                stockUnitId: soldUnit.id,
-                eventType: StockUnitEventType.SOLD,
-                fromStatus: StockUnitStatus.IN_STOCK,
-                toStatus: StockUnitStatus.SOLD,
-                referenceType: 'SALE',
-                referenceId: savedSale.id,
-                userId,
-                metadata: {
-                  saleNumber,
-                  saleItemId: saleItem.id,
-                  quantity: data.quantity,
-                },
-                tenantId,
-              }),
-            );
-          }
-
-          // Deduct inventory — cascade: primary warehouse first, then others by qty desc
-          let remaining = data.quantity;
-          for (const stock of data.stocks) {
-            if (remaining <= 0) break;
-            const available = Number(stock.quantity);
-            if (available <= 0) continue;
-
-            const toDeduct = Math.min(available, remaining);
-            stock.quantity = available - toDeduct;
-            remaining -= toDeduct;
-
-            await stockRepo.save(stock);
-
-            const movement = movementRepo.create({
+            const movido = await this.ledger.mover(manager, {
               variantId: data.variant.id,
-              warehouseId: stock.warehouseId,
-              movementType: MovementType.OUT,
-              quantity: -toDeduct,
-              referenceType: 'SALE',
-              referenceId: savedSale.id,
-              notes: `Venta ${saleNumber}`,
-              createdById: userId,
+              warehouseId: soldUnit.warehouseId,
+              cantidad: -data.quantity,
+              motivo: 'SALE',
+              referenciaId: savedSale.id,
+              notas: `Venta ${saleNumber}`,
+              usuarioId: userId,
+              unidades: [soldUnit.id],
+              // El par está en la mano del cajero: si la existencia de esa
+              // bodega no lo reconoce —una etiqueta fantasma de las que ya
+              // había antes de todo esto—, la venta no se frena. El saldo
+              // queda negativo y eso **es** el aviso: sale en el movimiento y
+              // en el reporte de integridad, en vez de descontarse de otra
+              // bodega y dejar el descuadre repartido en dos sitios.
+              permitirNegativo: true,
               tenantId,
             });
-            await movementRepo.save(movement);
+            anotarSaldo(data.variant.id, soldUnit.warehouseId, movido.saldo);
+          } else {
+            // Cascada: primero la bodega de la venta, luego las demás por
+            // existencia. Se relee el saldo porque el ledger ya bloqueó y
+            // pudo cambiar la fila que teníamos en memoria.
+            let remaining = data.quantity;
+            for (const stock of data.stocks) {
+              if (remaining <= 0) break;
+              const available = disponible(
+                data.variant.id,
+                stock.warehouseId,
+                stock,
+              );
+              if (available <= 0) continue;
+
+              const toDeduct = Math.min(available, remaining);
+              remaining -= toDeduct;
+
+              const movido = await this.ledger.mover(manager, {
+                variantId: data.variant.id,
+                warehouseId: stock.warehouseId,
+                cantidad: -toDeduct,
+                motivo: 'SALE',
+                referenciaId: savedSale.id,
+                notas: `Venta ${saleNumber}`,
+                usuarioId: userId,
+                tenantId,
+              });
+              anotarSaldo(data.variant.id, stock.warehouseId, movido.saldo);
+            }
+            if (remaining > 0) {
+              // La cascada se quedó corta. Sin esto la venta se guardaba
+              // completa habiendo movido menos mercancía de la facturada, y el
+              // faltante no aparecía en ninguna parte.
+              throw new BadRequestException(
+                `Stock insuficiente para "${data.variant.product.name}" ` +
+                  `${data.variant.sizeName}/${data.variant.colorName}: ` +
+                  `faltaron ${remaining} unidad(es) al descontar.`,
+              );
+            }
           }
 
           // Perfumería: si el producto (loción) tiene un frasco vinculado,
@@ -562,29 +604,29 @@ export class PosService {
             ) {
               const fs = frascoStocks[i];
               const isLast = i === frascoStocks.length - 1;
-              const avail = Number(fs.quantity);
+              const avail = disponible(frascoVariantId, fs.warehouseId, fs);
               // En la última fila se descuenta todo el remanente (puede quedar
               // negativo); en las demás, solo lo positivo disponible.
               const toDeduct = isLast
                 ? frascoRemaining
                 : Math.min(Math.max(avail, 0), frascoRemaining);
               if (toDeduct <= 0) continue;
-              fs.quantity = avail - toDeduct;
               frascoRemaining -= toDeduct;
-              await stockRepo.save(fs);
-              await movementRepo.save(
-                movementRepo.create({
-                  variantId: frascoVariantId,
-                  warehouseId: fs.warehouseId,
-                  movementType: MovementType.OUT,
-                  quantity: -toDeduct,
-                  referenceType: 'SALE',
-                  referenceId: savedSale.id,
-                  notes: `Frasco por venta ${saleNumber}`,
-                  createdById: userId,
-                  tenantId,
-                }),
-              );
+              const movidoFrasco = await this.ledger.mover(manager, {
+                variantId: frascoVariantId,
+                warehouseId: fs.warehouseId,
+                cantidad: -toDeduct,
+                motivo: 'SALE',
+                referenciaId: savedSale.id,
+                notas: `Frasco por venta ${saleNumber}`,
+                usuarioId: userId,
+                // El frasco puede quedar en negativo a propósito: la venta de
+                // la loción no se frena por falta de envase, el saldo negativo
+                // es el aviso de reponer.
+                permitirNegativo: true,
+                tenantId,
+              });
+              anotarSaldo(frascoVariantId, fs.warehouseId, movidoFrasco.saldo);
             }
           }
 
@@ -603,7 +645,7 @@ export class PosService {
             for (const r of clientResv) {
               if (toConsume <= 0) break;
               const take = Math.min(Number(r.quantity), toConsume);
-              r.quantity = Number(r.quantity) - take;
+              r.quantity = Number(r.quantity) - take; // no-es-stock: apartado
               toConsume -= take;
               if (r.quantity <= 0) r.status = 'FULFILLED';
               await reservationRepo.save(r);
@@ -819,16 +861,24 @@ export class PosService {
         .leftJoin('sale.client', 'client')
         .where('sale.tenant_id = :tenantId', { tenantId });
 
-      if (filters?.status) qb.andWhere('sale.status = :status', { status: filters.status });
+      if (filters?.status)
+        qb.andWhere('sale.status = :status', { status: filters.status });
       if (filters?.warehouseId)
-        qb.andWhere('sale.warehouse_id = :warehouseId', { warehouseId: filters.warehouseId });
-      if (filters?.userId) qb.andWhere('sale.user_id = :userId', { userId: filters.userId });
+        qb.andWhere('sale.warehouse_id = :warehouseId', {
+          warehouseId: filters.warehouseId,
+        });
+      if (filters?.userId)
+        qb.andWhere('sale.user_id = :userId', { userId: filters.userId });
       if (filters?.saleChannel)
-        qb.andWhere('sale.sale_channel = :saleChannel', { saleChannel: filters.saleChannel });
+        qb.andWhere('sale.sale_channel = :saleChannel', {
+          saleChannel: filters.saleChannel,
+        });
       if (filters?.paid !== undefined)
         qb.andWhere('sale.is_paid = :paid', { paid: filters.paid });
       if (filters?.clientPhone?.trim())
-        qb.andWhere('client.phone ILIKE :phone', { phone: `%${filters.clientPhone.trim()}%` });
+        qb.andWhere('client.phone ILIKE :phone', {
+          phone: `%${filters.clientPhone.trim()}%`,
+        });
 
       // Las fechas llegan como instantes completos: la pantalla sabe en qué
       // huso está la tienda y el servidor corre en UTC. Con una fecha pelada
@@ -883,7 +933,14 @@ export class PosService {
     const data = ids.length
       ? await this.saleRepository.find({
           where: { id: In(ids.map((row) => row.id)), tenantId },
-          relations: ['client', 'user', 'warehouse', 'items', 'payments', 'accountsReceivable'],
+          relations: [
+            'client',
+            'user',
+            'warehouse',
+            'items',
+            'payments',
+            'accountsReceivable',
+          ],
           order: { createdAt: 'DESC' },
         })
       : [];
@@ -1032,7 +1089,6 @@ export class PosService {
           throw new BadRequestException('La venta debe tener al menos un ítem');
         }
         const stockRepo = manager.getRepository(Stock);
-        const movementRepo = manager.getRepository(StockMovement);
         const saleItemRepo = manager.getRepository(SaleItem);
         const variantRepo = manager.getRepository(ProductVariant);
         const previousByVariant = new Map(
@@ -1125,35 +1181,53 @@ export class PosService {
             }
           }
 
-          // Códigos físicos que la venta tenía antes; los que no sobrevivan a
-          // la edición vuelven a estar disponibles al final del bloque.
-          const previousUnitIds = sale.items
-            .map((item) => item.stockUnitId)
-            .filter((unitId): unitId is string => !!unitId);
-          const unitsStillSold = new Set<string>();
-
-          // 1) Revertir inventario solo si cambiaron productos/cantidades.
-          const prevMovs = await movementRepo.find({
-            where: { referenceType: 'SALE', referenceId: sale.id, tenantId },
-          });
-          for (const m of prevMovs) {
-            const st = await stockRepo.findOne({
-              where: {
-                variantId: m.variantId,
-                warehouseId: m.warehouseId,
-                tenantId,
-              },
-            });
-            if (st) {
-              st.quantity += Math.abs(Number(m.quantity));
-              await stockRepo.save(st);
-            }
-          }
-          await movementRepo.delete({
-            referenceType: 'SALE',
-            referenceId: sale.id,
+          // 1) Revertir lo que la venta había descontado: la existencia y los
+          // códigos físicos, en el mismo movimiento.
+          //
+          // Los movimientos anteriores ya **no se borran**. El historial de
+          // inventario reconstruye el saldo sumando movimientos, y borrar el
+          // descuento original dejaba un hueco: la reversión sin su descuento
+          // hacía que el saldo reconstruido no cuadrara con el real. Ahora
+          // queda la traza completa —descuento, devolución por edición, nuevo
+          // descuento— y quien anule después lee el **neto**.
+          const prevMovs = await this.netoDescontado(
+            manager,
+            sale.id,
             tenantId,
-          });
+          );
+          const unidadesPrevias = await this.unidadesDeLaVenta(
+            manager,
+            sale,
+            tenantId,
+          );
+          for (const m of prevMovs) {
+            const clave = `${m.variantId}|${m.warehouseId}`;
+            await this.ledger.mover(manager, {
+              variantId: m.variantId,
+              warehouseId: m.warehouseId,
+              cantidad: -m.neto,
+              motivo: 'SALE_EDIT',
+              referenciaId: sale.id,
+              notas: `Edición venta ${sale.saleNumber}: se revierte lo anterior`,
+              usuarioId: userId,
+              unidades: unidadesPrevias.get(clave),
+              tenantId,
+            });
+            unidadesPrevias.delete(clave);
+          }
+          // Los que no casaron con ningún punto del neto: se liberan igual.
+          // Tiene que ser **antes** de resolver el bulto conservado más abajo,
+          // porque el ledger no deja volver a descontar un código que sigue
+          // marcado como vendido, y la edición entera moría con un mensaje que
+          // no tenía nada que ver.
+          await this.liberarSobrantes(
+            manager,
+            unidadesPrevias,
+            'SALE_EDIT',
+            sale,
+            userId,
+            tenantId,
+          );
           await saleItemRepo.delete({ saleId: sale.id, tenantId });
 
           // 2) Aplicar los ítems nuevos (mismo patrón que createSale).
@@ -1207,7 +1281,15 @@ export class PosService {
               previous && Number(previous.quantity) === item.quantity
                 ? previous.stockUnitId
                 : null;
-            if (keptStockUnitId) unitsStillSold.add(keptStockUnitId);
+            // El bulto conservado vuelve a salir del inventario, y **de su
+            // bodega**: la cascada de abajo ordena por bodega de la venta y
+            // podía descontar en otra, dejando el código vendido en un sitio y
+            // la existencia bajada en otro.
+            const keptUnit = keptStockUnitId
+              ? await manager.getRepository(StockUnit).findOne({
+                  where: { id: keptStockUnitId, tenantId },
+                })
+              : null;
 
             const editedItem = await saleItemRepo.save(
               saleItemRepo.create({
@@ -1253,28 +1335,45 @@ export class PosService {
             editedItems.push(editedItem);
 
             // Descontar inventario en cascada (bodega de la venta primero).
-            let remaining = item.quantity;
-            for (const stock of itemStocks) {
-              if (remaining <= 0) break;
-              const available = Number(stock.quantity);
-              if (available <= 0) continue;
-              const toDeduct = Math.min(available, remaining);
-              stock.quantity = available - toDeduct;
-              remaining -= toDeduct;
-              await stockRepo.save(stock);
-              await movementRepo.save(
-                movementRepo.create({
+            if (keptUnit) {
+              await this.ledger.mover(manager, {
+                variantId: variant.id,
+                warehouseId: keptUnit.warehouseId,
+                cantidad: -item.quantity,
+                motivo: 'SALE',
+                referenciaId: sale.id,
+                notas: `Edición venta ${sale.saleNumber}`,
+                usuarioId: userId,
+                unidades: [keptUnit.id],
+                tenantId,
+              });
+            } else {
+              let remaining = item.quantity;
+              for (const stock of itemStocks) {
+                if (remaining <= 0) break;
+                // Fresco: `itemStocks` se relee dentro del bucle de ítems.
+                const available = Number(stock.quantity);
+                if (available <= 0) continue;
+                const toDeduct = Math.min(available, remaining);
+                remaining -= toDeduct;
+                await this.ledger.mover(manager, {
                   variantId: variant.id,
                   warehouseId: stock.warehouseId,
-                  movementType: MovementType.OUT,
-                  quantity: -toDeduct,
-                  referenceType: 'SALE',
-                  referenceId: sale.id,
-                  notes: `Edición venta ${sale.saleNumber}`,
-                  createdById: userId,
+                  cantidad: -toDeduct,
+                  motivo: 'SALE',
+                  referenciaId: sale.id,
+                  notas: `Edición venta ${sale.saleNumber}`,
+                  usuarioId: userId,
                   tenantId,
-                }),
-              );
+                });
+              }
+              if (remaining > 0) {
+                throw new BadRequestException(
+                  `Stock insuficiente para "${variant.product.name}" ` +
+                    `${variant.sizeName}/${variant.colorName}: ` +
+                    `faltaron ${remaining} unidad(es) al descontar.`,
+                );
+              }
             }
 
             // Perfumería: descontar 1 frasco por unidad si el producto lo tiene.
@@ -1297,56 +1396,25 @@ export class PosService {
                   ? frascoRemaining
                   : Math.min(Math.max(avail, 0), frascoRemaining);
                 if (toDeduct <= 0) continue;
-                fs.quantity = avail - toDeduct;
                 frascoRemaining -= toDeduct;
-                await stockRepo.save(fs);
-                await movementRepo.save(
-                  movementRepo.create({
-                    variantId: frascoVariantId,
-                    warehouseId: fs.warehouseId,
-                    movementType: MovementType.OUT,
-                    quantity: -toDeduct,
-                    referenceType: 'SALE',
-                    referenceId: sale.id,
-                    notes: `Frasco por edición venta ${sale.saleNumber}`,
-                    createdById: userId,
-                    tenantId,
-                  }),
-                );
+                await this.ledger.mover(manager, {
+                  variantId: frascoVariantId,
+                  warehouseId: fs.warehouseId,
+                  cantidad: -toDeduct,
+                  motivo: 'SALE',
+                  referenciaId: sale.id,
+                  notas: `Frasco por edición venta ${sale.saleNumber}`,
+                  usuarioId: userId,
+                  permitirNegativo: true,
+                  tenantId,
+                });
               }
             }
           }
 
-          // Un código que salió de la venta vuelve a estar disponible: el
-          // inventario agregado ya se revirtió arriba, y dejarlo VENDIDO haría
-          // imposible volver a venderlo.
-          for (const unitId of previousUnitIds) {
-            if (unitsStillSold.has(unitId)) continue;
-            const unitRepo = manager.getRepository(StockUnit);
-            const unit = await unitRepo.findOne({
-              where: { id: unitId, tenantId },
-              lock: { mode: 'pessimistic_write' },
-            });
-            if (!unit || unit.status !== StockUnitStatus.SOLD) continue;
-            unit.status = StockUnitStatus.IN_STOCK;
-            await unitRepo.save(unit);
-            await manager.getRepository(StockUnitEvent).save(
-              manager.getRepository(StockUnitEvent).create({
-                stockUnitId: unit.id,
-                eventType: StockUnitEventType.RETURNED,
-                fromStatus: StockUnitStatus.SOLD,
-                toStatus: StockUnitStatus.IN_STOCK,
-                referenceType: 'SALE_EDIT',
-                referenceId: sale.id,
-                userId,
-                metadata: {
-                  saleNumber: sale.saleNumber,
-                  reason: 'REMOVED_FROM_SALE',
-                },
-                tenantId,
-              }),
-            );
-          }
+          // Los códigos que salieron de la venta ya volvieron a disponible en
+          // la reversión de arriba, y los que se conservaron se volvieron a
+          // descontar con su línea. No queda nada suelto que liberar.
         }
 
         const naturalTotal = editedItems.reduce(
@@ -1597,6 +1665,166 @@ export class PosService {
     return this.findOne(id, tenantId);
   }
 
+  /**
+   * Cuánto sigue descontado por esta venta, por variante y bodega.
+   *
+   * Es el **neto**, no cada movimiento suelto, porque editar una factura deja
+   * traza: el descuento original, la devolución por edición y el descuento
+   * nuevo conviven en el historial. Sumar los descuentos por separado
+   * repondría de más —y una factura editada dos veces repondría el doble—.
+   */
+  private async netoDescontado(
+    manager: EntityManager,
+    saleId: string,
+    tenantId: string,
+  ): Promise<{ variantId: string; warehouseId: string; neto: number }[]> {
+    const filas: {
+      variant_id: string;
+      warehouse_id: string;
+      neto: string;
+    }[] = await manager.query(
+      `SELECT variant_id, warehouse_id, SUM(quantity) AS neto
+         FROM stock_movements m
+        WHERE m.tenant_id = $2
+          AND (
+            (m.reference_id = $1 AND m.reference_type IN ('SALE', 'SALE_EDIT'))
+            -- Las devoluciones cuelgan del id de la devolución, no del de la
+            -- venta, pero devuelven mercancía de **esta** venta. Sin contarlas,
+            -- anular una factura con una devolución parcial repone otra vez lo
+            -- que el cliente ya había traído: el inventario termina con más
+            -- pares de los que salieron.
+            OR (
+              m.reference_type = 'RETURN'
+              AND m.reference_id IN (
+                SELECT r.id::text FROM returns r
+                 WHERE r.sale_id = $1::uuid AND r.tenant_id = $2
+              )
+            )
+          )
+        GROUP BY variant_id, warehouse_id
+       HAVING SUM(quantity) <> 0`,
+      [saleId, tenantId],
+    );
+    return filas.map((f) => ({
+      variantId: f.variant_id,
+      warehouseId: f.warehouse_id,
+      neto: Number(f.neto),
+    }));
+  }
+
+  /**
+   * Qué bultos se llevó esta venta, agrupados por variante y bodega.
+   *
+   * Hay dos fuentes y hacen falta las dos. La de siempre es el
+   * `stockUnitId` de la línea: existe cuando el cajero escaneó el par. La otra
+   * son los eventos que deja el ledger, que cubre el caso más común —vender
+   * desde el buscador— donde nadie escaneó nada y los pares se eligieron por
+   * antigüedad; sin ella, anular esa venta repone la existencia pero deja los
+   * pares marcados como vendidos.
+   *
+   * Solo entran los que siguen VENDIDOS: si ya volvieron por una devolución,
+   * reponerlos otra vez los duplicaría.
+   */
+  private async unidadesDeLaVenta(
+    manager: EntityManager,
+    sale: Sale,
+    tenantId: string,
+  ): Promise<Map<string, string[]>> {
+    // Candidatos: los que la venta anotó en su línea y los que el ledger
+    // eligió por antigüedad.
+    const candidatos: { id: string }[] = await manager.query(
+      `SELECT DISTINCT e.stock_unit_id AS id
+         FROM stock_unit_events e
+        WHERE e.reference_type = 'SALE'
+          AND e.reference_id = $1
+          AND e.tenant_id = $2`,
+      [sale.id, tenantId],
+    );
+    const ids = new Set(candidatos.map((fila) => fila.id));
+    for (const item of sale.items ?? []) {
+      if (item.stockUnitId) ids.add(item.stockUnitId);
+    }
+    if (ids.size === 0) return new Map();
+
+    // De esos, solo los que **siguen siendo de esta venta**.
+    //
+    // Los eventos no se borran, así que un par que esta venta soltó al
+    // editarse y que otra ya volvió a vender conserva el evento de esta.
+    // Reclamarlo lo devolvería al inventario estando en manos del cliente de
+    // la otra venta —y con la existencia ya descontada por ella—: justo el
+    // descuadre que este refactor vino a eliminar. Manda el **último** evento
+    // que cambió su estado; si no hay ninguno, el bulto es anterior a que se
+    // llevara esta historia y se acepta.
+    const propias: { id: string }[] = await manager.query(
+      `SELECT u.id
+         FROM stock_units u
+        WHERE u.id = ANY($1::uuid[])
+          AND u.tenant_id = $2
+          AND u.status = 'SOLD'
+          AND COALESCE(
+                (SELECT e.reference_id
+                   FROM stock_unit_events e
+                  WHERE e.stock_unit_id = u.id
+                    AND e.event_type IN ('SOLD', 'RETURNED', 'TRANSFERRED')
+                  ORDER BY e.created_at DESC, e.id DESC
+                  LIMIT 1),
+                $3
+              ) = $3`,
+      [[...ids], tenantId, sale.id],
+    );
+    if (propias.length === 0) return new Map();
+
+    const unidades = await manager.getRepository(StockUnit).find({
+      where: { id: In(propias.map((f) => f.id)), tenantId },
+    });
+    const porPunto = new Map<string, string[]>();
+    for (const unidad of unidades) {
+      const clave = `${unidad.variantId}|${unidad.warehouseId}`;
+      const lista = porPunto.get(clave);
+      if (lista) lista.push(unidad.id);
+      else porPunto.set(clave, [unidad.id]);
+    }
+    return porPunto;
+  }
+
+  /**
+   * Devuelve a disponible los códigos que quedaron sueltos.
+   *
+   * Un bulto puede seguir vendido en un punto (variante y bodega) que no tiene
+   * nada que reponer en el agregado. Pasa con las ventas viejas: la cascada
+   * descontaba de la bodega de la venta aunque el par escaneado estuviera en
+   * otra, así que el movimiento quedó en una bodega y el código en otra.
+   *
+   * Liberarlo no descuadra nada —al contrario: la bodega del par nunca vio el
+   * descuento, y el par marcado como vendido era justo el faltante—. Y sin
+   * esto el código se queda VENDIDO para siempre: no se puede volver a vender
+   * ni a escanear.
+   */
+  private async liberarSobrantes(
+    manager: EntityManager,
+    sobrantes: Map<string, string[]>,
+    motivo: 'SALE_CANCEL' | 'SALE_EDIT',
+    sale: Sale,
+    userId: string,
+    tenantId: string,
+  ): Promise<void> {
+    for (const [clave, ids] of sobrantes) {
+      const [variantId, warehouseId] = clave.split('|');
+      await this.ledger.mover(manager, {
+        variantId,
+        warehouseId,
+        cantidad: 0,
+        motivo,
+        referenciaId: sale.id,
+        notas: `Venta ${sale.saleNumber}: se liberan los códigos`,
+        usuarioId: userId,
+        unidades: ids,
+        tenantId,
+      });
+    }
+    sobrantes.clear();
+  }
+
   async cancelSale(
     id: string,
     userId: string,
@@ -1604,8 +1832,6 @@ export class PosService {
   ): Promise<Sale> {
     return this.dataSource.transaction(async (manager) => {
       const saleRepo = manager.getRepository(Sale);
-      const stockRepo = manager.getRepository(Stock);
-      const movementRepo = manager.getRepository(StockMovement);
 
       // Se bloquea la fila madre con SQL directo: pedir FOR UPDATE por TypeORM
       // junto con las relaciones intentaría bloquear el lado nullable de los
@@ -1640,74 +1866,55 @@ export class PosService {
         );
       }
 
-      // Restore inventory — reverse actual movements (supports cascade deductions)
-      const saleMovements = await movementRepo.find({
-        where: {
-          referenceType: 'SALE',
-          referenceId: sale.id,
-          tenantId,
-        },
-      });
+      // Cuánto queda descontado por esta venta, por variante y bodega.
+      //
+      // Se lee el **neto** y no cada movimiento suelto porque editar una
+      // factura deja traza: el descuento original, la devolución por edición y
+      // el descuento nuevo conviven en el historial. Reponer movimiento por
+      // movimiento devolvería de más justo en las ventas que alguien corrigió.
+      const netoPorPunto = await this.netoDescontado(
+        manager,
+        sale.id,
+        tenantId,
+      );
 
-      for (const mov of saleMovements) {
-        const stock = await stockRepo.findOne({
-          where: {
-            variantId: mov.variantId,
-            warehouseId: mov.warehouseId,
-            tenantId,
-          },
-        });
-        if (stock) {
-          stock.quantity += Math.abs(Number(mov.quantity));
-          await stockRepo.save(stock);
-        }
+      // Los códigos físicos que la venta se llevó, agrupados por variante y
+      // bodega, para devolverlos en el mismo movimiento que repone el
+      // agregado. Antes eran dos pasos sueltos y solo se devolvían los bultos
+      // escaneados: si la venta salió del buscador, el ledger eligió pares por
+      // antigüedad y esos quedaban VENDIDOS para siempre —el agregado volvía a
+      // cuadrar en total, pero esos pares concretos ya no se podían escanear—.
+      const unidadesVendidas = await this.unidadesDeLaVenta(
+        manager,
+        sale,
+        tenantId,
+      );
 
-        const reversal = movementRepo.create({
-          variantId: mov.variantId,
-          warehouseId: mov.warehouseId,
-          movementType: MovementType.IN,
-          quantity: Math.abs(Number(mov.quantity)),
-          referenceType: 'SALE_CANCEL',
-          referenceId: sale.id,
-          notes: `Cancelación venta ${sale.saleNumber}`,
-          createdById: userId,
+      for (const punto of netoPorPunto) {
+        const clave = `${punto.variantId}|${punto.warehouseId}`;
+        await this.ledger.mover(manager, {
+          variantId: punto.variantId,
+          warehouseId: punto.warehouseId,
+          // El neto de una venta es negativo: reponer es cambiarle el signo.
+          cantidad: -punto.neto,
+          motivo: 'SALE_CANCEL',
+          referenciaId: sale.id,
+          notas: `Cancelación venta ${sale.saleNumber}`,
+          usuarioId: userId,
+          unidades: unidadesVendidas.get(clave),
           tenantId,
         });
-        await movementRepo.save(reversal);
+        unidadesVendidas.delete(clave);
       }
 
-      // Los códigos físicos vuelven a estar disponibles. Sin esto el bulto
-      // queda VENDIDO para siempre: el inventario agregado cuadra, pero esa
-      // caja o ese par no se puede volver a vender ni a escanear.
-      const unitRepo = manager.getRepository(StockUnit);
-      const eventRepo = manager.getRepository(StockUnitEvent);
-      for (const item of sale.items) {
-        if (!item.stockUnitId) continue;
-        const unit = await unitRepo.findOne({
-          where: { id: item.stockUnitId, tenantId },
-          lock: { mode: 'pessimistic_write' },
-        });
-        if (!unit || unit.status !== StockUnitStatus.SOLD) continue;
-        unit.status = StockUnitStatus.IN_STOCK;
-        await unitRepo.save(unit);
-        await eventRepo.save(
-          eventRepo.create({
-            stockUnitId: unit.id,
-            eventType: StockUnitEventType.RETURNED,
-            fromStatus: StockUnitStatus.SOLD,
-            toStatus: StockUnitStatus.IN_STOCK,
-            referenceType: 'SALE_CANCEL',
-            referenceId: sale.id,
-            userId,
-            metadata: {
-              saleNumber: sale.saleNumber,
-              saleItemId: item.id,
-              reason: 'SALE_CANCELLED',
-            },
-            tenantId,
-          }),
-        );
-      }
+      await this.liberarSobrantes(
+        manager,
+        unidadesVendidas,
+        'SALE_CANCEL',
+        sale,
+        userId,
+        tenantId,
+      );
 
       // Cartera sin abonos: se salda en cero para que no siga apareciendo como
       // deuda del cliente (la fila queda, con su nota, para la auditoría).

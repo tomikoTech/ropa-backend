@@ -27,7 +27,9 @@ describe('PosService.findAll', () => {
     qb.getRawOne = jest.fn(() => Promise.resolve({ suma: '150000' }));
     qb.getRawMany = jest.fn(() => Promise.resolve(ids));
 
-    const find = jest.fn(() => Promise.resolve(ids.map((row) => ({ id: row.id }))));
+    const find = jest.fn(() =>
+      Promise.resolve(ids.map((row) => ({ id: row.id }))),
+    );
     const saleRepository = {
       createQueryBuilder: jest.fn(() => qb),
       find,
@@ -35,6 +37,7 @@ describe('PosService.findAll', () => {
     const unused = undefined as never;
     const service = new PosService(
       saleRepository as never,
+      unused,
       unused,
       unused,
       unused,

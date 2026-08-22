@@ -111,6 +111,16 @@ export interface OrdenDeMovimiento {
    * movió, se sabe cuánto hay.
    */
   dejarEn?: number;
+  /**
+   * Permite que el saldo quede por debajo de cero.
+   *
+   * Existe por un caso concreto y deliberado: en perfumería, vender una loción
+   * descuenta su frasco, y si no quedan frascos la venta **no se frena** —el
+   * cliente ya está pagando—. El saldo negativo es justamente el aviso de que
+   * hay que reponer. Fuera de ese caso, un negativo es un error y debe seguir
+   * reventando.
+   */
+  permitirNegativo?: boolean;
 }
 
 export interface ResultadoMovimiento {
@@ -126,6 +136,19 @@ export interface ResultadoMovimiento {
    */
   sinEtiqueta: number;
 }
+
+/**
+ * Motivos que deshacen algo que ya pasó.
+ *
+ * Se distinguen de una entrada de verdad —una compra, un ajuste— porque no
+ * traen mercancía nueva: devuelven la que salió. Y lo que salió ya tenía su
+ * código.
+ */
+const REVERSAS = new Set<MotivoMovimiento>([
+  'SALE_CANCEL',
+  'SALE_EDIT',
+  'RETURN',
+]);
 
 @Injectable()
 export class StockLedgerService {
@@ -155,7 +178,7 @@ export class StockLedgerService {
       orden.dejarEn !== undefined ? orden.dejarEn : antes + orden.cantidad;
     const delta = despues - antes;
 
-    if (despues < 0) {
+    if (despues < 0 && !orden.permitirNegativo) {
       throw new BadRequestException(
         `No hay suficiente inventario: hay ${antes} y se intentan sacar ${-delta}.`,
       );
@@ -180,12 +203,17 @@ export class StockLedgerService {
       sinEtiqueta = resultado.sinEtiqueta;
     }
 
-    await this.registrarMovimiento(manager, orden, delta, {
-      antes,
-      despues,
-      sinEtiqueta,
-      unidades,
-    });
+    // Un movimiento de cero no movió nada: aparece en el historial como una
+    // entrada que no entró y confunde a quien lo lee. Se llega aquí cuando lo
+    // único que había que hacer era liberar códigos.
+    if (delta !== 0) {
+      await this.registrarMovimiento(manager, orden, delta, {
+        antes,
+        despues,
+        sinEtiqueta,
+        unidades,
+      });
+    }
 
     await this.exigirCuadre(manager, tenantId, variantId, warehouseId, orden);
 
@@ -448,6 +476,8 @@ export class StockLedgerService {
           ? StockUnitEventType.SOLD
           : StockUnitEventType.TRANSFERRED,
         orden,
+        {},
+        estado,
       );
     }
 
@@ -478,20 +508,58 @@ export class StockLedgerService {
       const pedidas = await repo.find({
         where: { id: In(orden.unidades), tenantId: orden.tenantId },
       });
-      await repo.update(
-        { id: In(pedidas.map((u) => u.id)) },
-        { status: StockUnitStatus.IN_STOCK, warehouseId: orden.warehouseId },
+      // Solo vuelven las que están fuera. Una que ya está disponible no se
+      // "devuelve" otra vez: repetirlo la duplicaría contra el agregado y
+      // encima le cambiaría la bodega sin que nadie la haya movido.
+      const devolubles = pedidas.filter(
+        (u) => u.status !== StockUnitStatus.IN_STOCK,
       );
-      await this.anotarEventos(
-        manager,
-        pedidas,
-        StockUnitEventType.RETURNED,
-        orden,
+      if (devolubles.length) {
+        await repo.update(
+          { id: In(devolubles.map((u) => u.id)) },
+          { status: StockUnitStatus.IN_STOCK, warehouseId: orden.warehouseId },
+        );
+        await this.anotarEventos(
+          manager,
+          devolubles,
+          StockUnitEventType.RETURNED,
+          orden,
+        );
+      }
+      // Lo que la reversa repuso en el agregado y no pudo respaldar con un
+      // código. Decir cero aquí silenciaba el hueco justo en la nota del
+      // movimiento, que es donde va a mirar quien revise esa referencia.
+      const cubierto = devolubles.reduce((n, u) => n + u.quantity, 0);
+      const faltantes = orden.unidades.filter(
+        (id) => !pedidas.some((u) => u.id === id),
       );
+      if (faltantes.length) {
+        this.log.warn(
+          `Al reponer por ${orden.motivo} no se encontraron ${faltantes.length} ` +
+            `código(s) que la referencia decía tener.`,
+        );
+      }
       return {
-        unidades: pedidas.map((u) => ({ id: u.id, barcode: u.barcode })),
-        sinEtiqueta: 0,
+        unidades: devolubles.map((u) => ({ id: u.id, barcode: u.barcode })),
+        sinEtiqueta: Math.max(0, cantidad - cubierto),
       };
+    }
+
+    // Una reversa nunca inventa etiquetas.
+    //
+    // Anular o editar una venta repone la existencia, pero los pares que
+    // vuelven son los que se habían llevado, con el código que trae impreso la
+    // caja. Si no se pudo saber cuáles eran —ventas viejas, de antes de que
+    // esto pasara por aquí—, crear códigos nuevos sería peor que no crear
+    // ninguno: la etiqueta física del par ya no coincidiría con la del
+    // sistema, y los originales seguirían marcados como vendidos. Se repone la
+    // existencia y el hueco queda anotado y visible en el reporte.
+    if (REVERSAS.has(orden.motivo)) {
+      this.log.warn(
+        `Se repusieron ${cantidad} unidad(es) de la variante ${orden.variantId} ` +
+          `en la bodega ${orden.warehouseId} sin códigos identificables (${orden.motivo}).`,
+      );
+      return { unidades: [], sinEtiqueta: cantidad };
     }
 
     const variante = await manager.getRepository(ProductVariant).findOne({
@@ -571,21 +639,39 @@ export class StockLedgerService {
     return max + 1;
   }
 
+  /** En qué queda el bulto según lo que le pasó. */
+  private static readonly ESTADO_TRAS: Partial<
+    Record<StockUnitEventType, StockUnitStatus>
+  > = {
+    [StockUnitEventType.SOLD]: StockUnitStatus.SOLD,
+    [StockUnitEventType.TRANSFERRED]: StockUnitStatus.TRANSFERRED,
+    [StockUnitEventType.RETURNED]: StockUnitStatus.IN_STOCK,
+    [StockUnitEventType.RECEIVED]: StockUnitStatus.IN_STOCK,
+  };
+
   private async anotarEventos(
     manager: EntityManager,
     unidades: StockUnit[],
     tipo: StockUnitEventType,
     orden: Pick<OrdenDeMovimiento, 'motivo' | 'referenciaId' | 'usuarioId'>,
     metadata: Record<string, unknown> = {},
+    /** El estado real en que quedó, cuando no se deduce del tipo de evento. */
+    estadoFinal?: StockUnitStatus,
   ): Promise<void> {
     if (!unidades.length) return;
     const repo = manager.getRepository(StockUnitEvent);
+    // `toStatus` importa: sin él la línea de tiempo de un par tiene huecos
+    // justo en los eventos más frecuentes —vender, anular, editar—, mientras
+    // que traslados y conteos sí lo guardan. Se dedujo del tipo de evento
+    // porque quien llama ya lo decidió al elegir el tipo.
+    const destino = estadoFinal ?? StockLedgerService.ESTADO_TRAS[tipo] ?? null;
     await repo.save(
       unidades.map((u) =>
         repo.create({
           stockUnitId: u.id,
           eventType: tipo,
           fromStatus: u.status,
+          toStatus: destino,
           referenceType: orden.motivo,
           referenceId: orden.referenciaId ?? null,
           userId: orden.usuarioId ?? null,
@@ -614,6 +700,12 @@ export class StockLedgerService {
       orden.notas,
       contexto.sinEtiqueta > 0
         ? `Faltaron ${contexto.sinEtiqueta} etiqueta(s): el inventario iba por delante de los códigos.`
+        : null,
+      // Un saldo negativo solo llega aquí si quien llamó lo permitió a
+      // propósito. Queda escrito para que se vea de dónde salió y no aparezca
+      // como un misterio en el historial.
+      contexto.despues < 0
+        ? `El saldo quedó en ${contexto.despues}: se movió más de lo que había registrado.`
         : null,
     ]
       .filter(Boolean)

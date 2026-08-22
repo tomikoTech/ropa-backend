@@ -28,6 +28,8 @@ export enum StockUnitEventType {
 /** Historial append-only del código físico. Nunca se edita ni se elimina. */
 @Entity('stock_unit_events')
 @Index(['tenantId', 'stockUnitId', 'createdAt'])
+// Anular o editar una factura pregunta por aquí: qué bultos movió ese documento.
+@Index(['tenantId', 'referenceType', 'referenceId'])
 export class StockUnitEvent extends TenantAwareEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;

@@ -1,6 +1,5 @@
 import { Module } from '@nestjs/common';
-import { StockLedgerService } from './ledger/stock-ledger.service.js';
-import { StockIntegrityService } from './ledger/stock-integrity.service.js';
+import { StockLedgerModule } from './ledger/stock-ledger.module.js';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { InventoryService } from './inventory.service.js';
 import { LocationsService } from './locations.service.js';
@@ -55,6 +54,7 @@ import { SaleItem } from '../pos/entities/sale-item.entity.js';
       StoreSettings,
     ]),
     ProductsModule,
+    StockLedgerModule,
   ],
   controllers: [
     InventoryController,
@@ -64,8 +64,6 @@ import { SaleItem } from '../pos/entities/sale-item.entity.js';
     InventoryCountsController,
   ],
   providers: [
-    StockIntegrityService,
-    StockLedgerService,
     InventoryService,
     LocationsService,
     StockUnitsService,
@@ -76,10 +74,9 @@ import { SaleItem } from '../pos/entities/sale-item.entity.js';
     InventoryService,
     LocationsService,
     StockUnitsService,
-    // Se exportan para que los demás módulos —POS, compras, devoluciones—
-    // muevan inventario por aquí y no escribiendo `Stock` a mano.
-    StockLedgerService,
-    StockIntegrityService,
+    // Se reexporta para que quien ya importa inventario (el controlador del
+    // reporte de integridad, por ejemplo) no tenga que importar los dos.
+    StockLedgerModule,
   ],
 })
 export class InventoryModule {}
