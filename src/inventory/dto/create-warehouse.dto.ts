@@ -1,4 +1,10 @@
-import { IsBoolean, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import {
+  IsBoolean,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsUUID,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateWarehouseDto {
@@ -26,4 +32,19 @@ export class CreateWarehouseDto {
   @IsOptional()
   @IsBoolean()
   isPosLocation?: boolean;
+
+  @ApiPropertyOptional({
+    example: false,
+    description: 'Esta bodega es la vitrina: lo que está a la vista',
+  })
+  @IsOptional()
+  @IsBoolean()
+  isExhibition?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'De qué local es la vitrina, y de dónde sale lo que se exhibe',
+  })
+  @IsOptional()
+  @IsUUID()
+  exhibitionOfWarehouseId?: string;
 }

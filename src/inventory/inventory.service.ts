@@ -193,6 +193,13 @@ export class InventoryService {
     // Con el código autogenerado, el retry recalcula el consecutivo: basarlo en
     // el conteo hacía que, tras borrar una bodega, el siguiente código chocara
     // con uno existente y ninguna bodega nueva se pudiera crear.
+    await this.validarVitrina(
+      dto.isExhibition,
+      dto.exhibitionOfWarehouseId ?? null,
+      null,
+      tenantId,
+    );
+
     return retryOnUniqueViolation(async () => {
       const code = dto.code || (await this.nextWarehouseCode(tenantId));
       const warehouse = this.warehouseRepository.create({
@@ -202,6 +209,43 @@ export class InventoryService {
       });
       return this.warehouseRepository.save(warehouse);
     });
+  }
+
+  /**
+   * Que la vitrina apunte a un local que existe, y que sea un local.
+   *
+   * Sin esto se puede dejar una vitrina surtida por otra vitrina, o por una
+   * bodega de otra tienda. El error se descubriría el día que alguien intente
+   * exhibir y no entienda por qué no sale nada.
+   */
+  private async validarVitrina(
+    isExhibition: boolean | undefined,
+    localId: string | null,
+    propioId: string | null,
+    tenantId: string,
+  ): Promise<void> {
+    if (!localId) return;
+    if (localId === propioId) {
+      throw new BadRequestException(
+        'Una vitrina no puede surtirse de sí misma.',
+      );
+    }
+    const local = await this.warehouseRepository.findOne({
+      where: { id: localId, tenantId },
+    });
+    if (!local) {
+      throw new NotFoundException('El local que surte la vitrina no existe');
+    }
+    if (local.isExhibition) {
+      throw new BadRequestException(
+        `"${local.name}" es una vitrina: una vitrina no surte a otra.`,
+      );
+    }
+    if (isExhibition === false) {
+      throw new BadRequestException(
+        'Solo una vitrina puede tener un local que la surta.',
+      );
+    }
   }
 
   private async nextWarehouseCode(tenantId: string): Promise<string> {
@@ -245,6 +289,20 @@ export class InventoryService {
     if (dto.isPosLocation !== undefined)
       warehouse.isPosLocation = dto.isPosLocation;
     if (dto.isActive !== undefined) warehouse.isActive = dto.isActive;
+    if (dto.isExhibition !== undefined)
+      warehouse.isExhibition = dto.isExhibition;
+    if (dto.exhibitionOfWarehouseId !== undefined)
+      warehouse.exhibitionOfWarehouseId = dto.exhibitionOfWarehouseId;
+
+    // Se valida con los valores **ya aplicados**: marcar la vitrina y elegir
+    // su local llegan en la misma petición, y validar contra el DTO dejaría
+    // pasar la mitad de los casos.
+    await this.validarVitrina(
+      warehouse.isExhibition,
+      warehouse.exhibitionOfWarehouseId,
+      warehouse.id,
+      tenantId,
+    );
 
     return this.warehouseRepository.save(warehouse);
   }

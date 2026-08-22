@@ -599,4 +599,23 @@ export class UpdateStoreSettingsDto {
   @IsOptional()
   @IsString()
   wompiEventsSecret?: string;
+
+  // ─── Exhibición ───
+
+  @ApiPropertyOptional({
+    description: 'Avisar cuando falte un par en la vitrina',
+    example: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  exhibicionEnabled?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Cuántos pares de cada referencia van en vitrina',
+    example: 1,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  exhibicionObjetivo?: number;
 }

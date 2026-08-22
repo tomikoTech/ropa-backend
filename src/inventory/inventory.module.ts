@@ -3,6 +3,7 @@ import { StockLedgerModule } from './ledger/stock-ledger.module.js';
 import { CajaModule } from '../caja/caja.module.js';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { InventoryService } from './inventory.service.js';
+import { ExhibicionService } from './exhibicion.service.js';
 import { LocationsService } from './locations.service.js';
 import { LocationsController } from './locations.controller.js';
 import { Shelf } from './entities/shelf.entity.js';
@@ -68,6 +69,7 @@ import { SaleItem } from '../pos/entities/sale-item.entity.js';
   ],
   providers: [
     InventoryService,
+    ExhibicionService,
     LocationsService,
     StockUnitsService,
     LabelsService,
@@ -75,6 +77,7 @@ import { SaleItem } from '../pos/entities/sale-item.entity.js';
   ],
   exports: [
     InventoryService,
+    ExhibicionService,
     LocationsService,
     StockUnitsService,
     // Se reexporta para que quien ya importa inventario (el controlador del

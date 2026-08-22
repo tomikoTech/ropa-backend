@@ -193,4 +193,15 @@ export class UpdateProductDto {
   @IsOptional()
   @IsBoolean()
   unitTracking?: boolean;
+
+  @ApiPropertyOptional({
+    example: 1,
+    description:
+      'Cuántos pares de esta referencia van en vitrina. ' +
+      'Vacío = lo que diga la tienda; cero = esta referencia no se exhibe.',
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  exhibicionObjetivo?: number | null;
 }

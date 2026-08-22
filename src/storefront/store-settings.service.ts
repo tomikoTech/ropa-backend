@@ -127,6 +127,10 @@ export class StoreSettingsService {
         dto.comprobanteTransferenciaObligatorio;
     if (dto.cierreDeCajaEnabled !== undefined)
       settings.cierreDeCajaEnabled = dto.cierreDeCajaEnabled;
+    if (dto.exhibicionEnabled !== undefined)
+      settings.exhibicionEnabled = dto.exhibicionEnabled;
+    if (dto.exhibicionObjetivo !== undefined)
+      settings.exhibicionObjetivo = dto.exhibicionObjetivo;
     if (dto.autoReplenishEnabled !== undefined)
       settings.autoReplenishEnabled = dto.autoReplenishEnabled;
     if (dto.autoReplenishThreshold !== undefined)

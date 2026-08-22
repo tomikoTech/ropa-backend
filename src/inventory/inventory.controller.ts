@@ -22,6 +22,8 @@ import { AdjustStockDto } from './dto/adjust-stock.dto.js';
 import { parsePositiveInt } from '../common/utils/query-number.util.js';
 import { TransferStockDto } from './dto/transfer-stock.dto.js';
 import { StockIntegrityService } from './ledger/stock-integrity.service.js';
+import { ExhibicionService } from './exhibicion.service.js';
+import { ExhibirDto } from './dto/exhibir.dto.js';
 import {
   CloseTransferDto,
   ReturnTransferDto,
@@ -40,6 +42,7 @@ export class InventoryController {
     private readonly inventoryService: InventoryService,
     private readonly integridad: StockIntegrityService,
     private readonly access: AccessService,
+    private readonly exhibicion: ExhibicionService,
   ) {}
 
   // ─── Warehouses ───
@@ -176,6 +179,32 @@ export class InventoryController {
     return this.integridad.revisar(tenantId);
   }
 
+  // ─── Exhibición ───
+
+  @Get('exhibicion/pendientes')
+  @ApiOperation({
+    summary: 'Qué falta por subir a la vitrina, por local y por referencia',
+  })
+  @ApiQuery({ name: 'vitrinaId', required: false })
+  @ApiQuery({ name: 'localId', required: false })
+  pendientesDeExhibir(
+    @TenantId() tenantId: string,
+    @Query('vitrinaId') vitrinaId?: string,
+    @Query('localId') localId?: string,
+  ) {
+    return this.exhibicion.pendientes(tenantId, { vitrinaId, localId });
+  }
+
+  @Post('exhibicion/exhibir')
+  @ApiOperation({ summary: 'Subir un par del local a la vitrina' })
+  exhibir(
+    @Body() dto: ExhibirDto,
+    @CurrentUser() user: User,
+    @TenantId() tenantId: string,
+  ) {
+    return this.exhibicion.exhibir(dto, user.id, tenantId);
+  }
+
   // ─── Transfers ───
 
   @Post('transfer')
@@ -197,7 +226,11 @@ export class InventoryController {
   @ApiQuery({ name: 'type', required: false })
   @ApiQuery({ name: 'status', required: false })
   @ApiQuery({ name: 'warehouseId', required: false })
-  @ApiQuery({ name: 'q', required: false, description: 'Nombre, referencia, SKU o código de barras' })
+  @ApiQuery({
+    name: 'q',
+    required: false,
+    description: 'Nombre, referencia, SKU o código de barras',
+  })
   @ApiQuery({ name: 'from', required: false })
   @ApiQuery({ name: 'to', required: false })
   @ApiQuery({ name: 'page', required: false })
@@ -263,7 +296,9 @@ export class InventoryController {
   }
 
   @Post('transfers/:id/cancel')
-  @ApiOperation({ summary: 'Cancelar una remisión pendiente (la anula el origen)' })
+  @ApiOperation({
+    summary: 'Cancelar una remisión pendiente (la anula el origen)',
+  })
   cancelTransfer(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: CloseTransferDto,
@@ -288,7 +323,12 @@ export class InventoryController {
     @CurrentUser() user: User,
     @TenantId() tenantId: string,
   ) {
-    return this.inventoryService.returnTransfer(id, dto ?? {}, user.id, tenantId);
+    return this.inventoryService.returnTransfer(
+      id,
+      dto ?? {},
+      user.id,
+      tenantId,
+    );
   }
 
   @Post('loans')

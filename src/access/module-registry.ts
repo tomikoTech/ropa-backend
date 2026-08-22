@@ -201,6 +201,11 @@ const ROUTE_MODULES: Record<string, string> = {
   'inventory/transfer': 'transfers',
   'inventory/transfers': 'transfers',
   'inventory/loans': 'transfers',
+  // Subir la muestra a la vitrina queda en Inventario y no en Traslados a
+  // propósito: lo hace el vendedor de piso cuando ve el hueco, no el
+  // bodeguero. Exigirle permiso de traslados dejaría la vitrina vacía
+  // esperando a que alguien con más permisos pase por ahí.
+  'inventory/exhibicion': 'inventory',
   inventory: 'inventory',
   'inventory-counts': 'inventory-counts',
   'internal-requests': 'internal-requests',

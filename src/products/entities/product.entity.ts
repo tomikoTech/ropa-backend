@@ -162,6 +162,21 @@ export class Product extends TenantAwareEntity {
   @Column({ name: 'is_leftover', type: 'boolean', nullable: true })
   isLeftover?: boolean | null;
 
+  /**
+   * Cuántos pares de esta referencia deben estar en la vitrina.
+   *
+   * `null` = lo que diga la tienda en general. `0` **no** es lo mismo: es la
+   * decisión de no exhibir esta referencia. Las cajas de cartón y los
+   * accesorios no van en vitrina, y sin poder decirlo la lista de «falta por
+   * exhibir» se llena de cosas que nadie va a exhibir nunca y termina siendo
+   * ruido que se ignora.
+   *
+   * Es por referencia y no por talla porque en vitrina va **un par del
+   * modelo**, no uno de cada talla.
+   */
+  @Column({ name: 'exhibicion_objetivo', type: 'int', nullable: true })
+  exhibicionObjetivo: number | null;
+
   @OneToMany(() => ProductVariant, (v) => v.product, {
     cascade: true,
     eager: false,

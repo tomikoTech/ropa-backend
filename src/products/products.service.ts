@@ -650,6 +650,9 @@ export class ProductsService {
     if (dto.minimumSalePrice !== undefined)
       product.minimumSalePrice = dto.minimumSalePrice ?? null;
     if (dto.fixedPrice !== undefined) product.fixedPrice = !!dto.fixedPrice;
+    // Cero y vacío no son lo mismo: cero es «esta referencia no se exhibe».
+    if (dto.exhibicionObjetivo !== undefined)
+      product.exhibicionObjetivo = dto.exhibicionObjetivo ?? null;
     if (dto.gender !== undefined) product.gender = dto.gender;
     if (dto.categoryId !== undefined)
       product.categoryId = dto.categoryId as string;

@@ -101,7 +101,11 @@ export type MotivoMovimiento =
   /** Una caja concreta cambia de bodega. */
   | 'STOCK_UNIT_TRANSFER'
   /** Abrir una caja, corregir su contenido: cosas de un bulto. */
-  | 'STOCK_UNIT';
+  | 'STOCK_UNIT'
+  /** El par sube del local a la vitrina. */
+  | 'EXHIBICION_IN'
+  /** Y el local se queda sin él. */
+  | 'EXHIBICION_OUT';
 
 export interface OrdenDeMovimiento {
   variantId: string;

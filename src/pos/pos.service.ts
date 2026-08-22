@@ -30,6 +30,7 @@ import { CajaService } from '../caja/caja.service.js';
 import { ReposicionAutomaticaService } from '../inventory/reposicion-automatica.service.js';
 import { pendienteTotal, repartirAbono } from './ar-allocation.js';
 import { precioDeLinea, type ReglaDePrecio } from './precio-de-linea.js';
+import { ordenarParaDescuento } from '../inventory/exhibicion.js';
 import { TaxService, LineCalculation } from './services/tax.service.js';
 import { InvoiceService } from './services/invoice.service.js';
 import { ProductStatus } from '../common/enums/product-status.enum.js';
@@ -74,6 +75,24 @@ export class PosService {
     private readonly reposicion: ReposicionAutomaticaService,
     private readonly caja: CajaService,
   ) {}
+
+  /**
+   * Qué bodegas de esta tienda son la vitrina.
+   *
+   * Se consulta por transacción y no se cachea entre peticiones: son pocas
+   * filas, y una vitrina que se acaba de configurar tiene que valer en la
+   * venta siguiente, no cuando al proceso se le ocurra refrescar.
+   */
+  private async vitrinasDelTenant(
+    manager: EntityManager,
+    tenantId: string,
+  ): Promise<Set<string>> {
+    const filas = await manager.query<{ id: string }[]>(
+      `SELECT id FROM warehouses WHERE tenant_id = $1 AND is_exhibition = true`,
+      [tenantId],
+    );
+    return new Set(filas.map((f) => f.id));
+  }
 
   /**
    * Create and complete a sale in a single transaction.
@@ -177,6 +196,9 @@ export class PosService {
           if (arr) arr.push(s);
           else stocksByVariant.set(s.variantId, [s]);
         }
+        // Cuáles de esas bodegas son la vitrina. Se leen una sola vez para
+        // toda la factura: son pocas y no cambian a mitad de una venta.
+        const vitrinas = await this.vitrinasDelTenant(manager, tenantId);
 
         // Separados / apartados (F6): si el tenant lo tiene habilitado, el stock
         // reservado para OTROS clientes no está disponible para esta venta. Los
@@ -239,13 +261,16 @@ export class PosService {
             );
           }
 
-          // Cascade stock check: primary warehouse first, then others by qty desc
-          const itemStocks = stocksByVariant.get(item.variantId) || [];
-          itemStocks.sort((a, b) => {
-            if (a.warehouseId === dto.warehouseId) return -1;
-            if (b.warehouseId === dto.warehouseId) return 1;
-            return Number(b.quantity) - Number(a.quantity);
-          });
+          // De dónde se descuenta y en qué orden: primero donde se cobra,
+          // después la que más tenga, y **la vitrina de última** —vender la
+          // muestra teniendo pares en la bodega deja el local sin qué
+          // mostrar—. La regla vive en `exhibicion.ts`, probada aparte.
+          const itemStocks = ordenarParaDescuento(
+            stocksByVariant.get(item.variantId) || [],
+            dto.warehouseId,
+            (id) => vitrinas.has(id),
+          );
+          stocksByVariant.set(item.variantId, itemStocks);
           const totalAvailable = itemStocks.reduce(
             (sum, s) => sum + Number(s.quantity),
             0,
@@ -1175,6 +1200,7 @@ export class PosService {
         throw new BadRequestException('No se puede editar una venta cancelada');
       }
 
+      const vitrinas = await this.vitrinasDelTenant(manager, tenantId);
       const originalTotal = Number(sale.total);
       const roundMoney = (value: number) => Math.round(value * 100) / 100;
 
@@ -1407,14 +1433,16 @@ export class PosService {
                 `Variante ${item.variantId} no encontrada`,
               );
             }
-            const itemStocks = await stockRepo.find({
-              where: { variantId: item.variantId, tenantId },
-            });
-            itemStocks.sort((a, b) => {
-              if (a.warehouseId === sale.warehouseId) return -1;
-              if (b.warehouseId === sale.warehouseId) return 1;
-              return Number(b.quantity) - Number(a.quantity);
-            });
+            // El mismo orden que al vender —vitrina de última—: editar una
+            // factura no puede descontar por un criterio distinto del que usó
+            // la venta original.
+            const itemStocks = ordenarParaDescuento(
+              await stockRepo.find({
+                where: { variantId: item.variantId, tenantId },
+              }),
+              sale.warehouseId,
+              (id) => vitrinas.has(id),
+            );
             const totalAvailable = itemStocks.reduce(
               (s, st) => s + Number(st.quantity),
               0,

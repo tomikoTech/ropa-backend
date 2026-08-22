@@ -480,4 +480,24 @@ export class StoreSettings extends TenantAwareEntity {
     nullable: true,
   })
   autoReplenishProductIds: string[] | null;
+
+  // ─── Exhibición ───
+
+  /**
+   * Avisar cuando falta un par en la vitrina.
+   *
+   * Apagada por defecto, como el cierre de caja: una tienda sin vitrinas
+   * configuradas no debe amanecer con una pantalla de pendientes que no pidió.
+   */
+  @Column({ name: 'exhibicion_enabled', type: 'boolean', default: false })
+  exhibicionEnabled: boolean;
+
+  /**
+   * Cuántos pares de cada referencia van en vitrina.
+   *
+   * Uno: la muestra. Una referencia concreta puede pedir otro número con
+   * `products.exhibicion_objetivo`.
+   */
+  @Column({ name: 'exhibicion_objetivo', type: 'int', default: 1 })
+  exhibicionObjetivo: number;
 }
