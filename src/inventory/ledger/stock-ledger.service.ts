@@ -210,10 +210,14 @@ export class StockLedgerService {
   ): Promise<ResultadoMovimiento> {
     const { variantId, tenantId, cantidad } = orden;
     if (cantidad <= 0) {
-      throw new BadRequestException('La cantidad a trasladar debe ser mayor a 0');
+      throw new BadRequestException(
+        'La cantidad a trasladar debe ser mayor a 0',
+      );
     }
     if (orden.desdeWarehouseId === orden.hastaWarehouseId) {
-      throw new BadRequestException('El origen y el destino deben ser distintos');
+      throw new BadRequestException(
+        'El origen y el destino deben ser distintos',
+      );
     }
 
     const origen = await this.bloquearStock(manager, {
@@ -244,10 +248,12 @@ export class StockLedgerService {
       );
       sinEtiqueta = cantidad - elegidas.reduce((n, u) => n + u.quantity, 0);
       if (elegidas.length) {
-        await manager.getRepository(StockUnit).update(
-          { id: In(elegidas.map((u) => u.id)) },
-          { warehouseId: orden.hastaWarehouseId, standId: null },
-        );
+        await manager
+          .getRepository(StockUnit)
+          .update(
+            { id: In(elegidas.map((u) => u.id)) },
+            { warehouseId: orden.hastaWarehouseId, standId: null },
+          );
         await this.anotarEventos(
           manager,
           elegidas,
@@ -271,7 +277,10 @@ export class StockLedgerService {
       );
     }
 
-    for (const warehouseId of [orden.desdeWarehouseId, orden.hastaWarehouseId]) {
+    for (const warehouseId of [
+      orden.desdeWarehouseId,
+      orden.hastaWarehouseId,
+    ]) {
       await this.exigirCuadre(manager, tenantId, variantId, warehouseId, orden);
     }
 
@@ -313,21 +322,37 @@ export class StockLedgerService {
     );
   }
 
-  /** ¿Este producto se maneja par por par? */
+  /**
+   * ¿Este producto se maneja par por par?
+   *
+   * Vale la marca del producto **o** el ajuste de la tienda. Las dos, y no solo
+   * la del producto, porque encender el inventario por cajas no marca hacia
+   * atrás lo que ya estaba en el catálogo: una tienda que lo activaba después
+   * de cargar sus productos se quedaba con el ajuste en «sí» y todos los
+   * productos en «no», y el ledger concluía —correctamente según los datos, y
+   * mal según la realidad— que ahí no había bultos que mover.
+   *
+   * Con el ajuste de la tienda mandando, ese olvido deja de ser posible.
+   */
   private async llevaUnidades(
     manager: EntityManager,
     variantId: string,
     tenantId: string,
   ): Promise<boolean> {
-    const fila = await manager
-      .getRepository(ProductVariant)
-      .createQueryBuilder('v')
-      .innerJoin('v.product', 'p')
-      .select('p.unit_tracking', 'unitTracking')
-      .where('v.id = :variantId', { variantId })
-      .andWhere('v.tenant_id = :tenantId', { tenantId })
-      .getRawOne<{ unitTracking: boolean }>();
-    return !!fila?.unitTracking;
+    // SQL directo y no QueryBuilder: mezclar alias de relación con nombres de
+    // columna (`p.unit_tracking`) no resuelve, y el resultado era `undefined`
+    // —es decir, «este producto no lleva bultos»— en silencio. Un fallo así no
+    // rompe nada visible: simplemente deja de mover los códigos.
+    const filas = await manager.query<{ lleva: boolean }[]>(
+      `SELECT (p.unit_tracking OR COALESCE(ss.unit_tracking_enabled, false)) AS lleva
+       FROM product_variants v
+       JOIN products p ON p.id = v.product_id
+       LEFT JOIN store_settings ss ON ss.tenant_id = v.tenant_id
+       WHERE v.id = $1 AND v.tenant_id = $2
+       LIMIT 1`,
+      [variantId, tenantId],
+    );
+    return !!filas[0]?.lleva;
   }
 
   /**
@@ -392,7 +417,10 @@ export class StockLedgerService {
     manager: EntityManager,
     orden: OrdenDeMovimiento,
     cantidad: number,
-  ): Promise<{ unidades: { id: string; barcode: string }[]; sinEtiqueta: number }> {
+  ): Promise<{
+    unidades: { id: string; barcode: string }[];
+    sinEtiqueta: number;
+  }> {
     const elegidas = await this.elegirUnidades(manager, orden, cantidad);
     const cubierto = elegidas.reduce((n, u) => n + u.quantity, 0);
     const sinEtiqueta = Math.max(0, cantidad - cubierto);
@@ -439,7 +467,10 @@ export class StockLedgerService {
     manager: EntityManager,
     orden: OrdenDeMovimiento,
     cantidad: number,
-  ): Promise<{ unidades: { id: string; barcode: string }[]; sinEtiqueta: number }> {
+  ): Promise<{
+    unidades: { id: string; barcode: string }[];
+    sinEtiqueta: number;
+  }> {
     // Si venían bultos concretos es una reversa —anular una venta, devolver—:
     // se devuelven a disponible en vez de inventar códigos nuevos.
     if (orden.unidades?.length) {
@@ -470,7 +501,11 @@ export class StockLedgerService {
 
     const repo = manager.getRepository(StockUnit);
     const hoy = new Date();
-    const consecutivo = await this.siguienteConsecutivo(manager, hoy, orden.tenantId);
+    const consecutivo = await this.siguienteConsecutivo(
+      manager,
+      hoy,
+      orden.tenantId,
+    );
     const nuevas: StockUnit[] = [];
     for (let i = 0; i < cantidad; i++) {
       nuevas.push(

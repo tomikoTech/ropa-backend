@@ -15,7 +15,11 @@ import {
 } from 'typeorm';
 import { Warehouse } from './entities/warehouse.entity.js';
 import { Stock } from './entities/stock.entity.js';
-import { StockUnit, StockUnitKind, StockUnitStatus } from './entities/stock-unit.entity.js';
+import {
+  StockUnit,
+  StockUnitKind,
+  StockUnitStatus,
+} from './entities/stock-unit.entity.js';
 import { StockMovement } from './entities/stock-movement.entity.js';
 import { StockTransfer } from './entities/stock-transfer.entity.js';
 import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
@@ -33,6 +37,7 @@ import {
   movementDelta,
 } from './movement-delta.js';
 import { RecipeService } from '../products/services/recipe.service.js';
+import { StockLedgerService } from './ledger/stock-ledger.service.js';
 import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
 
 /** Una remisión con todo lo que hace falta para entenderla sin preguntar. */
@@ -148,6 +153,9 @@ export class InventoryService {
     private readonly settingsRepository: Repository<StoreSettings>,
     private readonly recipeService: RecipeService,
     private readonly dataSource: DataSource,
+    // El único camino por el que se mueve inventario: mantiene el agregado y
+    // los bultos cuadrados en la misma transacción.
+    private readonly ledger: StockLedgerService,
   ) {}
 
   // ─── Warehouses ───
@@ -254,7 +262,8 @@ export class InventoryService {
       boxedByKey.set(key, (boxedByKey.get(key) ?? 0) + Number(box.quantity));
     }
     return rows.map((row) => {
-      const boxedQuantity = boxedByKey.get(`${row.variantId}|${row.warehouseId}`) ?? 0;
+      const boxedQuantity =
+        boxedByKey.get(`${row.variantId}|${row.warehouseId}`) ?? 0;
       return Object.assign(row, {
         boxedQuantity,
         looseQuantity: Math.max(0, Number(row.quantity) - boxedQuantity),
@@ -464,56 +473,45 @@ export class InventoryService {
   ): Promise<Stock> {
     return this.dataSource.transaction(async (manager) => {
       const stockRepo = manager.getRepository(Stock);
-      const movementRepo = manager.getRepository(StockMovement);
 
-      let stock = await stockRepo.findOne({
+      const previo = await stockRepo.findOne({
         where: {
           variantId: dto.variantId,
           warehouseId: dto.warehouseId,
           tenantId,
         },
       });
+      const prevQuantity = previo?.quantity ?? 0;
 
-      if (!stock) {
-        stock = stockRepo.create({
+      // Por el ledger: un ajuste en una tienda con códigos por par también
+      // tiene que crear o consumir bultos. Antes solo movía `stock.quantity`,
+      // así que cargar inventario a mano dejaba existencia sin etiqueta —y una
+      // salida dejaba etiquetas de pares que ya no estaban—.
+      await this.ledger.mover(manager, {
+        variantId: dto.variantId,
+        warehouseId: dto.warehouseId,
+        // `ADJUSTMENT` no dice cuánto se movió: dice en cuánto queda.
+        ...(dto.movementType === MovementType.ADJUSTMENT
+          ? { cantidad: 0, dejarEn: dto.quantity }
+          : {
+              cantidad:
+                dto.movementType === MovementType.IN
+                  ? dto.quantity
+                  : -dto.quantity,
+            }),
+        motivo: 'ADJUSTMENT',
+        notas: dto.notes ?? null,
+        usuarioId: userId,
+        tenantId,
+      });
+
+      const stock = await stockRepo.findOneOrFail({
+        where: {
           variantId: dto.variantId,
           warehouseId: dto.warehouseId,
           tenantId,
-          quantity: 0,
-          minStock: 0,
-        });
-      }
-
-      const prevQuantity = stock.quantity;
-      switch (dto.movementType) {
-        case MovementType.IN:
-          stock.quantity += dto.quantity;
-          break;
-        case MovementType.OUT:
-          if (stock.quantity < dto.quantity) {
-            throw new BadRequestException(
-              `Stock insuficiente. Disponible: ${stock.quantity}`,
-            );
-          }
-          stock.quantity -= dto.quantity;
-          break;
-        case MovementType.ADJUSTMENT:
-          stock.quantity = dto.quantity;
-          break;
-      }
-
-      await stockRepo.save(stock);
-
-      const movement = movementRepo.create({
-        variantId: dto.variantId,
-        warehouseId: dto.warehouseId,
-        tenantId,
-        movementType: dto.movementType,
-        quantity: dto.quantity,
-        notes: dto.notes,
-        createdById: userId,
+        },
       });
-      await movementRepo.save(movement);
 
       // Perfumería: solo si se pide explícitamente (consumeEssence=producción)
       // y se AGREGARON unidades de un producto final con receta, se consume la
@@ -550,7 +548,9 @@ export class InventoryService {
     dto: TransferStockDto,
     userId: string,
     tenantId: string,
-  ): Promise<{ from: Stock; to: Stock; transfer: StockTransfer } | StockTransfer> {
+  ): Promise<
+    { from: Stock; to: Stock; transfer: StockTransfer } | StockTransfer
+  > {
     if (dto.fromWarehouseId === dto.toWarehouseId) {
       throw new BadRequestException(
         'La bodega origen y destino deben ser diferentes',
@@ -578,48 +578,7 @@ export class InventoryService {
 
     return this.dataSource.transaction(async (manager) => {
       const stockRepo = manager.getRepository(Stock);
-      const movementRepo = manager.getRepository(StockMovement);
       const transferRepo = manager.getRepository(StockTransfer);
-
-      // Get or create source stock
-      const fromStock = await stockRepo.findOne({
-        where: {
-          variantId: dto.variantId,
-          warehouseId: dto.fromWarehouseId,
-          tenantId,
-        },
-      });
-
-      if (!fromStock || fromStock.quantity < dto.quantity) {
-        throw new BadRequestException(
-          `Stock insuficiente en bodega origen. Disponible: ${fromStock?.quantity ?? 0}`,
-        );
-      }
-
-      // Get or create destination stock
-      let toStock = await stockRepo.findOne({
-        where: {
-          variantId: dto.variantId,
-          warehouseId: dto.toWarehouseId,
-          tenantId,
-        },
-      });
-
-      if (!toStock) {
-        toStock = stockRepo.create({
-          variantId: dto.variantId,
-          warehouseId: dto.toWarehouseId,
-          tenantId,
-          quantity: 0,
-          minStock: 0,
-        });
-      }
-
-      fromStock.quantity -= dto.quantity;
-      toStock.quantity += dto.quantity;
-
-      await stockRepo.save(fromStock);
-      await stockRepo.save(toStock);
 
       // El traslado inmediato también queda registrado.
       //
@@ -632,7 +591,10 @@ export class InventoryService {
       const ahora = new Date();
       const transfer = await transferRepo.save(
         transferRepo.create({
-          transferNumber: await this.siguienteNumeroDeTraslado(manager, tenantId),
+          transferNumber: await this.siguienteNumeroDeTraslado(
+            manager,
+            tenantId,
+          ),
           type: 'TRANSFER',
           status: 'RECEIVED',
           variantId: dto.variantId,
@@ -647,39 +609,37 @@ export class InventoryService {
         }),
       );
 
-      // Record movements
-      const outMovement = movementRepo.create({
+      // El movimiento va por el ledger: mueve el agregado **y** los bultos en
+      // la misma transacción, y un traslado conserva el código del par en vez
+      // de consumirlo y recrearlo. Antes esto solo tocaba `stock.quantity`, así
+      // que en una tienda con códigos por par los bultos se quedaban en la
+      // bodega de origen mientras la existencia ya estaba en la otra.
+      await this.ledger.trasladar(manager, {
         variantId: dto.variantId,
-        warehouseId: dto.fromWarehouseId,
+        desdeWarehouseId: dto.fromWarehouseId,
+        hastaWarehouseId: dto.toWarehouseId,
+        cantidad: dto.quantity,
+        motivo: 'TRANSFER_OUT',
+        referenciaId: transfer.id,
+        notas: dto.notes ?? null,
+        usuarioId: userId,
         tenantId,
-        movementType: MovementType.TRANSFER,
-        quantity: -dto.quantity,
-        referenceType: 'TRANSFER_OUT',
-        referenceId: transfer.id,
-        notes: dto.notes || `Traslado a bodega destino`,
-        createdById: userId,
       });
-
-      const inMovement = movementRepo.create({
-        variantId: dto.variantId,
-        warehouseId: dto.toWarehouseId,
-        tenantId,
-        movementType: MovementType.TRANSFER,
-        quantity: dto.quantity,
-        referenceType: 'TRANSFER_IN',
-        referenceId: transfer.id,
-        notes: dto.notes || `Traslado desde bodega origen`,
-        createdById: userId,
-      });
-
-      await movementRepo.save([outMovement, inMovement]);
 
       const from = await stockRepo.findOne({
-        where: { id: fromStock.id },
+        where: {
+          variantId: dto.variantId,
+          warehouseId: dto.fromWarehouseId,
+          tenantId,
+        },
         relations: ['variant', 'variant.product', 'warehouse'],
       });
       const to = await stockRepo.findOne({
-        where: { id: toStock.id },
+        where: {
+          variantId: dto.variantId,
+          warehouseId: dto.toWarehouseId,
+          tenantId,
+        },
         relations: ['variant', 'variant.product', 'warehouse'],
       });
 
@@ -721,7 +681,6 @@ export class InventoryService {
     }
     const transferId = await this.dataSource.transaction(async (manager) => {
       const stockRepo = manager.getRepository(Stock);
-      const movementRepo = manager.getRepository(StockMovement);
       const transferRepo = manager.getRepository(StockTransfer);
 
       const fromStock = await stockRepo.findOne({
@@ -736,12 +695,12 @@ export class InventoryService {
           `Stock insuficiente en bodega origen. Disponible: ${fromStock?.quantity ?? 0}`,
         );
       }
-      fromStock.quantity -= dto.quantity;
-      await stockRepo.save(fromStock);
-
       const transfer = await transferRepo.save(
         transferRepo.create({
-          transferNumber: await this.siguienteNumeroDeTraslado(manager, tenantId),
+          transferNumber: await this.siguienteNumeroDeTraslado(
+            manager,
+            tenantId,
+          ),
           type: 'TRANSFER',
           status: 'PENDING',
           variantId: dto.variantId,
@@ -754,19 +713,19 @@ export class InventoryService {
         }),
       );
 
-      await movementRepo.save(
-        movementRepo.create({
-          variantId: dto.variantId,
-          warehouseId: dto.fromWarehouseId,
-          tenantId,
-          movementType: MovementType.TRANSFER,
-          quantity: -dto.quantity,
-          referenceType: 'TRANSFER_OUT',
-          referenceId: transfer.id,
-          notes: dto.notes || 'Remisión en tránsito',
-          createdById: userId,
-        }),
-      );
+      // La mercancía sale del origen y queda en tránsito. Los bultos salen con
+      // ella —quedan TRANSFERRED, fuera del disponible— y vuelven a entrar en
+      // el destino cuando alguien recibe la remisión.
+      await this.ledger.mover(manager, {
+        variantId: dto.variantId,
+        warehouseId: dto.fromWarehouseId,
+        cantidad: -dto.quantity,
+        motivo: 'TRANSFER_OUT',
+        referenciaId: transfer.id,
+        notas: dto.notes || 'Remisión en tránsito',
+        usuarioId: userId,
+        tenantId,
+      });
 
       return transfer.id;
     });
@@ -781,8 +740,6 @@ export class InventoryService {
   ): Promise<StockTransfer> {
     await this.dataSource.transaction(async (manager) => {
       const transferRepo = manager.getRepository(StockTransfer);
-      const stockRepo = manager.getRepository(Stock);
-      const movementRepo = manager.getRepository(StockMovement);
 
       const transfer = await transferRepo.findOne({
         where: { id, tenantId },
@@ -797,28 +754,17 @@ export class InventoryService {
         );
       }
 
-      const toStock = await this.getOrCreateStockTx(
-        manager,
-        transfer.variantId,
-        transfer.toWarehouseId,
+      // Lo que estaba en tránsito entra al destino, bultos incluidos.
+      await this.ledger.mover(manager, {
+        variantId: transfer.variantId,
+        warehouseId: transfer.toWarehouseId,
+        cantidad: transfer.quantity,
+        motivo: 'TRANSFER_IN',
+        referenciaId: transfer.id,
+        notas: 'Recepción de remisión',
+        usuarioId: userId,
         tenantId,
-      );
-      toStock.quantity += transfer.quantity;
-      await stockRepo.save(toStock);
-
-      await movementRepo.save(
-        movementRepo.create({
-          variantId: transfer.variantId,
-          warehouseId: transfer.toWarehouseId,
-          tenantId,
-          movementType: MovementType.TRANSFER,
-          quantity: transfer.quantity,
-          referenceType: 'TRANSFER_IN',
-          referenceId: transfer.id,
-          notes: 'Recepción de remisión',
-          createdById: userId,
-        }),
-      );
+      });
 
       transfer.status = 'RECEIVED';
       transfer.receivedById = userId;
@@ -845,8 +791,6 @@ export class InventoryService {
   ): Promise<StockTransfer> {
     await this.dataSource.transaction(async (manager) => {
       const transferRepo = manager.getRepository(StockTransfer);
-      const stockRepo = manager.getRepository(Stock);
-      const movementRepo = manager.getRepository(StockMovement);
 
       const transfer = await transferRepo.findOne({ where: { id, tenantId } });
       if (!transfer) throw new NotFoundException('Remisión no encontrada');
@@ -861,35 +805,22 @@ export class InventoryService {
         );
       }
 
-      // Devolver al origen lo que estaba en tránsito (traslado).
-      const fromStock = await this.getOrCreateStockTx(
-        manager,
-        transfer.variantId,
-        transfer.fromWarehouseId,
-        tenantId,
-      );
-      fromStock.quantity += transfer.quantity;
-      await stockRepo.save(fromStock);
-
+      // Lo que estaba en tránsito vuelve al origen, bultos incluidos.
       const motivo = reason?.trim() || null;
-      await movementRepo.save(
-        movementRepo.create({
-          variantId: transfer.variantId,
-          warehouseId: transfer.fromWarehouseId,
-          tenantId,
-          movementType: MovementType.TRANSFER,
-          quantity: transfer.quantity,
-          referenceType:
-            status === 'REJECTED' ? 'TRANSFER_REJECT' : 'TRANSFER_CANCEL',
-          referenceId: transfer.id,
-          notes:
-            motivo ??
-            (status === 'REJECTED'
-              ? 'El destino no aceptó la remisión (devuelto a origen)'
-              : 'Cancelación de remisión (devuelto a origen)'),
-          createdById: userId,
-        }),
-      );
+      await this.ledger.mover(manager, {
+        variantId: transfer.variantId,
+        warehouseId: transfer.fromWarehouseId,
+        cantidad: transfer.quantity,
+        motivo: 'TRANSFER_IN',
+        referenciaId: transfer.id,
+        notas:
+          motivo ??
+          (status === 'REJECTED'
+            ? 'El destino no aceptó la remisión (devuelto a origen)'
+            : 'Cancelación de remisión (devuelto a origen)'),
+        usuarioId: userId,
+        tenantId,
+      });
 
       transfer.status = status;
       transfer.reason = motivo;
@@ -940,7 +871,11 @@ export class InventoryService {
    */
   async returnTransfer(
     id: string,
-    input: { quantity?: number; reason?: string; requireConfirmation?: boolean },
+    input: {
+      quantity?: number;
+      reason?: string;
+      requireConfirmation?: boolean;
+    },
     userId: string,
     tenantId: string,
   ): Promise<StockTransfer> {
@@ -972,7 +907,9 @@ export class InventoryService {
     }
     const cantidad = input.quantity ?? pendiente;
     if (!Number.isInteger(cantidad) || cantidad < 1) {
-      throw new BadRequestException('La cantidad a devolver debe ser mayor a 0');
+      throw new BadRequestException(
+        'La cantidad a devolver debe ser mayor a 0',
+      );
     }
     if (cantidad > pendiente) {
       throw new BadRequestException(
@@ -1041,7 +978,6 @@ export class InventoryService {
     }
     const loanId = await this.dataSource.transaction(async (manager) => {
       const stockRepo = manager.getRepository(Stock);
-      const movementRepo = manager.getRepository(StockMovement);
       const transferRepo = manager.getRepository(StockTransfer);
 
       const fromStock = await stockRepo.findOne({
@@ -1056,20 +992,13 @@ export class InventoryService {
           `Stock insuficiente en bodega origen. Disponible: ${fromStock?.quantity ?? 0}`,
         );
       }
-      const toStock = await this.getOrCreateStockTx(
-        manager,
-        dto.variantId,
-        dto.toWarehouseId,
-        tenantId,
-      );
-      fromStock.quantity -= dto.quantity;
-      toStock.quantity += dto.quantity;
-      await stockRepo.save(fromStock);
-      await stockRepo.save(toStock);
 
       const loan = await transferRepo.save(
         transferRepo.create({
-          transferNumber: await this.siguienteNumeroDeTraslado(manager, tenantId),
+          transferNumber: await this.siguienteNumeroDeTraslado(
+            manager,
+            tenantId,
+          ),
           type: 'LOAN',
           status: 'PENDING',
           variantId: dto.variantId,
@@ -1082,30 +1011,19 @@ export class InventoryService {
         }),
       );
 
-      await movementRepo.save([
-        movementRepo.create({
-          variantId: dto.variantId,
-          warehouseId: dto.fromWarehouseId,
-          tenantId,
-          movementType: MovementType.TRANSFER,
-          quantity: -dto.quantity,
-          referenceType: 'LOAN_OUT',
-          referenceId: loan.id,
-          notes: dto.notes || 'Préstamo (salida)',
-          createdById: userId,
-        }),
-        movementRepo.create({
-          variantId: dto.variantId,
-          warehouseId: dto.toWarehouseId,
-          tenantId,
-          movementType: MovementType.TRANSFER,
-          quantity: dto.quantity,
-          referenceType: 'LOAN_IN',
-          referenceId: loan.id,
-          notes: dto.notes || 'Préstamo (entrada)',
-          createdById: userId,
-        }),
-      ]);
+      // Un préstamo mueve la mercancía de verdad —el otro local la puede
+      // vender— así que los bultos viajan con ella y conservan su código.
+      await this.ledger.trasladar(manager, {
+        variantId: dto.variantId,
+        desdeWarehouseId: dto.fromWarehouseId,
+        hastaWarehouseId: dto.toWarehouseId,
+        cantidad: dto.quantity,
+        motivo: 'TRANSFER_OUT',
+        referenciaId: loan.id,
+        notas: dto.notes || 'Préstamo',
+        usuarioId: userId,
+        tenantId,
+      });
 
       return loan.id;
     });
@@ -1121,7 +1039,6 @@ export class InventoryService {
     await this.dataSource.transaction(async (manager) => {
       const transferRepo = manager.getRepository(StockTransfer);
       const stockRepo = manager.getRepository(Stock);
-      const movementRepo = manager.getRepository(StockMovement);
 
       const loan = await transferRepo.findOne({ where: { id, tenantId } });
       if (!loan) throw new NotFoundException('Préstamo no encontrado');
@@ -1148,41 +1065,19 @@ export class InventoryService {
             `Disponible: ${toStock?.quantity ?? 0}, Préstamo: ${loan.quantity}`,
         );
       }
-      const fromStock = await this.getOrCreateStockTx(
-        manager,
-        loan.variantId,
-        loan.fromWarehouseId,
-        tenantId,
-      );
-      toStock.quantity -= loan.quantity;
-      fromStock.quantity += loan.quantity;
-      await stockRepo.save(toStock);
-      await stockRepo.save(fromStock);
 
-      await movementRepo.save([
-        movementRepo.create({
-          variantId: loan.variantId,
-          warehouseId: loan.toWarehouseId,
-          tenantId,
-          movementType: MovementType.TRANSFER,
-          quantity: -loan.quantity,
-          referenceType: 'LOAN_RETURN',
-          referenceId: loan.id,
-          notes: 'Retorno de préstamo (salida destino)',
-          createdById: userId,
-        }),
-        movementRepo.create({
-          variantId: loan.variantId,
-          warehouseId: loan.fromWarehouseId,
-          tenantId,
-          movementType: MovementType.TRANSFER,
-          quantity: loan.quantity,
-          referenceType: 'LOAN_RETURN',
-          referenceId: loan.id,
-          notes: 'Retorno de préstamo (entrada origen)',
-          createdById: userId,
-        }),
-      ]);
+      // La mercancía vuelve por donde vino, con sus mismos códigos.
+      await this.ledger.trasladar(manager, {
+        variantId: loan.variantId,
+        desdeWarehouseId: loan.toWarehouseId,
+        hastaWarehouseId: loan.fromWarehouseId,
+        cantidad: loan.quantity,
+        motivo: 'TRANSFER_IN',
+        referenciaId: loan.id,
+        notas: 'Retorno de préstamo',
+        usuarioId: userId,
+        tenantId,
+      });
 
       loan.status = 'RETURNED';
       loan.receivedById = userId;
@@ -1331,11 +1226,7 @@ export class InventoryService {
       [t.createdById, t.receivedById, t.closedById],
       tenantId,
     );
-    return this.describirTraslado(
-      t,
-      new Map([[id, devoluciones]]),
-      nombres,
-    );
+    return this.describirTraslado(t, new Map([[id, devoluciones]]), nombres);
   }
 
   /** Nombre legible de cada usuario, por id. Ignora los nulos y repetidos. */
@@ -1363,8 +1254,7 @@ export class InventoryService {
     porOriginal: Map<string, StockTransfer[]>,
     nombres: Map<string, string>,
   ): TrasladoConContexto {
-    const nombre = (id?: string | null) =>
-      (id && nombres.get(id)) || null;
+    const nombre = (id?: string | null) => (id && nombres.get(id)) || null;
     const propias = porOriginal.get(t.id) ?? [];
     const devuelto = t.returnedQuantity ?? 0;
     return {
@@ -1516,7 +1406,9 @@ export class InventoryService {
           warehouseId: filters.warehouseId,
         });
       if (filters?.variantId)
-        qb.andWhere('m.variant_id = :variantId', { variantId: filters.variantId });
+        qb.andWhere('m.variant_id = :variantId', {
+          variantId: filters.variantId,
+        });
       if (filters?.movementType)
         qb.andWhere('m.movement_type = :movementType', {
           movementType: filters.movementType,
@@ -1717,7 +1609,11 @@ export class InventoryService {
 
     const stockRows = await this.stockRepository.find({
       where: filters?.warehouseId
-        ? { variantId: In(variantIds), tenantId, warehouseId: filters.warehouseId }
+        ? {
+            variantId: In(variantIds),
+            tenantId,
+            warehouseId: filters.warehouseId,
+          }
         : { variantId: In(variantIds), tenantId },
     });
     const currentStock = stockRows.reduce((t, s) => t + Number(s.quantity), 0);

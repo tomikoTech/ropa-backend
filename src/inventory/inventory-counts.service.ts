@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { StockLedgerService } from './ledger/stock-ledger.service.js';
 import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import {
   InventoryCount,
@@ -16,14 +17,12 @@ import {
   InventoryCountScanResult,
 } from './entities/inventory-count-scan.entity.js';
 import { Stock } from './entities/stock.entity.js';
-import { StockMovement } from './entities/stock-movement.entity.js';
 import { StockUnit, StockUnitStatus } from './entities/stock-unit.entity.js';
 import {
   StockUnitEvent,
   StockUnitEventType,
 } from './entities/stock-unit-event.entity.js';
 import { ProductVariant } from '../products/entities/product-variant.entity.js';
-import { MovementType } from '../common/enums/movement-type.enum.js';
 
 export interface CountDifference {
   variantId: string;
@@ -63,6 +62,8 @@ export class InventoryCountsService {
     @InjectRepository(ProductVariant)
     private readonly variantRepo: Repository<ProductVariant>,
     private readonly dataSource: DataSource,
+    // El único camino por el que se mueve inventario.
+    private readonly ledger: StockLedgerService,
   ) {}
 
   private async nextNumber(
@@ -352,12 +353,28 @@ export class InventoryCountsService {
   private componentsForUnit(
     unit: StockUnit,
   ): Array<{ variantId: string; quantity: number }> {
-    if (!unit.variantId) {
-      throw new BadRequestException(
-        `El código ${unit.barcode} no tiene variante asociada y requiere conciliación.`,
-      );
+    if (unit.variantId) {
+      return [{ variantId: unit.variantId, quantity: unit.quantity }];
     }
-    return [{ variantId: unit.variantId, quantity: unit.quantity }];
+
+    // Sin variante propia: son cajas viejas que quedaron así porque
+    // `variant_id` es `ON DELETE SET NULL` y la migración legacy solo la
+    // rellenaba si había una variante activa compatible. Antes se resolvían
+    // por su contenido, y hacerlas reventar aquí sería peor que el descuadre:
+    // la excepción tumba la transacción del escaneo, así que ni siquiera queda
+    // registrada la lectura — y al cerrar el conteo la caja se daría de baja
+    // estando físicamente en la bodega.
+    const porContenido = (unit.contents ?? [])
+      .filter((c) => c.variantId && c.actualQuantity > 0)
+      .map((c) => ({
+        variantId: c.variantId as string,
+        quantity: c.actualQuantity,
+      }));
+    if (porContenido.length) return porContenido;
+
+    throw new BadRequestException(
+      `El código ${unit.barcode} no tiene variante asociada y requiere conciliación.`,
+    );
   }
 
   async getDifferences(
@@ -558,47 +575,45 @@ export class InventoryCountsService {
 
       if (adjust) {
         for (const line of differences) {
-          const stockRepo = manager.getRepository(Stock);
-          let stock = await stockRepo.findOne({
+          // La existencia **de este momento**, no la foto de apertura: si hubo
+          // ventas mientras se contaba, usar la foto dejaría el kardex
+          // descuadrado contra el stock real. Solo se lee: el bloqueo de fila
+          // y la escritura los hace el ledger.
+          const stockActual = await manager.getRepository(Stock).findOne({
             where: {
               variantId: line.variantId,
               warehouseId: count.warehouseId,
               tenantId,
             },
-            lock: { mode: 'pessimistic_write' },
           });
-          if (!stock) {
-            stock = stockRepo.create({
-              variantId: line.variantId,
-              warehouseId: count.warehouseId,
-              quantity: 0,
-              tenantId,
-            });
-          }
-          // El movimiento se calcula contra la existencia **de este momento**,
-          // no contra la foto de apertura: si hubo ventas mientras se contaba,
-          // usar la foto dejaría el kardex descuadrado contra el stock real.
-          const actual = Number(stock.quantity);
+          const actual = Number(stockActual?.quantity ?? 0);
           const difference = line.countedQuantity - actual;
           if (difference === 0) continue;
-          stock.quantity = line.countedQuantity;
-          await stockRepo.save(stock);
-          await manager.getRepository(StockMovement).save(
-            manager.getRepository(StockMovement).create({
-              variantId: line.variantId,
-              warehouseId: count.warehouseId,
-              movementType: difference > 0 ? MovementType.IN : MovementType.OUT,
-              quantity: Math.abs(difference),
-              createdById: userId,
-              notes:
-                `Ajuste por conteo ${count.countNumber}: sistema ${actual}, ` +
-                `contado ${line.countedQuantity}` +
-                (actual !== line.expectedQuantity
-                  ? ` (al abrir el conteo había ${line.expectedQuantity})`
-                  : ''),
-              tenantId,
-            }),
-          );
+
+          // Por el ledger, no escribiendo `stock.quantity` a mano.
+          //
+          // Un conteo que baja la existencia tiene que dar de baja los bultos
+          // correspondientes, y uno que la sube tiene que crearlos. Ajustar
+          // solo el agregado dejaba lo contrario de lo que un conteo busca: el
+          // número cuadrado y los códigos mintiendo. Es además el único caso
+          // donde `dejarEn` tiene sentido: aquí no se sabe cuánto se movió, se
+          // sabe cuánto hay.
+          await this.ledger.mover(manager, {
+            variantId: line.variantId,
+            warehouseId: count.warehouseId,
+            cantidad: 0,
+            dejarEn: line.countedQuantity,
+            motivo: 'COUNT',
+            referenciaId: count.id,
+            notas:
+              `Ajuste por conteo ${count.countNumber}: sistema ${actual}, ` +
+              `contado ${line.countedQuantity}` +
+              (actual !== line.expectedQuantity
+                ? ` (al abrir el conteo había ${line.expectedQuantity})`
+                : ''),
+            usuarioId: userId,
+            tenantId,
+          });
         }
 
         const expectedUnits = await manager
@@ -613,16 +628,32 @@ export class InventoryCountsService {
             where: { countId, tenantId, result: In(SUCCESS_RESULTS) },
           });
 
-        // Dar de baja lo que no apareció solo tiene sentido si de verdad se
-        // pasó el lector por la bodega. En un conteo hecho a mano no se escanea
-        // nada, así que «no apareció» significa «no lo buscamos con el lector»
-        // — y el barrido daba de baja TODOS los bultos etiquetados de esa
-        // bodega. Contar una talla a mano borraba el rastro de todo lo demás.
-        const huboEscaneo = successfulScans.length > 0;
+        // Dar de baja lo que no apareció solo tiene sentido donde de verdad se
+        // pasó el lector.
+        //
+        // Primero: en un conteo hecho a mano no se escanea nada, así que «no
+        // apareció» significaba «no lo buscamos con el lector» — y el barrido
+        // daba de baja TODOS los bultos etiquetados de la bodega.
+        //
+        // Y segundo, más sutil: la señal no puede ser global al conteo. Con 199
+        // pares escaneados y uno registrado a mano porque tenía la etiqueta
+        // rayada, ese último no está en `foundIds` y se daba de baja estando
+        // físicamente ahí. Por eso el barrido se limita a las **variantes** que
+        // sí se recorrieron con el lector: de una variante que nadie escaneó no
+        // se puede concluir nada.
         const foundIds = new Set(
           successfulScans.map((scan) => scan.stockUnitId),
         );
-        for (const expected of huboEscaneo ? expectedUnits : []) {
+        const variantesEscaneadas = new Set(
+          expectedUnits
+            .filter((e) => foundIds.has(e.stockUnitId))
+            .map((e) => e.stockUnit?.variantId)
+            .filter((v): v is string => !!v),
+        );
+        for (const expected of expectedUnits) {
+          if (!variantesEscaneadas.has(expected.stockUnit?.variantId ?? '')) {
+            continue;
+          }
           if (foundIds.has(expected.stockUnitId)) continue;
           const unit = await manager.getRepository(StockUnit).findOne({
             where: { id: expected.stockUnitId, tenantId },

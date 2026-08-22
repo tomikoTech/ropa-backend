@@ -29,11 +29,9 @@ const RAIZ = join(process.cwd(), 'src');
  */
 const PENDIENTES_DE_MIGRAR: Record<string, string> = {
   'inventory/inventory.service.ts':
-    'ajuste y traslados: se migran en el paso siguiente',
+    'solo queda `getOrCreateStockTx`: ajuste, traslados y préstamos ya pasan por el ledger',
   'inventory/stock-units.service.ts':
     'ya mantiene las dos caras; se moverá al ledger para tener un solo camino',
-  'inventory/inventory-counts.service.ts':
-    'conteo físico: el peor de los 21, se migra con su propio arreglo',
   'pos/pos.service.ts': 'venta, anulación y edición de factura',
   'purchases/purchases.service.ts': 'recepción de compra',
   'returns/returns.service.ts': 'devoluciones',
@@ -66,8 +64,12 @@ describe('el inventario se mueve por un solo sitio', () => {
     // consignación y la propia entidad de movimientos lo tienen, y no mueven
     // inventario.
     const importaStock = /from '[^']*\/stock\.entity\.js'/;
+    // **Escrituras**, no lecturas. `getRepository(Stock)` a secas es legítimo:
+    // varios servicios necesitan leer la existencia para decidir. Marcar la
+    // lectura llenaba la lista de falsos positivos, y una prueba que grita por
+    // cosas correctas deja de leerse.
     const escribe =
-      /\.quantity\s*(=|\+=|-=)|getRepository\(Stock\)|stockRepo(sitory)?\.save\(/;
+      /\.quantity\s*(=|\+=|-=)|stockRepo(sitory)?\.save\(|getRepository\(Stock\)\s*\.\s*save\(/;
 
     for (const ruta of archivos(RAIZ)) {
       const relativa = ruta.slice(RAIZ.length + 1);
