@@ -21,6 +21,14 @@ export interface ScanResult {
   taxRate: number;
   imageUrl: string | null;
   productName: string;
+  /**
+   * El código de barras: el identificador que la gente ve, fotografía y dicta
+   * por teléfono. El uuid es del sistema; este es el del mundo real.
+   *
+   * En un bulto es el código de la caja o del par etiquetado —cada uno tiene
+   * el suyo—; en un producto suelto es el de la variante.
+   */
+  barcode: string | null;
   size: string;
   color: string;
   /**
@@ -141,6 +149,9 @@ export class ScanService {
         variantId: unit.variantId ?? unit.variant?.id ?? null,
         productId: unit.productId,
         sku: unit.variant?.sku ?? unit.barcode,
+        // El del bulto, no el de la variante: es el que está pegado en esa
+        // caja concreta y el que se vuelve a escanear para encontrarla.
+        barcode: unit.barcode,
         categoryId: unit.product?.categoryId ?? null,
         taxRate: Number(unit.product?.taxRate ?? 19),
         imageUrl: unit.product?.imageUrl ?? null,
@@ -209,6 +220,7 @@ export class ScanService {
       variantId: variant.id,
       productId: variant.productId,
       sku: variant.sku,
+      barcode: variant.barcode ?? null,
       categoryId: variant.product?.categoryId ?? null,
       taxRate: Number(variant.product?.taxRate ?? 19),
       imageUrl: variant.product?.imageUrl ?? null,
