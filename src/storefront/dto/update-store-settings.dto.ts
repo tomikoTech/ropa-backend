@@ -5,6 +5,7 @@ import {
   IsUUID,
   IsNumber,
   IsIn,
+  IsInt,
   IsArray,
   Min,
   Max,
@@ -316,6 +317,47 @@ export class UpdateStoreSettingsDto {
   @IsOptional()
   @IsBoolean()
   unitTrackingEnabled?: boolean;
+
+  // ─── Reposición automática ───
+
+  @ApiPropertyOptional({
+    description:
+      'La solicitud de reposición nace sola cuando un local se queda corto',
+  })
+  @IsOptional()
+  @IsBoolean()
+  autoReplenishEnabled?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Cuando el local baja a esto o menos, se pide',
+    example: 1,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  autoReplenishThreshold?: number;
+
+  @ApiPropertyOptional({ description: 'Hasta cuánto se repone', example: 3 })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  autoReplenishTarget?: number;
+
+  @ApiPropertyOptional({
+    description: 'De qué bodega sale. Vacío = la que más tenga.',
+  })
+  @IsOptional()
+  @IsUUID()
+  autoReplenishSourceWarehouseId?: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Qué productos se reponen solos. Omitido = todos; lista vacía = ninguno.',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  autoReplenishProductIds?: string[] | null;
 
   @ApiPropertyOptional()
   @IsOptional()

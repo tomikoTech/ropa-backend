@@ -1,4 +1,6 @@
 import {
+  ArrayNotEmpty,
+  IsArray,
   IsNumber,
   IsEnum,
   IsString,
@@ -31,4 +33,18 @@ export class RecordArPaymentDto {
   @IsString()
   @IsOptional()
   notes?: string;
+}
+
+/**
+ * Cobrar varias deudas de una vez.
+ *
+ * Un local que debe diez pares de días distintos se cobra marcando los que
+ * está pagando, no entrando día por día. El abono se reparte entre las cuentas
+ * elegidas, de la más vieja a la más nueva.
+ */
+export class CollectAccountsDto extends RecordArPaymentDto {
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsUUID('4', { each: true })
+  accountIds: string[];
 }

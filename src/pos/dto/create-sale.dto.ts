@@ -27,6 +27,19 @@ export class SaleItemDto {
   @IsOptional()
   stockUnitId?: string;
 
+  /**
+   * Las cajas que el carrito anunció en pantalla.
+   *
+   * A diferencia de `stockUnitId` —el par que el cajero tiene en la mano tras
+   * escanearlo—, estas son una preferencia: si alguna ya no está disponible,
+   * el inventario elige otra por antigüedad. Frenar el cobro porque un código
+   * cambió sería el peor final para algo que solo era información.
+   */
+  @IsArray()
+  @IsOptional()
+  @IsUUID('4', { each: true })
+  preferredStockUnitIds?: string[];
+
   @IsUUID()
   @IsOptional()
   promoterId?: string;

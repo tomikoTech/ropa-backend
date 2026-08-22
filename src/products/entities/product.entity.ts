@@ -67,6 +67,18 @@ export class Product extends TenantAwareEntity {
   })
   minimumSalePrice: number | null;
 
+  /**
+   * El precio no se negocia.
+   *
+   * Distinto del mínimo, que es un piso: aquí subirlo también está prohibido,
+   * y no admite descuento. «Las cajas que yo vendo, si tienen un precio, eso
+   * no tiene descuento para nadie».
+   *
+   * Apagado por defecto: en calzado el precio casi siempre se negocia.
+   */
+  @Column({ name: 'fixed_price', type: 'boolean', default: false })
+  fixedPrice: boolean;
+
   @Column({ type: 'enum', enum: Gender, default: Gender.UNISEX })
   gender: Gender;
 

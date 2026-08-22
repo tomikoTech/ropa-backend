@@ -431,6 +431,7 @@ export class ProductsService {
         costPrice: dto.costPrice ?? 0,
         wholesalePrice: dto.wholesalePrice ?? null,
         minimumSalePrice: dto.minimumSalePrice ?? null,
+        fixedPrice: dto.fixedPrice ?? false,
         gender: dto.gender,
         categoryId: dto.categoryId,
         brand: dto.brand?.trim() || undefined,
@@ -648,6 +649,7 @@ export class ProductsService {
       product.wholesalePrice = dto.wholesalePrice ?? null;
     if (dto.minimumSalePrice !== undefined)
       product.minimumSalePrice = dto.minimumSalePrice ?? null;
+    if (dto.fixedPrice !== undefined) product.fixedPrice = !!dto.fixedPrice;
     if (dto.gender !== undefined) product.gender = dto.gender;
     if (dto.categoryId !== undefined)
       product.categoryId = dto.categoryId as string;
@@ -958,6 +960,8 @@ export class ProductsService {
       basePrice: number;
       wholesalePrice: number | null;
       minimumSalePrice: number | null;
+      /** El precio no se negocia: el POS no deja editarlo. */
+      fixedPrice: boolean;
       taxRate: number;
       imageUrl: string | null;
       categoryId: string | null;
@@ -1160,6 +1164,7 @@ export class ProductsService {
             product.minimumSalePrice === null
               ? null
               : Number(product.minimumSalePrice),
+          fixedPrice: !!product.fixedPrice,
           taxRate: Number(product.taxRate),
           imageUrl: product.imageUrl ?? null,
           categoryId: product.categoryId ?? null,

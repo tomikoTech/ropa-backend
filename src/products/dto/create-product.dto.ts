@@ -69,6 +69,16 @@ export class CreateProductDto {
   @Min(0)
   minimumSalePrice?: number;
 
+  @ApiPropertyOptional({
+    example: false,
+    description:
+      'El precio no se negocia: ni se sube, ni se baja, ni admite descuento. ' +
+      'Distinto del mínimo, que solo pone un piso.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  fixedPrice?: boolean;
+
   @ApiPropertyOptional({ enum: Gender, default: Gender.UNISEX })
   @IsOptional()
   @IsEnum(Gender)

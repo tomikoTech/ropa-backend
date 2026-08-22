@@ -415,4 +415,47 @@ export class StoreSettings extends TenantAwareEntity {
 
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
   updatedAt: Date;
+  // ─── Reposición automática ───
+  //
+  // «Siempre hay que notificar, reponer ese, reponer ese; solo debería ser
+  // automático». Apagada por defecto: no todas las tiendas tienen bodega
+  // aparte, y encenderla para todas llenaría de solicitudes a quien vende de
+  // un solo local.
+
+  @Column({
+    name: 'auto_replenish_enabled',
+    type: 'boolean',
+    default: false,
+  })
+  autoReplenishEnabled: boolean;
+
+  /** Cuando el local baja a esto o menos, se pide. Uno = «cuando quede el último». */
+  @Column({ name: 'auto_replenish_threshold', type: 'int', default: 1 })
+  autoReplenishThreshold: number;
+
+  /** Hasta cuánto se repone. */
+  @Column({ name: 'auto_replenish_target', type: 'int', default: 3 })
+  autoReplenishTarget: number;
+
+  /** De qué bodega sale. Nulo = la que más tenga en ese momento. */
+  @Column({
+    name: 'auto_replenish_source_warehouse_id',
+    type: 'uuid',
+    nullable: true,
+  })
+  autoReplenishSourceWarehouseId: string | null;
+
+  /**
+   * Qué productos se reponen solos.
+   *
+   * Nulo = todos. Una lista vacía **no** es lo mismo: es la tienda diciendo
+   * que todavía no eligió ninguno.
+   */
+  @Column({
+    name: 'auto_replenish_product_ids',
+    type: 'uuid',
+    array: true,
+    nullable: true,
+  })
+  autoReplenishProductIds: string[] | null;
 }

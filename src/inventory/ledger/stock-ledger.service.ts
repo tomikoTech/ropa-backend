@@ -123,6 +123,17 @@ export interface OrdenDeMovimiento {
    */
   unidades?: string[];
   /**
+   * Los bultos que se **esperaba** llevar, si todavía están.
+   *
+   * Es distinto de `unidades`: ahí el cajero tiene el par en la mano y si no
+   * está disponible hay que decirlo. Aquí la caja mostró en pantalla cuáles
+   * iban a salir —para que el cliente y el vendedor vean el código antes de
+   * pagar— y entre eso y el cobro otra venta pudo llevarse alguno. Si pasa, se
+   * elige por antigüedad como siempre: frenar el cobro porque un par cambió
+   * sería el peor final para algo que solo era información.
+   */
+  unidadesPreferidas?: string[];
+  /**
    * Deja el stock en este número en vez de sumarle `cantidad`.
    *
    * Solo para el conteo físico y las correcciones: ahí no se sabe cuánto se
@@ -541,7 +552,11 @@ export class StockLedgerService {
     manager: EntityManager,
     orden: Pick<
       OrdenDeMovimiento,
-      'variantId' | 'warehouseId' | 'tenantId' | 'unidades'
+      | 'variantId'
+      | 'warehouseId'
+      | 'tenantId'
+      | 'unidades'
+      | 'unidadesPreferidas'
     >,
     cantidad: number,
   ): Promise<StockUnit[]> {
@@ -573,6 +588,18 @@ export class StockLedgerService {
       },
       order: { createdAt: 'ASC', id: 'ASC' },
     });
+
+    // Lo que la caja anunció va primero, si sigue disponible. Así el código
+    // que el cliente vio en pantalla es el que sale en su factura, y cuando no
+    // se puede, se resuelve solo en vez de frenar el cobro.
+    if (orden.unidadesPreferidas?.length) {
+      const preferidas = new Set(orden.unidadesPreferidas);
+      disponibles.sort((a, b) => {
+        const ap = preferidas.has(a.id) ? 0 : 1;
+        const bp = preferidas.has(b.id) ? 0 : 1;
+        return ap - bp;
+      });
+    }
 
     const elegidas: StockUnit[] = [];
     let faltan = cantidad;

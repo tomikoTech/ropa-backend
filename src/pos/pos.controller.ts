@@ -9,7 +9,12 @@ import {
   Res,
   ParseUUIDPipe,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiQuery,
+} from '@nestjs/swagger';
 import type { Response } from 'express';
 import { PosService } from './pos.service.js';
 import { ScanService } from './services/scan.service.js';
@@ -17,7 +22,10 @@ import { buildStatementWorkbook } from '../common/utils/statement-excel.util.js'
 import { CreateSaleDto } from './dto/create-sale.dto.js';
 import { UpdateSaleDto } from './dto/update-sale.dto.js';
 import { MarkSalePaidDto } from './dto/mark-sale-paid.dto.js';
-import { RecordArPaymentDto } from './dto/record-ar-payment.dto.js';
+import {
+  CollectAccountsDto,
+  RecordArPaymentDto,
+} from './dto/record-ar-payment.dto.js';
 import { SendInvoiceDto } from './dto/send-invoice.dto.js';
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
 import { TenantId } from '../common/decorators/tenant-id.decorator.js';
@@ -39,6 +47,31 @@ export class PosController {
   })
   scan(@Param('barcode') barcode: string, @TenantId() tenantId: string) {
     return this.scanService.resolve(barcode, tenantId);
+  }
+
+  @Get('pares-que-saldrian')
+  @ApiOperation({
+    summary: 'Qué códigos de par saldrían si se vendiera esto ahora',
+    description:
+      'Para que el carrito muestre el código de la caja antes de cobrar. Usa ' +
+      'la misma regla que el inventario (por antigüedad). Puede devolver ' +
+      'menos de lo pedido si hay existencia sin etiquetar.',
+  })
+  @ApiQuery({ name: 'variantId', required: true })
+  @ApiQuery({ name: 'warehouseId', required: true })
+  @ApiQuery({ name: 'quantity', required: false })
+  paresQueSaldrian(
+    @Query('variantId', ParseUUIDPipe) variantId: string,
+    @Query('warehouseId', ParseUUIDPipe) warehouseId: string,
+    @TenantId() tenantId: string,
+    @Query('quantity') quantity?: string,
+  ) {
+    return this.posService.paresQueSaldrian(
+      variantId,
+      warehouseId,
+      Math.max(1, Number(quantity) || 1),
+      tenantId,
+    );
   }
 
   @Post('sales')
@@ -126,6 +159,26 @@ export class PosController {
     @TenantId() tenantId: string,
   ) {
     return this.posService.recordArPayment(id, dto, tenantId);
+  }
+
+  @Post('accounts-receivable/collect')
+  @ApiOperation({
+    summary: 'Cobrar varias cuentas por cobrar en un solo pago',
+    description:
+      'El abono se reparte entre las cuentas elegidas, de la más vieja a la ' +
+      'más nueva. Sirve para cuando un local paga varios pares de días ' +
+      'distintos de una sola vez.',
+  })
+  collectAccountsReceivable(
+    @Body() dto: CollectAccountsDto,
+    @TenantId() tenantId: string,
+  ) {
+    const { accountIds, ...pago } = dto;
+    return this.posService.collectAccountsReceivable(
+      accountIds,
+      pago,
+      tenantId,
+    );
   }
 
   @Post('accounts-receivable/clients/:clientId/balance-payment')

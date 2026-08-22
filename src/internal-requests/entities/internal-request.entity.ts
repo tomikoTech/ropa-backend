@@ -48,6 +48,16 @@ export class InternalRequest extends TenantAwareEntity {
   @OneToMany(() => InternalRequestItem, (item) => item.request, { eager: true })
   items: InternalRequestItem[];
   @Column({ type: 'text', nullable: true }) notes: string | null;
+
+  /**
+   * La pidió el sistema, no una persona.
+   *
+   * Sirve para dos cosas: agrupar en una sola solicitud todo lo que un local
+   * se va quedando sin tener —si no, cinco ventas dejan cinco solicitudes— y
+   * para que quien la reciba sepa que nadie la escribió a mano.
+   */
+  @Column({ name: 'origen_automatico', type: 'boolean', default: false })
+  origenAutomatico: boolean;
   @Column({ name: 'created_by', type: 'uuid', nullable: true }) createdById:
     | string
     | null;

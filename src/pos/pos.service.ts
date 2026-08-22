@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource, EntityManager, In, Not } from 'typeorm';
@@ -25,6 +26,9 @@ import { CreateSaleDto } from './dto/create-sale.dto.js';
 import { UpdateSaleDto } from './dto/update-sale.dto.js';
 import { RecordArPaymentDto } from './dto/record-ar-payment.dto.js';
 import { StockLedgerService } from '../inventory/ledger/stock-ledger.service.js';
+import { ReposicionAutomaticaService } from '../inventory/reposicion-automatica.service.js';
+import { pendienteTotal, repartirAbono } from './ar-allocation.js';
+import { precioDeLinea, type ReglaDePrecio } from './precio-de-linea.js';
 import { TaxService, LineCalculation } from './services/tax.service.js';
 import { InvoiceService } from './services/invoice.service.js';
 import { ProductStatus } from '../common/enums/product-status.enum.js';
@@ -41,6 +45,8 @@ import { randomUUID } from 'node:crypto';
 
 @Injectable()
 export class PosService {
+  private readonly log = new Logger(PosService.name);
+
   constructor(
     @InjectRepository(Sale)
     private readonly saleRepository: Repository<Sale>,
@@ -64,6 +70,7 @@ export class PosService {
     private readonly receiptService: ReceiptService,
     private readonly invoiceEmailService: InvoiceEmailService,
     private readonly ledger: StockLedgerService,
+    private readonly reposicion: ReposicionAutomaticaService,
   ) {}
 
   /**
@@ -134,6 +141,8 @@ export class PosService {
           lineCalc: LineCalculation;
           /** Bulto etiquetado del que salió la línea, si vino de escanearlo. */
           stockUnitId?: string;
+          /** Las cajas que el carrito anunció; una preferencia, no un requisito. */
+          preferredStockUnitIds?: string[];
           promoter: Promoter | null;
         }[] = [];
 
@@ -254,25 +263,27 @@ export class PosService {
             );
           }
 
-          // Precio: el editado manualmente en el POS tiene prioridad; si no,
-          // priceOverride de la variante y luego basePrice del producto.
-          const defaultPrice = variant.priceOverride
-            ? Number(variant.priceOverride)
-            : Number(variant.product.basePrice);
-          const unitPrice =
-            item.unitPrice != null && Number(item.unitPrice) >= 0
-              ? Number(item.unitPrice)
-              : defaultPrice;
+          // Precio: la regla vive aparte y se prueba sola. Decide entre el
+          // precio fijo, el mínimo y el sugerido, en ese orden de mando.
           const taxRate = effectiveTaxRate;
           const discountPercent = item.discountPercent || 0;
-          const minimumPrice = Number(variant.product.minimumSalePrice) || 0;
-          const effectiveUnitPrice = unitPrice * (1 - discountPercent / 100);
-          if (minimumPrice > 0 && effectiveUnitPrice + 0.0001 < minimumPrice) {
+          const resuelto = precioDeLinea(
+            {
+              precioProducto: Number(variant.product.basePrice),
+              precioVariante: variant.priceOverride
+                ? Number(variant.priceOverride)
+                : null,
+              precioMinimo: Number(variant.product.minimumSalePrice) || null,
+              precioFijo: !!variant.product.fixedPrice,
+            },
+            { unitPrice: item.unitPrice, discountPercent },
+          );
+          if (resuelto.error !== undefined) {
             throw new BadRequestException(
-              `"${variant.product.name}" no puede venderse por debajo de $${minimumPrice.toLocaleString('es-CO')} ` +
-                `(precio efectivo enviado: $${Math.round(effectiveUnitPrice).toLocaleString('es-CO')}).`,
+              `"${variant.product.name}" ${variant.sizeName}/${variant.colorName}: ${resuelto.error}`,
             );
           }
+          const unitPrice = resuelto.precio!;
 
           const lineCalc = this.taxService.calculateLine(
             unitPrice,
@@ -291,6 +302,7 @@ export class PosService {
             discountPercent,
             lineCalc,
             stockUnitId: item.stockUnitId,
+            preferredStockUnitIds: item.preferredStockUnitIds,
             promoter: promoter ?? null,
           });
         }
@@ -570,6 +582,9 @@ export class PosService {
                 referenciaId: savedSale.id,
                 notas: `Venta ${saleNumber}`,
                 usuarioId: userId,
+                // Lo que el carrito le mostró al cliente sale primero, si
+                // sigue disponible.
+                unidadesPreferidas: data.preferredStockUnitIds,
                 tenantId,
               });
               anotarSaldo(data.variant.id, stock.warehouseId, movido.saldo);
@@ -706,6 +721,29 @@ export class PosService {
         if (!fullSale) {
           throw new NotFoundException('Venta no encontrada después de crear');
         }
+        // Lo que el local se quedó sin tener, pedido solo.
+        //
+        // Va dentro de la transacción de la venta: si la venta se deshace, la
+        // solicitud que generó también. Y no puede tumbar el cobro —la caja no
+        // se queda sin vender porque el bodeguero no se enteró—, así que se
+        // anota y se sigue.
+        try {
+          for (const data of variantData) {
+            await this.reposicion.revisar(manager, {
+              variantId: data.variant.id,
+              productId: data.variant.productId,
+              warehouseId: dto.warehouseId,
+              tenantId,
+              usuarioId: userId,
+            });
+          }
+        } catch (error) {
+          this.log.warn(
+            `No se pudo revisar la reposición automática de la venta ${saleNumber}: ` +
+              `${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+
         return fullSale;
       }),
     );
@@ -744,6 +782,51 @@ export class PosService {
     }
 
     return fullSale;
+  }
+
+  /**
+   * Qué pares saldrían si se vendiera esto ahora.
+   *
+   * El carrito muestra el código de la caja **antes** de cobrar, que es lo que
+   * el cliente ve y lo que la tienda dicta por teléfono. Usa la misma regla
+   * que el ledger —por antigüedad— para que lo anunciado y lo vendido
+   * coincidan; y si entre una cosa y otra otra caja se lleva un par, la venta
+   * se resuelve sola y la factura registra la verdad.
+   *
+   * Devuelve menos de lo pedido cuando no hay tantos etiquetados. No es un
+   * error: significa que el inventario va por delante de las etiquetas.
+   */
+  async paresQueSaldrian(
+    variantId: string,
+    warehouseId: string,
+    cantidad: number,
+    tenantId: string,
+  ): Promise<{ id: string; barcode: string }[]> {
+    if (cantidad <= 0) return [];
+    const filas: { id: string; barcode: string; quantity: number }[] =
+      await this.dataSource.query(
+        `SELECT u.id, u.barcode, u.quantity
+           FROM stock_units u
+          WHERE u.tenant_id = $1
+            AND u.variant_id = $2
+            AND u.warehouse_id = $3
+            AND u.status = 'IN_STOCK'
+          ORDER BY u.created_at ASC, u.id ASC
+          LIMIT 200`,
+        [tenantId, variantId, warehouseId],
+      );
+
+    const elegidos: { id: string; barcode: string }[] = [];
+    let faltan = cantidad;
+    for (const fila of filas) {
+      if (faltan <= 0) break;
+      // Una caja no se parte para vender tres pares: si no cabe entera en lo
+      // que falta, se salta. Es la misma regla del ledger.
+      if (Number(fila.quantity) > faltan) continue;
+      elegidos.push({ id: fila.id, barcode: fila.barcode });
+      faltan -= Number(fila.quantity);
+    }
+    return elegidos;
   }
 
   async sendSaleInvoice(
@@ -1185,7 +1268,11 @@ export class PosService {
           (origTax > 0 ? Number(settings?.ivaRate ?? 19) : 0);
 
         const editedItems: SaleItem[] = [];
-        const minimumPriceByVariant = new Map<string, number>();
+        // La regla de precio de cada variante que toca esta edición. Editar
+        // una factura tiene que respetar el precio fijo igual que venderla:
+        // si no, bajarle el precio a un producto cerrado es tan fácil como
+        // venderlo y después editarlo.
+        const reglaPorVariante = new Map<string, ReglaDePrecio>();
         const newSubtotal = requestedItems.reduce(
           (sum, item) => sum + Number(item.unitPrice) * item.quantity,
           0,
@@ -1227,10 +1314,14 @@ export class PosService {
               );
             }
             editedItems.push(pair.previous);
-            minimumPriceByVariant.set(
-              variant.id,
-              Number(variant.product.minimumSalePrice) || 0,
-            );
+            reglaPorVariante.set(variant.id, {
+              precioProducto: Number(variant.product.basePrice),
+              precioVariante: variant.priceOverride
+                ? Number(variant.priceOverride)
+                : null,
+              precioMinimo: Number(variant.product.minimumSalePrice) || null,
+              precioFijo: !!variant.product.fixedPrice,
+            });
           }
         } else {
           // Cambiar los productos obliga a recrear las líneas, y una devolución
@@ -1330,10 +1421,14 @@ export class PosService {
 
             const unitPrice = Number(item.unitPrice);
             const lineTotal = unitPrice * item.quantity;
-            minimumPriceByVariant.set(
-              variant.id,
-              Number(variant.product.minimumSalePrice) || 0,
-            );
+            reglaPorVariante.set(variant.id, {
+              precioProducto: Number(variant.product.basePrice),
+              precioVariante: variant.priceOverride
+                ? Number(variant.priceOverride)
+                : null,
+              precioMinimo: Number(variant.product.minimumSalePrice) || null,
+              precioFijo: !!variant.product.fixedPrice,
+            });
 
             // Se consume el snapshot: si la venta traía dos líneas de la misma
             // variante, la segunda no puede heredar el mismo código físico.
@@ -1526,13 +1621,17 @@ export class PosService {
           const discountPercent = preserveLineDiscounts
             ? Number(requestedItems[index].discountPercent)
             : globalDiscountPercent;
-          const effectiveUnitPrice =
-            Number(item.unitPrice) * (1 - discountPercent / 100);
-          const minimumPrice = minimumPriceByVariant.get(item.variantId) || 0;
-          if (minimumPrice > 0 && effectiveUnitPrice + 0.0001 < minimumPrice) {
-            throw new BadRequestException(
-              `"${item.productName}" no puede venderse por debajo de $${minimumPrice.toLocaleString('es-CO')}`,
-            );
+          const regla = reglaPorVariante.get(item.variantId);
+          if (regla) {
+            const resuelto = precioDeLinea(regla, {
+              unitPrice: Number(item.unitPrice),
+              discountPercent,
+            });
+            if (resuelto.error !== undefined) {
+              throw new BadRequestException(
+                `"${item.productName}": ${resuelto.error}`,
+              );
+            }
           }
           const calculation = this.taxService.calculateLine(
             Number(item.unitPrice),
@@ -2151,6 +2250,181 @@ export class PosService {
    * venta a crédito más antigua, luego la siguiente y así sucesivamente. Cada
    * aplicación conserva su propia fila contable y comparte un batch auditable.
    */
+  /**
+   * Cobra **varias deudas escogidas a mano** en un solo pago.
+   *
+   * Un local debe diez pares de días distintos. Cobrarlos de a uno obligaba a
+   * entrar día por día y registrar venta por venta: «a veces se demoraba
+   * mucho». Aquí se marcan las que se están pagando y se cobra una vez.
+   *
+   * Se diferencia del abono por saldo del cliente en que **quien cobra elige**
+   * qué cuentas entran: puede estar saldando tres de las diez, o cuentas de un
+   * local que además le compra a título personal. Por eso no exige el ajuste
+   * de aplicación automática: escoger las cuentas ya es la instrucción.
+   */
+  /**
+   * Aplica un abono sobre un grupo de cuentas ya elegidas y bloqueadas.
+   *
+   * El corazón lo hace `repartirAbono`, que vive aparte porque es aritmética
+   * de plata y se prueba sola. Aquí queda lo que necesita base de datos:
+   * validar que no se cobre de más, escribir cada aplicación con su fila
+   * contable y dejarlas atadas por un mismo lote para poder auditarlas juntas.
+   */
+  private async aplicarAbono(
+    manager: EntityManager,
+    cuentas: AccountsReceivable[],
+    dto: RecordArPaymentDto,
+    tenantId: string,
+    descartadas = 0,
+  ): Promise<{
+    batchId: string;
+    amount: number;
+    allocations: {
+      accountReceivableId: string;
+      saleId: string;
+      saleNumber: string;
+      invoiceNumber: string | null;
+      amount: number;
+      remainingBalance: number;
+      isFullyPaid: boolean;
+    }[];
+  }> {
+    const aCentavos = (valor: number) => Math.round(Number(valor) * 100);
+    const enCentavos = cuentas.map((cuenta) => ({
+      id: cuenta.id,
+      totalCents: aCentavos(cuenta.totalAmount),
+      paidCents: aCentavos(cuenta.paidAmount),
+    }));
+    const abonoCents = aCentavos(dto.amount);
+    const pendienteCents = pendienteTotal(enCentavos);
+
+    if (pendienteCents <= 0) {
+      throw new BadRequestException('No hay saldo pendiente que cobrar.');
+    }
+    if (abonoCents > pendienteCents) {
+      throw new BadRequestException(
+        `El monto ($${dto.amount}) excede el saldo pendiente ` +
+          `($${(pendienteCents / 100).toFixed(2)})` +
+          (descartadas > 0
+            ? `. Se descartaron ${descartadas} cuenta(s) ya pagadas o anuladas.`
+            : '.'),
+      );
+    }
+
+    const batchId = randomUUID();
+    const porId = new Map(cuentas.map((cuenta) => [cuenta.id, cuenta]));
+    const arRepo = manager.getRepository(AccountsReceivable);
+    const pagoRepo = manager.getRepository(AccountsReceivablePayment);
+    const allocations: {
+      accountReceivableId: string;
+      saleId: string;
+      saleNumber: string;
+      invoiceNumber: string | null;
+      amount: number;
+      remainingBalance: number;
+      isFullyPaid: boolean;
+    }[] = [];
+
+    for (const aplicacion of repartirAbono(enCentavos, abonoCents)) {
+      const cuenta = porId.get(aplicacion.cuentaId)!;
+      const pagadoCents = aCentavos(cuenta.paidAmount) + aplicacion.centavos;
+      const totalCents = aCentavos(cuenta.totalAmount);
+
+      await pagoRepo.save(
+        pagoRepo.create({
+          accountReceivableId: cuenta.id,
+          amount: aplicacion.centavos / 100,
+          method: dto.method,
+          reference: dto.reference,
+          bankId: dto.bankId ?? null,
+          receiptImageUrl: dto.receiptImageUrl,
+          notes: dto.notes,
+          allocationBatchId: batchId,
+          tenantId,
+        }),
+      );
+      await arRepo.update(
+        { id: cuenta.id, tenantId },
+        {
+          paidAmount: pagadoCents / 100,
+          isFullyPaid: aplicacion.quedaSaldada,
+          fullyPaidAt: aplicacion.quedaSaldada ? new Date() : null,
+        },
+      );
+
+      allocations.push({
+        accountReceivableId: cuenta.id,
+        saleId: cuenta.saleId,
+        saleNumber: cuenta.sale.saleNumber,
+        invoiceNumber: cuenta.sale.invoiceNumber ?? null,
+        amount: aplicacion.centavos / 100,
+        remainingBalance: Math.max(0, totalCents - pagadoCents) / 100,
+        isFullyPaid: aplicacion.quedaSaldada,
+      });
+    }
+
+    return { batchId, amount: abonoCents / 100, allocations };
+  }
+
+  async collectAccountsReceivable(
+    accountIds: string[],
+    dto: RecordArPaymentDto,
+    tenantId: string,
+  ): Promise<{
+    batchId: string;
+    amount: number;
+    allocations: {
+      accountReceivableId: string;
+      saleId: string;
+      saleNumber: string;
+      invoiceNumber: string | null;
+      amount: number;
+      remainingBalance: number;
+      isFullyPaid: boolean;
+    }[];
+  }> {
+    const ids = [...new Set(accountIds)];
+    if (!ids.length) {
+      throw new BadRequestException('No se eligió ninguna cuenta por cobrar.');
+    }
+    return this.dataSource.transaction(async (manager) => {
+      const abiertas = await manager
+        .getRepository(AccountsReceivable)
+        .createQueryBuilder('ar')
+        .innerJoinAndSelect('ar.sale', 'sale')
+        .setLock('pessimistic_write', undefined, ['ar'])
+        .where('ar.id IN (:...ids)', { ids })
+        .andWhere('ar.tenantId = :tenantId', { tenantId })
+        .andWhere('ar.isFullyPaid = false')
+        // Una venta anulada ya no se cobra.
+        //
+        // Hoy es un cinturón sobre tirantes: anular deja la cuenta en cero y
+        // marcada como saldada, así que el filtro de arriba ya la descarta. Se
+        // deja porque el día que anular cambie —o aparezca cartera vieja
+        // anulada a mano— la diferencia es cobrarle a alguien una factura que
+        // no existe.
+        .andWhere('sale.status <> :cancelled', {
+          cancelled: SaleStatus.CANCELLED,
+        })
+        // De la más vieja a la más nueva: es como se cobra en la calle.
+        .orderBy('sale.createdAt', 'ASC')
+        .addOrderBy('ar.createdAt', 'ASC')
+        .addOrderBy('ar.id', 'ASC')
+        .getMany();
+
+      if (!abiertas.length) {
+        throw new BadRequestException(
+          'Ninguna de las cuentas elegidas tiene saldo por cobrar. ' +
+            'Puede que ya las hayan pagado o que su factura esté anulada.',
+        );
+      }
+      // Se dice cuáles se cayeron en vez de cobrar en silencio de menos: quien
+      // cobra tiene el dinero en la mano y necesita saber a qué se aplicó.
+      const descartadas = ids.length - abiertas.length;
+      return this.aplicarAbono(manager, abiertas, dto, tenantId, descartadas);
+    });
+  }
+
   async recordClientBalancePayment(
     clientId: string,
     dto: RecordArPaymentDto,
@@ -2200,87 +2474,12 @@ export class PosService {
         .addOrderBy('ar.id', 'ASC')
         .getMany();
 
-      const toCents = (value: number) => Math.round(Number(value) * 100);
-      const amountCents = toCents(dto.amount);
-      const totalPendingCents = openAccounts.reduce(
-        (sum, account) =>
-          sum +
-          Math.max(
-            0,
-            toCents(account.totalAmount) - toCents(account.paidAmount),
-          ),
-        0,
-      );
-      if (totalPendingCents <= 0) {
+      if (!openAccounts.length) {
         throw new BadRequestException('El cliente no tiene saldo pendiente.');
       }
-      if (amountCents > totalPendingCents) {
-        throw new BadRequestException(
-          `El monto ($${dto.amount}) excede el saldo total pendiente ($${(totalPendingCents / 100).toFixed(2)}).`,
-        );
-      }
-
-      const batchId = randomUUID();
-      const allocations: {
-        accountReceivableId: string;
-        saleId: string;
-        saleNumber: string;
-        invoiceNumber: string | null;
-        amount: number;
-        remainingBalance: number;
-        isFullyPaid: boolean;
-      }[] = [];
-      let unappliedCents = amountCents;
-      const paymentRepo = manager.getRepository(AccountsReceivablePayment);
-
-      for (const account of openAccounts) {
-        if (unappliedCents <= 0) break;
-        const pendingCents = Math.max(
-          0,
-          toCents(account.totalAmount) - toCents(account.paidAmount),
-        );
-        if (pendingCents === 0) continue;
-
-        const appliedCents = Math.min(unappliedCents, pendingCents);
-        const newPaidCents = toCents(account.paidAmount) + appliedCents;
-        const totalCents = toCents(account.totalAmount);
-        const isFullyPaid = newPaidCents >= totalCents;
-
-        await paymentRepo.save(
-          paymentRepo.create({
-            accountReceivableId: account.id,
-            amount: appliedCents / 100,
-            method: dto.method,
-            reference: dto.reference,
-            bankId: dto.bankId ?? null,
-            receiptImageUrl: dto.receiptImageUrl,
-            notes: dto.notes,
-            allocationBatchId: batchId,
-            tenantId,
-          }),
-        );
-        await arRepo.update(
-          { id: account.id, tenantId },
-          {
-            paidAmount: newPaidCents / 100,
-            isFullyPaid,
-            fullyPaidAt: isFullyPaid ? new Date() : null,
-          },
-        );
-
-        allocations.push({
-          accountReceivableId: account.id,
-          saleId: account.saleId,
-          saleNumber: account.sale.saleNumber,
-          invoiceNumber: account.sale.invoiceNumber ?? null,
-          amount: appliedCents / 100,
-          remainingBalance: Math.max(0, totalCents - newPaidCents) / 100,
-          isFullyPaid,
-        });
-        unappliedCents -= appliedCents;
-      }
-
-      return { batchId, amount: amountCents / 100, allocations };
+      // El mismo reparto que usa el cobro por selección: una sola aritmética,
+      // para que un arreglo en una no deje la otra atrás.
+      return this.aplicarAbono(manager, openAccounts, dto, tenantId);
     });
   }
 

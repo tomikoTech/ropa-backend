@@ -122,6 +122,17 @@ export class StoreSettingsService {
       settings.arPaymentAllocationMode = dto.arPaymentAllocationMode;
     if (dto.unitTrackingEnabled !== undefined)
       settings.unitTrackingEnabled = dto.unitTrackingEnabled;
+    if (dto.autoReplenishEnabled !== undefined)
+      settings.autoReplenishEnabled = dto.autoReplenishEnabled;
+    if (dto.autoReplenishThreshold !== undefined)
+      settings.autoReplenishThreshold = dto.autoReplenishThreshold;
+    if (dto.autoReplenishTarget !== undefined)
+      settings.autoReplenishTarget = dto.autoReplenishTarget;
+    if (dto.autoReplenishSourceWarehouseId !== undefined)
+      settings.autoReplenishSourceWarehouseId =
+        dto.autoReplenishSourceWarehouseId || null;
+    if (dto.autoReplenishProductIds !== undefined)
+      settings.autoReplenishProductIds = dto.autoReplenishProductIds;
     if (dto.showBoxPairSequenceOnLabels !== undefined)
       settings.showBoxPairSequenceOnLabels = dto.showBoxPairSequenceOnLabels;
     if (dto.leftoverAgeMonths !== undefined)

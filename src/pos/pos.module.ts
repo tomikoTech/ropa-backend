@@ -23,6 +23,7 @@ import { PurchaseBoxLine } from '../purchases/entities/purchase-box-line.entity.
 import { StockUnitContent } from '../inventory/entities/stock-unit-content.entity.js';
 import { StockUnitEvent } from '../inventory/entities/stock-unit-event.entity.js';
 import { StockLedgerModule } from '../inventory/ledger/stock-ledger.module.js';
+import { ReposicionAutomaticaModule } from '../inventory/reposicion-automatica.module.js';
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { StockLedgerModule } from '../inventory/ledger/stock-ledger.module.js';
     ]),
     ClientsModule,
     StockLedgerModule,
+    ReposicionAutomaticaModule,
   ],
   controllers: [PosController],
   providers: [

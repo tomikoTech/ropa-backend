@@ -81,6 +81,14 @@ export class UpdateProductDto {
   @Min(0)
   minimumSalePrice?: number | null;
 
+  @ApiPropertyOptional({
+    description:
+      'El precio no se negocia: ni se sube, ni se baja, ni admite descuento.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  fixedPrice?: boolean;
+
   @ApiPropertyOptional({ enum: Gender })
   @IsOptional()
   @IsEnum(Gender)
@@ -185,5 +193,4 @@ export class UpdateProductDto {
   @IsOptional()
   @IsBoolean()
   unitTracking?: boolean;
-
 }

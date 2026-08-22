@@ -149,7 +149,9 @@ export class ScanService {
               size: row.size?.name ?? '',
               quantity: Number(row.actualQuantity),
             }))
-            .sort((a, b) => a.size.localeCompare(b.size, 'es', { numeric: true }))
+            .sort((a, b) =>
+              a.size.localeCompare(b.size, 'es', { numeric: true }),
+            )
         : [];
 
       return {
@@ -247,7 +249,10 @@ export class ScanService {
       stockUnitId: null,
       kind: null,
       available,
-      warehouseId: looseStocks.find((stock) => stock.quantity > 0)?.warehouseId ?? stocks[0]?.warehouseId ?? null,
+      warehouseId:
+        looseStocks.find((stock) => stock.quantity > 0)?.warehouseId ??
+        stocks[0]?.warehouseId ??
+        null,
       minimumSalePrice: variant.product?.minimumSalePrice
         ? Number(variant.product.minimumSalePrice)
         : null,
