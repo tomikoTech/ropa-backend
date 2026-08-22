@@ -51,6 +51,16 @@ export class SaleItem extends TenantAwareEntity {
   stockUnitId: string | null;
 
   /**
+   * Los códigos de los pares que se llevó esta línea. **No es una columna.**
+   *
+   * `stockUnitId` solo existe cuando el cajero escaneó, y guarda uno solo; una
+   * línea de dos pares se lleva dos códigos. Se calculan al pedir el detalle,
+   * leyendo los movimientos de inventario que dejó la venta —que es donde el
+   * ledger los anota— para no duplicar el dato en dos sitios.
+   */
+  unitBarcodes?: string[] | null;
+
+  /**
    * Qué se vendió: una caja cerrada, un par etiquetado, o nada de eso.
    *
    * Es un snapshot y no una consulta al bulto a propósito: la caja se abre,

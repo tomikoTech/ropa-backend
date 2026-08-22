@@ -29,6 +29,14 @@ export interface ScanResult {
    * el suyo—; en un producto suelto es el de la variante.
    */
   barcode: string | null;
+  /**
+   * El código de la variante, cuando el escaneado fue el de un bulto.
+   *
+   * Los dos sirven y para cosas distintas: el del bulto encuentra **esa** caja
+   * y el de la variante dice qué modelo y qué talla es. En pantalla se
+   * muestran los dos porque el cajero pregunta las dos cosas.
+   */
+  variantBarcode: string | null;
   size: string;
   color: string;
   /**
@@ -152,6 +160,7 @@ export class ScanService {
         // El del bulto, no el de la variante: es el que está pegado en esa
         // caja concreta y el que se vuelve a escanear para encontrarla.
         barcode: unit.barcode,
+        variantBarcode: unit.variant?.barcode ?? null,
         categoryId: unit.product?.categoryId ?? null,
         taxRate: Number(unit.product?.taxRate ?? 19),
         imageUrl: unit.product?.imageUrl ?? null,
@@ -221,6 +230,10 @@ export class ScanService {
       productId: variant.productId,
       sku: variant.sku,
       barcode: variant.barcode ?? null,
+      // Un producto suelto no tiene bulto: el de la variante es el único que
+      // hay, y va en los dos campos para que quien lo pinte no tenga que
+      // preguntar de dónde vino.
+      variantBarcode: variant.barcode ?? null,
       categoryId: variant.product?.categoryId ?? null,
       taxRate: Number(variant.product?.taxRate ?? 19),
       imageUrl: variant.product?.imageUrl ?? null,

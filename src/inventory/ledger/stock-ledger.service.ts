@@ -924,6 +924,11 @@ export class StockLedgerService {
       variantId: orden.variantId,
       warehouseId: orden.warehouseId,
       tenantId: orden.tenantId,
+      // Qué pares se movieron, no solo cuántos: es el código que va impreso en
+      // la caja y el único que sirve para ir a buscarla.
+      unitBarcodes: contexto.unidades.length
+        ? contexto.unidades.map((u) => u.barcode)
+        : null,
       movementType:
         orden.dejarEn !== undefined
           ? MovementType.ADJUSTMENT

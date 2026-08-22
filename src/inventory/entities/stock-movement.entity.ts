@@ -57,6 +57,20 @@ export class StockMovement extends TenantAwareEntity {
   @Column({ nullable: true })
   notes: string;
 
+  /**
+   * Los códigos de los pares o cajas que movió esta operación.
+   *
+   * Es el código impreso en la caja, el que la tienda busca en la bodega. El
+   * de la variante ya está en el producto y es el mismo para todos los pares
+   * de esa talla: para saber **cuál** se fue, hace falta este.
+   *
+   * Nulo cuando el producto no lleva seguimiento por unidad (una perfumería
+   * que vende por gramos) o cuando el agregado iba por delante de las
+   * etiquetas —eso último queda además dicho en `notes`—.
+   */
+  @Column({ name: 'unit_barcodes', type: 'text', array: true, nullable: true })
+  unitBarcodes: string[] | null;
+
   @ManyToOne(() => User, { nullable: true })
   @JoinColumn({ name: 'created_by' })
   createdBy: User;

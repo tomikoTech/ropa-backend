@@ -111,6 +111,14 @@ export interface MovimientoConContexto {
    */
   productCode: string | null;
   barcode: string | null;
+  /**
+   * Los códigos de los pares concretos que se movieron.
+   *
+   * `barcode` es el de la variante: identifica el modelo, la talla y el color,
+   * y es **el mismo** para todos los pares iguales. Estos son los que van
+   * impresos en cada caja, y son los que sirven para ir a buscarla.
+   */
+  unitBarcodes: string[] | null;
   variantLabel: string;
   warehouseName: string;
   referenceType: string | null;
@@ -1487,6 +1495,7 @@ export class InventoryService {
       variantSku: m.variant?.sku ?? '',
       productCode: m.variant?.product?.skuPrefix ?? null,
       barcode: m.variant?.barcode ?? null,
+      unitBarcodes: m.unitBarcodes?.length ? m.unitBarcodes : null,
       variantLabel:
         [m.variant?.size, m.variant?.color].filter(Boolean).join(' / ') || '',
       warehouseName: m.warehouse?.name ?? '',
@@ -1653,6 +1662,8 @@ export class InventoryService {
         variantId: m.variantId,
         variantSku: m.variant?.sku ?? null,
         barcode: m.variant?.barcode ?? null,
+        // Los pares concretos que se movieron, no solo el código del modelo.
+        unitBarcodes: m.unitBarcodes?.length ? m.unitBarcodes : null,
         variantLabel: [m.variant?.size, m.variant?.color]
           .filter(Boolean)
           .join(' / '),

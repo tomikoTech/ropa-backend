@@ -710,6 +710,10 @@ export class PosService {
       }),
     );
 
+    // Los pares que se llevó, para que salgan en el papel que se imprime al
+    // cobrar y no solo al abrir la factura después.
+    await this.adjuntarCodigosDeLosPares([fullSale], tenantId);
+
     // Send invoice email asynchronously (fire-and-forget)
     if (fullSale.client?.email) {
       const settings = await this.storeSettingsRepo.findOne({
@@ -945,6 +949,10 @@ export class PosService {
         })
       : [];
 
+    // El listado abre el detalle con la fila que ya tiene: si los códigos no
+    // vienen aquí, la factura en pantalla no los muestra nunca.
+    await this.adjuntarCodigosDeLosPares(data, tenantId);
+
     return {
       data,
       total,
@@ -972,7 +980,67 @@ export class PosService {
     if (!sale) {
       throw new NotFoundException('Venta no encontrada');
     }
+    await this.adjuntarCodigosDeLosPares([sale], tenantId);
     return sale;
+  }
+
+  /**
+   * Qué pares concretos se llevó cada línea de la factura.
+   *
+   * El código que la línea guarda es el de la **variante**: identifica el
+   * modelo, la talla y el color, y es el mismo para todos los pares iguales.
+   * La tienda necesita el otro —el que va impreso en la caja— para saber cuál
+   * de los dos pares idénticos salió con esta factura.
+   *
+   * Se lee de los movimientos de inventario, que es donde el ledger anota los
+   * bultos que movió. Guardarlo también en la línea sería tener el mismo dato
+   * en dos sitios, y tarde o temprano uno de los dos miente.
+   */
+  private async adjuntarCodigosDeLosPares(
+    ventas: Sale[],
+    tenantId: string,
+  ): Promise<void> {
+    const conLineas = ventas.filter((venta) => venta.items?.length);
+    if (!conLineas.length) return;
+
+    // Una sola consulta para toda la página: el listado abre el detalle con la
+    // fila que ya tiene en memoria, así que si esto fuera por venta, ver
+    // Ventas dispararía una consulta por cada factura de la página.
+    const filas: { sale_id: string; variant_id: string; barcode: string }[] =
+      await this.dataSource.query(
+        `SELECT m.reference_id AS sale_id, m.variant_id,
+                UNNEST(m.unit_barcodes) AS barcode
+           FROM stock_movements m
+          WHERE m.reference_id = ANY($1::text[])
+            AND m.tenant_id = $2
+            AND m.reference_type = 'SALE'
+            AND m.unit_barcodes IS NOT NULL`,
+        [conLineas.map((venta) => venta.id), tenantId],
+      );
+    if (!filas.length) return;
+
+    const porVenta = new Map<string, Map<string, string[]>>();
+    for (const fila of filas) {
+      const porVariante =
+        porVenta.get(fila.sale_id) ?? new Map<string, string[]>();
+      const lista = porVariante.get(fila.variant_id);
+      if (lista) lista.push(fila.barcode);
+      else porVariante.set(fila.variant_id, [fila.barcode]);
+      porVenta.set(fila.sale_id, porVariante);
+    }
+
+    // Se reparten en orden entre las líneas de esa variante: si la factura
+    // trae la misma referencia dos veces —distinto impulsador, distinto
+    // descuento—, a cada una le tocan tantos códigos como unidades vendió.
+    for (const venta of conLineas) {
+      const porVariante = porVenta.get(venta.id);
+      if (!porVariante) continue;
+      for (const item of venta.items) {
+        const disponibles = porVariante.get(item.variantId);
+        if (!disponibles?.length) continue;
+        item.unitBarcodes = disponibles.splice(0, item.quantity);
+      }
+    }
   }
 
   /**
