@@ -50,6 +50,21 @@ export class ProductsService {
   // Crea un "Frasco {nombre}" en la categoría Frascos, con una variante y
   // stock 0 en la bodega FRASCOS, y lo vincula a la loción. Devuelve el
   // variantId del frasco (o null si no existe la categoría Frascos).
+  /**
+   * ¿Esta tienda trabaja con un código por par?
+   *
+   * Decide si un producto nuevo nace con seguimiento por unidad. Sin esto, en
+   * una importadora de calzado se colaban productos sin etiqueta y sus ventas
+   * dejaban el inventario descuadrado en silencio.
+   */
+  private async tiendaUsaCodigos(tenantId: string): Promise<boolean> {
+    const ajustes = await this.storeSettingsRepo.findOne({
+      where: { tenantId },
+      select: ['id', 'unitTrackingEnabled'],
+    });
+    return !!ajustes?.unitTrackingEnabled;
+  }
+
   private async createFrascoForProduct(
     locion: Product,
     tenantId: string,
@@ -423,7 +438,10 @@ export class ProductsService {
         imageUrl: dto.imageUrl || dto.imageUrls?.[0],
         imageUrls: dto.imageUrls ?? [],
         videoUrl: dto.videoUrl,
-        unitTracking: dto.unitTracking ?? false,
+        // Por defecto, lo que haga la tienda: si trabaja con códigos por par,
+        // un producto nuevo también los lleva. Dejarlo en `false` era como se
+        // colaban productos sin etiqueta en una tienda que sí las usa.
+        unitTracking: dto.unitTracking ?? (await this.tiendaUsaCodigos(tenantId)),
         tenantId,
       });
 

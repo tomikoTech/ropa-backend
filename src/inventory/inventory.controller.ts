@@ -21,6 +21,7 @@ import { UpdateWarehouseDto } from './dto/update-warehouse.dto.js';
 import { AdjustStockDto } from './dto/adjust-stock.dto.js';
 import { parsePositiveInt } from '../common/utils/query-number.util.js';
 import { TransferStockDto } from './dto/transfer-stock.dto.js';
+import { StockIntegrityService } from './ledger/stock-integrity.service.js';
 import {
   CloseTransferDto,
   ReturnTransferDto,
@@ -37,6 +38,7 @@ import { AccessService } from '../access/access.service.js';
 export class InventoryController {
   constructor(
     private readonly inventoryService: InventoryService,
+    private readonly integridad: StockIntegrityService,
     private readonly access: AccessService,
   ) {}
 
@@ -163,6 +165,15 @@ export class InventoryController {
   ) {
     // La bodega la valida `WarehouseScopeGuard` (F8).
     return this.inventoryService.adjustStock(dto, user.id, tenantId);
+  }
+
+  @Get('integridad')
+  @ApiOperation({
+    summary:
+      'Descuadre entre el inventario agregado y los códigos: qué no cuadra y por cuánto',
+  })
+  revisarIntegridad(@TenantId() tenantId: string) {
+    return this.integridad.revisar(tenantId);
   }
 
   // ─── Transfers ───
