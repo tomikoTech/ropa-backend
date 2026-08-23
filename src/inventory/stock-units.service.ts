@@ -25,11 +25,7 @@ import { SizeCurveItem } from '../catalogs/entities/size-curve-item.entity.js';
 import { ProductVariant } from '../products/entities/product-variant.entity.js';
 import { MovementType } from '../common/enums/movement-type.enum.js';
 import { PurchaseOrderStatus } from '../common/enums/purchase-order-status.enum.js';
-import {
-  BARCODE_LIMITS,
-  buildStockBarcode,
-  withCheckDigit,
-} from './barcode.util.js';
+import { buildStockBarcode, withCheckDigit } from './barcode.util.js';
 import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
 import { StockUnitContent } from './entities/stock-unit-content.entity.js';
 import {
@@ -411,58 +407,50 @@ export class StockUnitsService {
         );
 
         const today = new Date();
-        const lineConsecutive = await this.nextIntakeConsecutive(
+        // El mismo reparto que usa el ledger, y por el mismo motivo: cada
+        // ingreso se llevaba un renglón entero aunque metiera una sola caja,
+        // así que el día se acababa a los 999 ingresos con los 999 puestos de
+        // cada renglón vacíos. Y un ingreso de más de 999 cajas ya no hay que
+        // partirlo a mano: se reparte solo.
+        const tramos = await this.ledger.reservarEtiquetas(
+          m,
           today,
           tenantId,
-          m,
+          dto.boxes,
         );
-        const barcodePrefix = buildStockBarcode({
-          date: today,
-          orderSequence: INTAKE_ORDER_SEQUENCE,
-          lineConsecutive,
-          unitSequence: 0,
-        }).slice(0, 13);
-        let barcodeSequence = await this.nextUnitSequence(
-          null,
-          barcodePrefix,
-          tenantId,
-          m,
-        );
-        if (barcodeSequence + dto.boxes - 1 > BARCODE_LIMITS.unit) {
-          throw new BadRequestException(
-            `Un ingreso admite hasta ${BARCODE_LIMITS.unit} cajas. Divídelo en varios.`,
-          );
-        }
 
         const unitRepo = m.getRepository(StockUnit);
         const units: StockUnit[] = [];
-        for (let i = 0; i < dto.boxes; i++) {
-          const body = buildStockBarcode({
-            date: today,
-            orderSequence: INTAKE_ORDER_SEQUENCE,
-            lineConsecutive,
-            unitSequence: barcodeSequence,
-          });
-          barcodeSequence++;
-          units.push(
-            unitRepo.create({
-              barcode: withCheckDigit(body),
-              kind: StockUnitKind.BOX,
-              status: StockUnitStatus.IN_STOCK,
-              productId: dto.productId,
-              variantId: variant.id,
-              colorId: dto.colorId ?? null,
-              sizeId: null,
-              warehouseId: dto.warehouseId,
-              standId: dto.standId ?? null,
-              quantity: unitsPerBox,
-              cost: dto.unitCost ?? 0,
-              purchaseBoxLineId: null,
-              boxSequence: i + 1,
-              pairSequence: null,
-              tenantId,
-            }),
-          );
+        let indiceDeCaja = 0;
+        for (const tramo of tramos) {
+          for (let j = 0; j < tramo.cuantas; j++) {
+            const body = buildStockBarcode({
+              date: today,
+              orderSequence: INTAKE_ORDER_SEQUENCE,
+              lineConsecutive: tramo.renglon,
+              unitSequence: tramo.desdeUnidad + j,
+            });
+            indiceDeCaja++;
+            units.push(
+              unitRepo.create({
+                barcode: withCheckDigit(body),
+                kind: StockUnitKind.BOX,
+                status: StockUnitStatus.IN_STOCK,
+                productId: dto.productId,
+                variantId: variant.id,
+                colorId: dto.colorId ?? null,
+                sizeId: null,
+                warehouseId: dto.warehouseId,
+                standId: dto.standId ?? null,
+                quantity: unitsPerBox,
+                cost: dto.unitCost ?? 0,
+                purchaseBoxLineId: null,
+                boxSequence: indiceDeCaja,
+                pairSequence: null,
+                tenantId,
+              }),
+            );
+          }
         }
         const saved = await unitRepo.save(units);
 
@@ -649,44 +637,6 @@ export class StockUnitsService {
         where: { id: In(units.map((u) => u.id)), tenantId },
       });
     });
-  }
-
-  /**
-   * Consecutivo del ingreso directo dentro del día.
-   *
-   * Los ingresos sin compra comparten el tramo de orden (`0000`), así que lo
-   * que los separa es este número: sin él, dos ingresos del mismo día
-   * chocarían de código desde la primera caja.
-   */
-  private async nextIntakeConsecutive(
-    date: Date,
-    tenantId: string,
-    manager: EntityManager,
-  ): Promise<number> {
-    const dayPrefix = buildStockBarcode({
-      date,
-      orderSequence: INTAKE_ORDER_SEQUENCE,
-      lineConsecutive: 0,
-      unitSequence: 0,
-    }).slice(0, 10);
-    const rows = await manager
-      .getRepository(StockUnit)
-      .createQueryBuilder('unit')
-      .select('unit.barcode', 'barcode')
-      .where('unit.tenantId = :tenantId', { tenantId })
-      .andWhere('unit.barcode LIKE :prefix', { prefix: `${dayPrefix}%` })
-      .getRawMany<{ barcode: string }>();
-    let max = 0;
-    for (const row of rows) {
-      const consecutive = Number(row.barcode.slice(10, 13));
-      if (!Number.isNaN(consecutive) && consecutive > max) max = consecutive;
-    }
-    if (max + 1 > BARCODE_LIMITS.line) {
-      throw new BadRequestException(
-        `Hoy ya se hicieron ${BARCODE_LIMITS.line} ingresos de cajas. Continúa mañana o registra la mercancía como compra.`,
-      );
-    }
-    return max + 1;
   }
 
   /**

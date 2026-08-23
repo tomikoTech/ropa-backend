@@ -26,8 +26,11 @@ import {
   ConsecutivoAgotadoError,
   explicarConsecutivoAgotado,
   prefijoDelDia,
-  siguienteConsecutivoDelDia,
 } from '../consecutivo-del-dia.js';
+import {
+  repartirEtiquetasDelDia,
+  type TramoDeEtiquetas,
+} from '../reparto-de-etiquetas.js';
 
 /**
  * El único sitio por donde se mueve el inventario.
@@ -827,9 +830,14 @@ export class StockLedgerService {
 
     const repo = manager.getRepository(StockUnit);
     const hoy = new Date();
-    let consecutivo: number;
+    let tramos: TramoDeEtiquetas[];
     try {
-      consecutivo = await this.siguienteConsecutivo(manager, hoy, orden.tenantId);
+      tramos = await this.reservarEtiquetas(
+        manager,
+        hoy,
+        orden.tenantId,
+        cantidad,
+      );
     } catch (error) {
       // Se acabaron los códigos del día. Es una condición del negocio, no una
       // falla del servidor: salía como 500 «Error interno del servidor» y el
@@ -840,30 +848,33 @@ export class StockLedgerService {
       }
       throw error;
     }
+
     const nuevas: StockUnit[] = [];
-    for (let i = 0; i < cantidad; i++) {
-      nuevas.push(
-        repo.create({
-          barcode: withCheckDigit(
-            buildStockBarcode({
-              date: hoy,
-              // Tramo reservado para lo que entra sin orden de compra.
-              orderSequence: 0,
-              lineConsecutive: consecutivo,
-              unitSequence: i + 1,
-            }),
-          ),
-          kind: StockUnitKind.UNIT,
-          status: StockUnitStatus.IN_STOCK,
-          productId: variante.productId,
-          variantId: variante.id,
-          sizeId: variante.sizeId,
-          colorId: variante.colorId,
-          warehouseId: orden.warehouseId,
-          quantity: 1,
-          tenantId: orden.tenantId,
-        }),
-      );
+    for (const tramo of tramos) {
+      for (let i = 0; i < tramo.cuantas; i++) {
+        nuevas.push(
+          repo.create({
+            barcode: withCheckDigit(
+              buildStockBarcode({
+                date: hoy,
+                // Tramo reservado para lo que entra sin orden de compra.
+                orderSequence: 0,
+                lineConsecutive: tramo.renglon,
+                unitSequence: tramo.desdeUnidad + i,
+              }),
+            ),
+            kind: StockUnitKind.UNIT,
+            status: StockUnitStatus.IN_STOCK,
+            productId: variante.productId,
+            variantId: variante.id,
+            sizeId: variante.sizeId,
+            colorId: variante.colorId,
+            warehouseId: orden.warehouseId,
+            quantity: 1,
+            tenantId: orden.tenantId,
+          }),
+        );
+      }
     }
     const guardadas = await repo.save(nuevas);
     await this.anotarEventos(
@@ -875,9 +886,8 @@ export class StockLedgerService {
     return guardadas.map((u) => ({ id: u.id, barcode: u.barcode }));
   }
 
-  /** El siguiente renglón del día para lo que entra sin orden de compra. */
   /**
-   * El consecutivo del día para la mercancía que entra sin orden de compra.
+   * Dónde caben las etiquetas del día para lo que entra sin orden de compra.
    *
    * Dos cuidados, los dos aprendidos por las malas:
    *
@@ -886,8 +896,8 @@ export class StockLedgerService {
    *    impresos en las cajas y no se pueden cambiar—. Antes se contaba
    *    cualquier código que empezara igual, así que uno ajeno empujaba el
    *    número hacia arriba y al pasar de 999 la tienda se quedaba sin poder
-   *    etiquetar el resto del día. La regla está en `consecutivo-del-dia.ts`
-   *    y se prueba sin base de datos.
+   *    etiquetar el resto del día. La regla está en
+   *    `reparto-de-etiquetas.ts` y se prueba sin base de datos.
    *
    * 2. **Un candado por tienda y día.** Dos ingresos simultáneos leían el
    *    mismo máximo y armaban el mismo código; el índice único lo atajaba,
@@ -896,11 +906,18 @@ export class StockLedgerService {
    *    serializa a quien está creando etiquetas ese mismo día en esa misma
    *    tienda.
    */
-  private async siguienteConsecutivo(
+  /**
+   * Público a propósito: `stock-units.service` numera sus cajas con el mismo
+   * pozo del día, y tener dos copias del candado y de la consulta fue justo lo
+   * que dejó a los dos caminos con topes distintos y con un filtro de códigos
+   * ajenos en uno solo.
+   */
+  async reservarEtiquetas(
     manager: EntityManager,
     fecha: Date,
     tenantId: string,
-  ): Promise<number> {
+    cantidad: number,
+  ): Promise<TramoDeEtiquetas[]> {
     const prefijo = prefijoDelDia(fecha);
     await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
       `codigos:${tenantId}:${prefijo}`,
@@ -912,9 +929,10 @@ export class StockLedgerService {
       .where('u.tenantId = :tenantId', { tenantId })
       .andWhere('u.barcode LIKE :prefijo', { prefijo: `${prefijo}%` })
       .getRawMany<{ barcode: string }>();
-    return siguienteConsecutivoDelDia(
+    return repartirEtiquetasDelDia(
       filas.map((f) => f.barcode),
       fecha,
+      cantidad,
     );
   }
 
