@@ -40,6 +40,7 @@ import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
 import { Role } from '../common/enums/role.enum.js';
 import { Gender } from '../common/enums/gender.enum.js';
 import { MovementType } from '../common/enums/movement-type.enum.js';
+import { esHostLocal } from '../common/utils/host-local.js';
 
 dotenv.config();
 
@@ -125,7 +126,7 @@ async function main() {
   );
 
   const host = process.env.DB_HOST || 'localhost';
-  const isLocal = host === 'localhost' || host === '127.0.0.1';
+  const isLocal = esHostLocal(host);
   const dataSource = new DataSource({
     type: 'postgres',
     host,
@@ -143,6 +144,12 @@ async function main() {
       Stock,
       StockMovement,
       StoreSettings,
+      // `ProductVariant` gana relaciones con los catálogos de talla y color
+      // después de que esta migración corriera la primera vez. Sin ellas,
+      // TypeORM ni siquiera levanta: «Entity metadata for
+      // ProductVariant#sizeRef was not found».
+      Size,
+      Color,
     ],
     synchronize: isLocal, // en local crea las columnas nuevas (brand, source_ref); en prod NO
     ...(!isLocal && { ssl: { rejectUnauthorized: false } }),

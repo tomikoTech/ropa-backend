@@ -20,6 +20,7 @@ import * as dotenv from 'dotenv';
 import { Size } from '../catalogs/entities/size.entity.js';
 import { Color } from '../catalogs/entities/color.entity.js';
 import { deriveSortOrder } from '../catalogs/sizes.service.js';
+import { esHostLocal } from '../common/utils/host-local.js';
 
 dotenv.config();
 
@@ -27,7 +28,7 @@ const DRY_RUN = process.env.DRY_RUN === '1';
 
 function buildDataSource(): DataSource {
   const host = process.env.DB_HOST || 'localhost';
-  const isLocal = host === 'localhost' || host === '127.0.0.1';
+  const isLocal = esHostLocal(host);
   return new DataSource({
     type: 'postgres',
     host,

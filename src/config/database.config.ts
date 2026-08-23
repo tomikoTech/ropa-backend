@@ -1,13 +1,12 @@
 import { TypeOrmModuleOptions } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
+import { esHostLocal } from '../common/utils/host-local.js';
 
 export const getDatabaseConfig = (
   configService: ConfigService,
 ): TypeOrmModuleOptions => {
   const host = configService.get<string>('database.host') || 'localhost';
-  // Un socket de Unix (`/tmp`) cuenta como local.
-  const isLocal =
-    host === 'localhost' || host === '127.0.0.1' || host.startsWith('/');
+  const isLocal = esHostLocal(host);
   const dbSsl = configService.get<string>('DB_SSL');
   // `DB_SSL=false` manda: contra un Postgres sin TLS, forzar SSL tumba el arranque.
   const sslEnabled = dbSsl === 'false' ? false : dbSsl === 'true' || !isLocal;

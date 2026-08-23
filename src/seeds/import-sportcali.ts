@@ -37,6 +37,7 @@ import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
 import { Role } from '../common/enums/role.enum.js';
 import { Gender } from '../common/enums/gender.enum.js';
 import { MovementType } from '../common/enums/movement-type.enum.js';
+import { esHostLocal } from '../common/utils/host-local.js';
 
 dotenv.config();
 
@@ -119,10 +120,7 @@ async function main() {
   console.log(`  productos=${payload.products.length} bodegas=${payload.warehouses.length} staff=${payload.staff.length}`);
 
   const host = process.env.DB_HOST || 'localhost';
-  // Un socket Unix ('/tmp') siempre es local: en esta máquina Postgres no
-  // responde por TCP, así que sin esto las pruebas locales intentaban SSL.
-  const isLocal =
-    host === 'localhost' || host === '127.0.0.1' || host.startsWith('/');
+  const isLocal = esHostLocal(host);
   const dataSource = new DataSource({
     type: 'postgres',
     host,

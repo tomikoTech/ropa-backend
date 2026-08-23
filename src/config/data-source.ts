@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { DataSource } from 'typeorm';
+import { esHostLocal } from '../common/utils/host-local.js';
 
 // DataSource standalone para el CLI de TypeORM (migration:generate/run/revert).
 // La app en runtime usa getDatabaseConfig (TypeOrmModule.forRootAsync); este
@@ -7,11 +8,7 @@ import { DataSource } from 'typeorm';
 const host = process.env.DB_HOST || 'localhost';
 const databaseUrl =
   process.env.DATABASE_PUBLIC_URL || process.env.DATABASE_URL || undefined;
-// Un socket de Unix (`/tmp`) también es local: es como se conecta Postgres en
-// una Mac de desarrollo.
-const isLocal =
-  !databaseUrl &&
-  (host === 'localhost' || host === '127.0.0.1' || host.startsWith('/'));
+const isLocal = esHostLocal(host, databaseUrl);
 // `DB_SSL=false` manda: sin esto no había forma de apagar SSL a mano, y contra
 // un Postgres local sin TLS la conexión moría con "server does not support SSL".
 const sslEnabled =

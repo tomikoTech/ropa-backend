@@ -33,6 +33,7 @@ import {
   buildReconciliationConfirmation,
   LegacyPhysicalUnit,
   previewPhysicalUnitImport,
+  repartirPorExclusion,
   revisarSalvaguardas,
 } from './codigos-fisicos.util.js';
 
@@ -119,20 +120,17 @@ async function main() {
     });
     if (!tenant) throw new Error(`No existe el tenant ${slug} en MiPinta.`);
 
-    const excludedSourceCodes = new Set(
-      (process.env.EXCLUDE_SOURCE_CODES ?? '')
-        .split(',')
-        .map((code) => code.trim())
-        .filter(Boolean),
-    );
-    const excludedRows = document.stock_units.filter(
-      (row) =>
-        row.product_code && excludedSourceCodes.has(row.product_code.trim()),
-    );
-    const importRows = document.stock_units.filter(
-      (row) =>
-        !row.product_code || !excludedSourceCodes.has(row.product_code.trim()),
-    );
+    // Dos formas de dejar filas fuera, y las dos exigen `EXCLUSION_REASON`:
+    // por referencia (`EXCLUDE_SOURCE_CODES`) y por código exacto
+    // (`EXCLUDE_BARCODES`). La segunda existe porque una sola fila mala en
+    // 2.742 no puede costar los otros nueve pares buenos de su referencia.
+    const lista = (nombre: string) =>
+      (process.env[nombre] ?? '').split(',').map((v) => v.trim());
+    const { entran: importRows, quedanFuera: excludedRows } =
+      repartirPorExclusion(document.stock_units, {
+        referencias: lista('EXCLUDE_SOURCE_CODES'),
+        codigos: lista('EXCLUDE_BARCODES'),
+      });
 
     const [products, warehouses, existing, aggregateStock] = await Promise.all([
       AppDataSource.getRepository(Product).find({
@@ -231,7 +229,8 @@ async function main() {
       tenant: { id: tenant.id, slug: tenant.slug },
       source: document.meta,
       exclusions: {
-        sourceCodes: [...excludedSourceCodes],
+        sourceCodes: lista('EXCLUDE_SOURCE_CODES').filter(Boolean),
+        barcodes: lista('EXCLUDE_BARCODES').filter(Boolean),
         rows: excludedRows.length,
         physicalQuantity: excludedRows.reduce(
           (sum, row) => sum + row.quantity,

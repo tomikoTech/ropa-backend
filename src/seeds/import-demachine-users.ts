@@ -58,6 +58,7 @@ import {
   type ModulePermission,
 } from '../access/role-templates.js';
 import { MODULE_KEYS } from '../access/module-registry.js';
+import { esHostLocal } from '../common/utils/host-local.js';
 
 dotenv.config();
 
@@ -149,8 +150,7 @@ async function main() {
   const payload = JSON.parse(fs.readFileSync(PAYLOAD, 'utf8')) as Payload;
 
   const host = process.env.DB_HOST || 'localhost';
-  const isLocal =
-    host === 'localhost' || host === '127.0.0.1' || host.startsWith('/');
+  const isLocal = esHostLocal(host);
   const ds = new DataSource({
     type: 'postgres',
     host,

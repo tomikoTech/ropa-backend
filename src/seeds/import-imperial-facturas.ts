@@ -54,6 +54,7 @@ import { SaleStatus } from '../common/enums/sale-status.enum.js';
 import { SaleChannel } from '../common/enums/sale-channel.enum.js';
 import { PaymentMethod } from '../common/enums/payment-method.enum.js';
 import { diaDeCalendario } from '../common/utils/dia-de-calendario.util.js';
+import { esHostLocal } from '../common/utils/host-local.js';
 
 dotenv.config();
 
@@ -110,7 +111,7 @@ async function main() {
   const payload: Payload = JSON.parse(fs.readFileSync(payloadPath, 'utf8'));
 
   const host = process.env.DB_HOST || 'localhost';
-  const isLocal = host === 'localhost' || host === '127.0.0.1';
+  const isLocal = esHostLocal(host);
   const ds = new DataSource({
     type: 'postgres',
     host,

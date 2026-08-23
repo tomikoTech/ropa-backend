@@ -509,3 +509,42 @@ export function revisarSalvaguardas(params: {
     );
   }
 }
+
+/**
+ * Qué filas se dejan fuera de la importación.
+ *
+ * Antes solo se podía excluir por **referencia**. Cuando en 2.742 códigos de
+ * Sportcali apareció **una sola** fila mala —un par sin talla, error de
+ * captura en demachine—, las opciones eran tirar los diez pares buenos de esa
+ * referencia o dejar los 2.741 sin importar, porque el guardián no deja
+ * aplicar con conflictos. Bajarle al guardián no era opción: importar «casi
+ * todo» deja un inventario a medias que nadie sabe leer.
+ *
+ * Ahora también se excluye el código exacto. Las dos formas exigen igual una
+ * razón escrita (`EXCLUSION_REASON`), que es lo que queda para leer dentro de
+ * seis meses.
+ */
+export function repartirPorExclusion<
+  T extends { barcode: string; product_code: string | null },
+>(
+  filas: T[],
+  excluir: { referencias: string[]; codigos: string[] },
+): { entran: T[]; quedanFuera: T[] } {
+  const limpiar = (v: string | null | undefined) => (v ?? '').trim();
+  // Lo que se pega desde una hoja de cálculo trae espacios alrededor.
+  const referencias = new Set(excluir.referencias.map(limpiar).filter(Boolean));
+  const codigos = new Set(excluir.codigos.map(limpiar).filter(Boolean));
+  const entran: T[] = [];
+  const quedanFuera: T[] = [];
+  for (const fila of filas) {
+    // No hace falta preguntar si la referencia está vacía: el `.filter(Boolean)`
+    // de arriba ya impide que la cadena vacía entre al conjunto.
+    const porReferencia = referencias.has(limpiar(fila.product_code));
+    const porCodigo = codigos.has(limpiar(fila.barcode));
+    // Una sola vez aunque coincida por las dos: si se contara dos veces, el
+    // total del reporte no cuadraría con las filas.
+    if (porReferencia || porCodigo) quedanFuera.push(fila);
+    else entran.push(fila);
+  }
+  return { entran, quedanFuera };
+}
