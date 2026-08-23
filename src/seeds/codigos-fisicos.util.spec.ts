@@ -293,3 +293,87 @@ describe('el prefijo de procedencia es el de la tienda que se está importando',
     expect(preview.issues[0].message).toContain('demachine:sportcali:47');
   });
 });
+
+describe('una caja que ya existe no cambia por el catálogo', () => {
+  const caja = () =>
+    row({ quantity: 24, size: null, product_source_id: 47, color: 'FUCSIA' });
+
+  it('no se reporta conflicto porque la caja se ate a otra variante', () => {
+    // Una caja no tiene talla, así que se cuelga de **cualquiera** de las
+    // variantes de su color: la de id más bajo. Es una elección arbitraria, no
+    // un hecho de la caja.
+    //
+    // Al agregarle tallas al producto —conciliando contra demachine, que es la
+    // fuente— esa elección cambia, y nueve cajas de AMAWAD que llevaban meses
+    // importadas salieron como «el código ya existe con atributos
+    // diferentes». No había cambiado nada de la caja física.
+    const yaImportada: ExistingPhysicalUnit = {
+      id: 'unidad-1',
+      barcode: '260412000500200103',
+      productId: 'product-1',
+      variantId: 'variant-41', // la que se eligió cuando se importó
+      colorId: 'color-fucsia',
+      sizeId: null,
+      warehouseId: 'warehouse-1',
+      kind: StockUnitKind.BOX,
+      status: StockUnitStatus.IN_STOCK,
+      quantity: 24,
+      cost: 70,
+    };
+    const preview = previewPhysicalUnitImport({
+      ...catalog,
+      rows: [caja()],
+      existing: [yaImportada],
+    });
+    expect(preview.issues).toEqual([]);
+    expect(preview.summary.alreadyImported).toBe(1);
+  });
+
+  it('pero un cambio de verdad sí se reporta', () => {
+    // El producto sí importa: una caja que aparece colgada de otra referencia
+    // es un error que hay que ver.
+    const otra: ExistingPhysicalUnit = {
+      id: 'unidad-1',
+      barcode: '260412000500200103',
+      productId: 'otro-producto',
+      variantId: 'variant-41',
+      colorId: 'color-fucsia',
+      sizeId: null,
+      warehouseId: 'warehouse-1',
+      kind: StockUnitKind.BOX,
+      status: StockUnitStatus.IN_STOCK,
+      quantity: 24,
+      cost: 70,
+    };
+    const preview = previewPhysicalUnitImport({
+      ...catalog,
+      rows: [caja()],
+      existing: [otra],
+    });
+    expect(preview.issues[0].code).toBe('EXISTING_BARCODE_CONFLICT');
+  });
+
+  it('y en un par suelto la variante sigue mandando', () => {
+    // Un par sí tiene talla: si cambió de variante, cambió de talla, y eso es
+    // un error real.
+    const parSuelto: ExistingPhysicalUnit = {
+      id: 'unidad-2',
+      barcode: '260412000500200103',
+      productId: 'product-1',
+      variantId: 'variant-41',
+      colorId: 'color-fucsia',
+      sizeId: 'size-41',
+      warehouseId: 'warehouse-1',
+      kind: StockUnitKind.UNIT,
+      status: StockUnitStatus.IN_STOCK,
+      quantity: 1,
+      cost: 70,
+    };
+    const preview = previewPhysicalUnitImport({
+      ...catalog,
+      rows: [row({ size: '40' })],
+      existing: [parSuelto],
+    });
+    expect(preview.issues[0].code).toBe('EXISTING_BARCODE_CONFLICT');
+  });
+});

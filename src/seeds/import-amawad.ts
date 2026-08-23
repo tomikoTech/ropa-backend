@@ -20,7 +20,7 @@
  *     node dist/seeds/import-amawad.js                              # prueba local
  *   DRY_RUN=1 node dist/seeds/import-amawad.js                      # no escribe, solo cuenta
  */
-import { DataSource } from 'typeorm';
+import { DataSource, In } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -41,10 +41,21 @@ import { Role } from '../common/enums/role.enum.js';
 import { Gender } from '../common/enums/gender.enum.js';
 import { MovementType } from '../common/enums/movement-type.enum.js';
 import { esHostLocal } from '../common/utils/host-local.js';
+import {
+  ajustesDeStock,
+  variantesQueFaltan,
+} from './reconciliar-catalogo.util.js';
 
 dotenv.config();
 
 const DRY_RUN = process.env.DRY_RUN === '1';
+/**
+ * Pone al día los productos que ya existen contra la fuente.
+ *
+ * Apagado por defecto: agrega variantes y **mueve saldos**, así que se pide a
+ * propósito y no se dispara por correr el importador sin pensar.
+ */
+const RECONCILE = process.env.RECONCILE_STOCK === '1';
 const TENANT_SLUG = 'amawad';
 const TENANT_NAME = 'AMAWAD';
 const SOURCE = 'demachine:amawad';
@@ -175,6 +186,9 @@ async function main() {
     variants: 0,
     stockRows: 0,
     skippedExisting: 0,
+    reconciledProducts: 0,
+    variantsAddedToExisting: 0,
+    stockAdjustments: 0,
   };
 
   // ── 1. Tenant ──
@@ -273,6 +287,130 @@ async function main() {
       .replace(/[^A-Z0-9]+/g, '')
       .slice(0, 12) || 'NA';
 
+  /**
+   * Pone al día un producto que ya existe, contra lo que dice demachine.
+   *
+   * Sin esto, el importador solo **creaba**: a un producto ya migrado nunca le
+   * agregaba las tallas que aparecieran después. Por eso trece códigos físicos
+   * de AMAWAD no encontraban dónde colgarse —«no existe variante para talla 40
+   * y color BLANCO»— aunque demachine tuviera esas tallas con existencia y sus
+   * pares etiquetados.
+   *
+   * Las dos decisiones —qué falta y cuánto mover— viven en
+   * `reconciliar-catalogo.util.ts` y se prueban sin base de datos.
+   */
+  const reconciliarExistente = async (product: Product, p: PayloadProduct) => {
+    await dataSource.transaction(async (m) => {
+      const catalog = new CatalogCache(m);
+      const variantRepo = m.getRepository(ProductVariant);
+      const existentes = await variantRepo.find({
+        where: { tenantId, productId: product.id },
+      });
+
+      // Lo que la fuente dice que debería haber, con los ids de esta base y
+      // conservando las etiquetas de origen: el SKU se arma con el texto de la
+      // talla y el color, no con sus identificadores.
+      const deseadas: {
+        sizeId: string | null;
+        colorId: string | null;
+        talla: string;
+        color: string;
+      }[] = [];
+      for (const v of p.variants) {
+        deseadas.push({
+          sizeId: (await catalog.sizeId(v.size, tenantId)) ?? null,
+          colorId: (await catalog.colorId(v.color, tenantId)) ?? null,
+          talla: v.size || '',
+          color: v.color || '',
+        });
+      }
+
+      const porClave = new Map<string, string>();
+      for (const v of existentes) {
+        porClave.set(`${v.sizeId ?? ''}|${v.colorId ?? ''}`, v.id);
+      }
+
+      for (const falta of variantesQueFaltan(existentes, deseadas)) {
+        let sku = `${product.skuPrefix}-${skuPart(falta.talla)}-${skuPart(falta.color)}`;
+        let n = 1;
+        while (await variantRepo.findOne({ where: { tenantId, sku } })) {
+          sku = `${product.skuPrefix}-${skuPart(falta.talla)}-${skuPart(falta.color)}-${++n}`;
+        }
+        const nueva = variantRepo.create({
+          productId: product.id,
+          sku,
+          sizeId: falta.sizeId,
+          colorId: falta.colorId,
+          barcode: `78${stamp}${String(barcodeCounter++).padStart(6, '0')}`,
+          isActive: true,
+          tenantId,
+        });
+        const creada = DRY_RUN ? nueva : await variantRepo.save(nueva);
+        porClave.set(`${falta.sizeId ?? ''}|${falta.colorId ?? ''}`, creada.id);
+        stats.variantsAddedToExisting++;
+      }
+
+      // Saldos: lo que dice la fuente, por variante y bodega.
+      const deseado = new Map<string, number>();
+      for (const row of p.stock_by_warehouse) {
+        const sizeId = (await catalog.sizeId(row.size, tenantId)) ?? null;
+        const colorId = (await catalog.colorId(row.color, tenantId)) ?? null;
+        const variantId = porClave.get(`${sizeId ?? ''}|${colorId ?? ''}`);
+        const warehouseId = whMap.get(String(row.warehouse_id));
+        if (!variantId || !warehouseId) continue;
+        const k = `${variantId}|${warehouseId}`;
+        deseado.set(k, (deseado.get(k) ?? 0) + (row.qty || 0));
+      }
+
+      const variantIds = [...porClave.values()];
+      const filas = variantIds.length
+        ? await m.getRepository(Stock).find({
+            where: { tenantId, variantId: In(variantIds) },
+          })
+        : [];
+      const actual = new Map<string, number>();
+      for (const f of filas) {
+        actual.set(`${f.variantId}|${f.warehouseId}`, Number(f.quantity) || 0);
+      }
+
+      for (const ajuste of ajustesDeStock(actual, deseado)) {
+        const fila =
+          filas.find(
+            (f) =>
+              f.variantId === ajuste.variantId &&
+              f.warehouseId === ajuste.warehouseId,
+          ) ??
+          m.getRepository(Stock).create({
+            variantId: ajuste.variantId,
+            warehouseId: ajuste.warehouseId,
+            quantity: 0,
+            minStock: 0,
+            tenantId,
+          });
+        fila.quantity = ajuste.hasta;
+        const movimiento = m.getRepository(StockMovement).create({
+          variantId: ajuste.variantId,
+          warehouseId: ajuste.warehouseId,
+          movementType: ajuste.delta > 0 ? MovementType.IN : MovementType.OUT,
+          quantity: Math.abs(ajuste.delta),
+          referenceType: 'RECONCILE_AMAWAD',
+          notes: `Conciliación con demachine ${SOURCE}:${p.source_id}: ${ajuste.desde} → ${ajuste.hasta}`,
+          tenantId,
+        });
+        // `DRY_RUN` tiene que cortar **todas** las escrituras. Se me pasó en la
+        // primera versión de esta función y un ensayo en seco movió 51 saldos:
+        // un script que puede apuntar a producción no se puede permitir que su
+        // modo «no escribe nada» escriba algo.
+        if (!DRY_RUN) {
+          await m.getRepository(Stock).save(fila);
+          await m.getRepository(StockMovement).save(movimiento);
+        }
+        stats.stockAdjustments++;
+      }
+    });
+    stats.reconciledProducts++;
+  };
+
   for (const p of payload.products) {
     const sourceRef = `${SOURCE}:${p.source_id}`;
     const existing = await productRepo.findOne({
@@ -280,6 +418,7 @@ async function main() {
     });
     if (existing) {
       stats.skippedExisting++;
+      if (RECONCILE) await reconciliarExistente(existing, p);
       continue;
     }
 

@@ -162,13 +162,35 @@ const STATUS_MAP = new Map<string, StockUnitStatus>([
   ['REMITIDO EXTERNO', StockUnitStatus.CONSIGNED],
 ]);
 
+/**
+ * Si la unidad que ya está en MiPinta es la misma que trae la fuente.
+ *
+ * **La variante de una caja no cuenta.** Una caja no tiene talla, así que se
+ * cuelga de cualquiera de las variantes de su color —la de id más bajo—: una
+ * elección arbitraria, no un hecho de la caja. Al agregarle tallas al producto
+ * esa elección cambia, y nueve cajas de AMAWAD que llevaban meses importadas
+ * salieron como «el código ya existe con atributos diferentes» sin que nada de
+ * la caja física hubiera cambiado.
+ *
+ * El producto sí se compara, que es lo que de verdad identifica a la caja. Y
+ * en un par suelto la variante manda: si cambió, cambió de talla.
+ *
+ * Dicho de frente: para un par suelto, comparar `variantId` es una **guarda
+ * redundante**. `productId`, `sizeId` y `colorId` ya lo determinan, y dos
+ * variantes con la misma talla y color se rechazan antes con
+ * `VARIANT_NOT_UNIQUE`. Ninguna mutación la caza y se deja igual, porque el
+ * día que esa unicidad deje de garantizarse esta comparación es la que avisa.
+ */
 function sameExisting(
   existing: ExistingPhysicalUnit,
   resolved: Omit<ResolvedPhysicalUnit, 'source' | 'alreadyImported'>,
 ) {
+  const mismaVariante =
+    resolved.kind === StockUnitKind.BOX ||
+    existing.variantId === resolved.variantId;
   return (
     existing.productId === resolved.productId &&
-    existing.variantId === resolved.variantId &&
+    mismaVariante &&
     existing.colorId === resolved.colorId &&
     existing.sizeId === resolved.sizeId &&
     existing.warehouseId === resolved.warehouseId &&
