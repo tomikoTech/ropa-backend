@@ -1,11 +1,4 @@
-import {
-  Entity,
-  PrimaryGeneratedColumn,
-  Column,
-  ManyToOne,
-  JoinColumn,
-  CreateDateColumn,
-} from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn, CreateDateColumn, Index } from 'typeorm';
 import { Sale } from './sale.entity.js';
 import { ProductVariant } from '../../products/entities/product-variant.entity.js';
 import { TenantAwareEntity } from '../../common/entities/tenant-aware.entity.js';
@@ -21,6 +14,12 @@ export class SaleItem extends TenantAwareEntity {
   @JoinColumn({ name: 'sale_id' })
   sale: Sale;
 
+  /**
+   * Por acá se leen y se borran los renglones al abrir o editar una factura.
+   * Sin índice era un `Seq Scan` sobre toda la tabla, dentro de la transacción
+   * de la venta y con la fila de stock bloqueada.
+   */
+  @Index('IDX_sale_items_sale')
   @Column({ name: 'sale_id' })
   saleId: string;
 
