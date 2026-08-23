@@ -27,6 +27,7 @@ import { Size } from '../catalogs/entities/size.entity.js';
 import { Color } from '../catalogs/entities/color.entity.js';
 import { Supplier } from '../suppliers/entities/supplier.entity.js';
 import { ReportsService } from './reports.service.js';
+import { BalanceService } from './balance.service.js';
 import { ReportsController } from './reports.controller.js';
 import { ReportEngineService } from './report-engine.service.js';
 import { ReportEngineController } from './report-engine.controller.js';
@@ -71,6 +72,7 @@ import { MovementsReportService } from './data/movements-report.service.js';
   controllers: [ReportsController, ReportEngineController],
   providers: [
     ReportsService,
+    BalanceService,
     ReportEngineService,
     InventoryReportService,
     ValuationReportService,
@@ -79,6 +81,6 @@ import { MovementsReportService } from './data/movements-report.service.js';
     ReceivablesReportService,
     MovementsReportService,
   ],
-  exports: [ReportsService],
+  exports: [ReportsService, BalanceService],
 })
 export class ReportsModule {}

@@ -64,8 +64,16 @@ export class Expense extends TenantAwareEntity {
   @Column({ name: 'petty_cash_id', type: 'uuid', nullable: true })
   pettyCashId: string | null;
 
+  /**
+   * El día en que se pagó, como texto (`AAAA-MM-DD`).
+   *
+   * No es un instante: es una jornada. Como `Date` quedaba expuesto a que la
+   * zona lo corriera un día —un gasto del 22 se guardaba como del 21, porque
+   * `new Date('2026-08-22')` es medianoche UTC—, y ese gasto aparecía en el
+   * mes equivocado. Mismo criterio que `cierres_de_caja.dia`.
+   */
   @Column({ name: 'expense_date', type: 'date' })
-  expenseDate: Date;
+  expenseDate: string;
 
   @Column({ type: 'text', nullable: true })
   notes: string | null;

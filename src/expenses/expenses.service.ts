@@ -10,6 +10,7 @@ import { Expense } from './entities/expense.entity.js';
 import { ExpenseCategory } from './entities/expense-category.entity.js';
 import { PettyCash } from './entities/petty-cash.entity.js';
 import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
+import { diaDeCalendario } from '../common/utils/dia-de-calendario.util.js';
 import { Bank } from '../banks/entities/bank.entity.js';
 import { PaymentMethod } from '../common/enums/payment-method.enum.js';
 import {
@@ -156,7 +157,7 @@ export class ExpensesService {
           paymentMethod,
           bankId: dto.bankId ?? null,
           pettyCashId: dto.pettyCashId ?? null,
-          expenseDate: dto.expenseDate ? new Date(dto.expenseDate) : new Date(),
+          expenseDate: diaDeCalendario(dto.expenseDate),
           notes: dto.notes?.trim() || null,
           createdById: userId,
           tenantId,
@@ -172,7 +173,21 @@ export class ExpensesService {
     const where: Record<string, unknown> = { tenantId };
     if (filters?.categoryId) where.categoryId = filters.categoryId;
     if (filters?.from && filters?.to) {
-      where.expenseDate = Between(new Date(filters.from), new Date(filters.to));
+      // Los dos extremos como día, por lo mismo: filtrar «del 1 al 31» con
+      // instantes dejaba fuera el 31 en una zona y metía el 31 de julio en otra.
+      //
+      // Las fechas llegan de la barra de direcciones, así que una mal escrita
+      // es un 400 y no un 500: el error es de quien preguntó, no nuestro.
+      try {
+        where.expenseDate = Between(
+          diaDeCalendario(filters.from),
+          diaDeCalendario(filters.to),
+        );
+      } catch {
+        throw new BadRequestException(
+          'Las fechas del filtro van como AAAA-MM-DD.',
+        );
+      }
     }
     const items = await this.expenseRepo.find({
       where,

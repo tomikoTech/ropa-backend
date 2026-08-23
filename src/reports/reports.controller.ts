@@ -9,6 +9,7 @@ import {
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { ReportsService } from './reports.service.js';
+import { BalanceService } from './balance.service.js';
 import { TenantId } from '../common/decorators/tenant-id.decorator.js';
 import { Roles } from '../common/decorators/roles.decorator.js';
 import { RolesGuard } from '../common/guards/roles.guard.js';
@@ -19,7 +20,46 @@ import ExcelJS from 'exceljs';
 @ApiBearerAuth()
 @Controller('reports')
 export class ReportsController {
-  constructor(private readonly reportsService: ReportsService) {}
+  constructor(
+    private readonly reportsService: ReportsService,
+    private readonly balance: BalanceService,
+  ) {}
+
+  /**
+   * El balance del negocio: ventas, ganancia, recuperación de capital, gastos,
+   * inversión y deuda — **del mismo periodo y juntos**, con filtro por local.
+   *
+   * Va en `reports` y no en un módulo nuevo porque no calcula nada que no
+   * existiera: compone lo que ya estaba repartido en seis reportes, gastos,
+   * compras y las dos carteras.
+   */
+  @Get('balance')
+  @ApiOperation({ summary: 'Balance del negocio del periodo' })
+  getBalance(
+    @TenantId() tenantId: string,
+    @Query('from') from: string,
+    @Query('to') to: string,
+    @Query('warehouseId') warehouseId?: string,
+  ) {
+    const dia = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dia.test(from ?? '') || !dia.test(to ?? '')) {
+      throw new BadRequestException(
+        'Las fechas del balance van como AAAA-MM-DD.',
+      );
+    }
+    if (from > to) {
+      // Un rango al revés devuelve todo en cero, que se lee como un mes sin
+      // ventas en vez de como un error de quien preguntó.
+      throw new BadRequestException(
+        'La fecha inicial no puede ser posterior a la final.',
+      );
+    }
+    return this.balance.calcular(tenantId, {
+      desde: from,
+      hasta: to,
+      warehouseId: warehouseId || undefined,
+    });
+  }
 
   @Get('dashboard')
   @ApiOperation({ summary: 'Estadísticas del dashboard' })
