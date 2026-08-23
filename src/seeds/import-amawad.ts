@@ -50,12 +50,23 @@ dotenv.config();
 
 const DRY_RUN = process.env.DRY_RUN === '1';
 /**
- * Pone al día los productos que ya existen contra la fuente.
- *
- * Apagado por defecto: agrega variantes y **mueve saldos**, así que se pide a
- * propósito y no se dispara por correr el importador sin pensar.
+ * Agregar a los productos que ya existen las tallas que la fuente tiene y
+ * MiPinta no. **No toca saldos.**
  */
-const RECONCILE = process.env.RECONCILE_STOCK === '1';
+const RECONCILE_VARIANTES =
+  process.env.RECONCILE_VARIANTS === '1' || process.env.RECONCILE_STOCK === '1';
+
+/**
+ * Además, mover el saldo a lo que diga la fuente.
+ *
+ * Va aparte de lo anterior a propósito, y aprendido con AMAWAD: cuando la
+ * tienda lleva meses operando en MiPinta, su inventario es el bueno y el de
+ * demachine quedó atrás. Ahí hacen falta las tallas —para que los códigos
+ * físicos tengan dónde colgarse— pero mover el saldo le borraría a la tienda
+ * mercancía que sí tiene. Eran un solo interruptor y eso es una trampa: quien
+ * quiere lo primero se lleva lo segundo sin enterarse.
+ */
+const RECONCILE_SALDOS = process.env.RECONCILE_STOCK === '1';
 const TENANT_SLUG = 'amawad';
 const TENANT_NAME = 'AMAWAD';
 const SOURCE = 'demachine:amawad';
@@ -350,6 +361,8 @@ async function main() {
         stats.variantsAddedToExisting++;
       }
 
+      if (!RECONCILE_SALDOS) return;
+
       // Saldos: lo que dice la fuente, por variante y bodega.
       const deseado = new Map<string, number>();
       for (const row of p.stock_by_warehouse) {
@@ -418,7 +431,7 @@ async function main() {
     });
     if (existing) {
       stats.skippedExisting++;
-      if (RECONCILE) await reconciliarExistente(existing, p);
+      if (RECONCILE_VARIANTES) await reconciliarExistente(existing, p);
       continue;
     }
 
