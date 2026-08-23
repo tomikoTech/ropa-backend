@@ -59,17 +59,20 @@ export class PosController {
       'menos de lo pedido si hay existencia sin etiquetar.',
   })
   @ApiQuery({ name: 'variantId', required: true })
-  @ApiQuery({ name: 'warehouseId', required: true })
+  @ApiQuery({ name: 'warehouseId', required: false })
   @ApiQuery({ name: 'quantity', required: false })
   paresQueSaldrian(
     @Query('variantId', ParseUUIDPipe) variantId: string,
-    @Query('warehouseId', ParseUUIDPipe) warehouseId: string,
+    // Opcional: el POS puede estar en «Todas las bodegas», y ahí los códigos
+    // salen de donde estén, en el orden en que la venta los consumiría.
+    @Query('warehouseId', new ParseUUIDPipe({ optional: true }))
+    warehouseId: string | undefined,
     @TenantId() tenantId: string,
     @Query('quantity') quantity?: string,
   ) {
     return this.posService.paresQueSaldrian(
       variantId,
-      warehouseId,
+      warehouseId ?? null,
       Math.max(1, Number(quantity) || 1),
       tenantId,
     );

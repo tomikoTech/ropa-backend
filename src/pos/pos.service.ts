@@ -831,23 +831,62 @@ export class PosService {
    */
   async paresQueSaldrian(
     variantId: string,
-    warehouseId: string,
+    warehouseId: string | null,
     cantidad: number,
     tenantId: string,
   ): Promise<{ id: string; barcode: string }[]> {
     if (cantidad <= 0) return [];
-    const filas: { id: string; barcode: string; quantity: number }[] =
-      await this.dataSource.query(
-        `SELECT u.id, u.barcode, u.quantity
-           FROM stock_units u
-          WHERE u.tenant_id = $1
-            AND u.variant_id = $2
-            AND u.warehouse_id = $3
-            AND u.status = 'IN_STOCK'
-          ORDER BY u.created_at ASC, u.id ASC
-          LIMIT 200`,
-        [tenantId, variantId, warehouseId],
+    // Sin bodega —el POS abierto en «Todas las bodegas»— se miran todas, en el
+    // mismo orden en que la venta las consumiría: la que más tenga primero y
+    // la vitrina de última. Antes acá se devolvía vacío, y por eso el carrito
+    // mostraba solo el código de la variante: el mismo para los dos pares.
+    const filas: {
+      id: string;
+      barcode: string;
+      quantity: number;
+      warehouse_id: string;
+    }[] = await this.dataSource.query(
+      `SELECT u.id, u.barcode, u.quantity, u.warehouse_id
+         FROM stock_units u
+        WHERE u.tenant_id = $1
+          AND u.variant_id = $2
+          AND u.status = 'IN_STOCK'
+          ${warehouseId ? 'AND u.warehouse_id = $3' : ''}
+        ORDER BY u.created_at ASC, u.id ASC
+        LIMIT 400`,
+      warehouseId
+        ? [tenantId, variantId, warehouseId]
+        : [tenantId, variantId],
+    );
+
+    if (!warehouseId && filas.length > 1) {
+      // Cuánto hay etiquetado en cada bodega, para poder ordenarlas con la
+      // misma regla que usa la venta.
+      const porBodega = new Map<string, number>();
+      for (const f of filas) {
+        porBodega.set(
+          f.warehouse_id,
+          (porBodega.get(f.warehouse_id) ?? 0) + Number(f.quantity),
+        );
+      }
+      const vitrinas = await this.vitrinasDelTenant(
+        this.dataSource.manager,
+        tenantId,
       );
+      const orden = ordenarParaDescuento(
+        [...porBodega].map(([id, quantity]) => ({
+          warehouseId: id,
+          quantity,
+        })),
+        '',
+        (id) => vitrinas.has(id),
+      ).map((b) => b.warehouseId);
+      const puesto = new Map(orden.map((id, i) => [id, i]));
+      filas.sort(
+        (a, b) =>
+          (puesto.get(a.warehouse_id) ?? 0) - (puesto.get(b.warehouse_id) ?? 0),
+      );
+    }
 
     const elegidos: { id: string; barcode: string }[] = [];
     let faltan = cantidad;
