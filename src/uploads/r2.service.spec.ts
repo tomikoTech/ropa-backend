@@ -1,3 +1,4 @@
+import sharp from 'sharp';
 import { R2Service } from './r2.service.js';
 
 /**
@@ -90,9 +91,8 @@ describe('R2Service.uploadBase64Image', () => {
   it('deleteByUrl ignora las URLs que no son del bucket propio', async () => {
     // Quedan URLs viejas de Supabase en pantallas ya cargadas; borrar una no
     // puede terminar en una llamada a Cloudflare con una llave inventada.
-    const cliente = (
-      servicio as unknown as { client: { send: jest.Mock } }
-    ).client;
+    const cliente = (servicio as unknown as { client: { send: jest.Mock } })
+      .client;
     const enviar = jest
       .spyOn(cliente, 'send')
       .mockResolvedValue(undefined as never);
@@ -102,5 +102,72 @@ describe('R2Service.uploadBase64Image', () => {
     );
 
     expect(enviar).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Y lo que se guarda ya viene optimizado.
+ *
+ * La optimización vive en `upload`, que es por donde pasan los dos caminos —el
+ * formulario del admin y el base64 del bot de WhatsApp—. Acá se comprueba que
+ * la cadena esté conectada: sin esto, las dos podrían estar bien por separado
+ * y las fotos seguir subiéndose enteras.
+ */
+describe('R2Service.upload · lo que llega al bucket', () => {
+  const ENV = process.env;
+  let servicio: R2Service;
+  let guardado: { Body: Buffer; ContentType: string; Key: string };
+
+  beforeEach(() => {
+    process.env = {
+      ...ENV,
+      R2_ENDPOINT: 'https://cuenta.r2.cloudflarestorage.com',
+      R2_ACCESS_KEY_ID: 'llave',
+      R2_SECRET_ACCESS_KEY: 'secreto',
+      R2_BUCKET: 'mipinta',
+      R2_PUBLIC_URL: 'https://pub-abc.r2.dev',
+    };
+    servicio = new R2Service();
+    // Se intercepta el envío a Cloudflare: interesa qué se manda, no mandarlo.
+    const cliente = (servicio as unknown as { client: { send: unknown } })
+      .client;
+    jest
+      .spyOn(cliente as { send: (c: unknown) => Promise<unknown> }, 'send')
+      .mockImplementation((comando: unknown) => {
+        guardado = (comando as { input: typeof guardado }).input;
+        return Promise.resolve({});
+      });
+  });
+
+  afterEach(() => {
+    process.env = ENV;
+    jest.restoreAllMocks();
+  });
+
+  it('una foto grande llega al bucket reducida y como webp', async () => {
+    const px = Buffer.alloc(2400 * 1600 * 3);
+    for (let i = 0; i < px.length; i++) px[i] = (i * 7919) % 256;
+    const grande = await sharp(px, {
+      raw: { width: 2400, height: 1600, channels: 3 },
+    })
+      .jpeg({ quality: 95 })
+      .toBuffer();
+
+    const url = await servicio.upload('products', grande, 'image/jpeg', 'jpg');
+
+    expect(guardado.ContentType).toBe('image/webp');
+    expect(guardado.Key).toMatch(/\.webp$/);
+    expect(url).toMatch(/\.webp$/);
+    expect(guardado.Body.length).toBeLessThan(grande.length);
+    const meta = await sharp(guardado.Body).metadata();
+    expect(meta.width).toBe(1400);
+  }, 30000);
+
+  it('un video llega tal cual, con su tipo y su extensión', async () => {
+    const video = Buffer.from('no soy una imagen');
+    const url = await servicio.upload('products', video, 'video/mp4', 'mp4');
+    expect(guardado.ContentType).toBe('video/mp4');
+    expect(guardado.Body).toBe(video);
+    expect(url).toMatch(/\.mp4$/);
   });
 });

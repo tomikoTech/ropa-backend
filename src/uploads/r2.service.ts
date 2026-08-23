@@ -9,6 +9,7 @@ import {
   DeleteObjectCommand,
 } from '@aws-sdk/client-s3';
 import { randomBytes } from 'crypto';
+import { optimizarImagen } from './optimizar-imagen.js';
 
 /**
  * Extensión por MIME permitido (imágenes + videos cortos de producto).
@@ -77,13 +78,18 @@ export class R2Service {
     ext: string,
   ): Promise<string> {
     if (!this.client) throw new Error('R2 no está configurado');
-    const key = `${folder}/${Date.now()}-${randomBytes(6).toString('hex')}.${ext}`;
+
+    // Todo pasa por acá —el formulario del admin y el base64 del bot de
+    // WhatsApp— así que optimizar en este punto cubre los dos caminos.
+    const listo = await optimizarImagen(buffer, contentType, ext);
+
+    const key = `${folder}/${Date.now()}-${randomBytes(6).toString('hex')}.${listo.ext}`;
     await this.client.send(
       new PutObjectCommand({
         Bucket: this.bucket,
         Key: key,
-        Body: buffer,
-        ContentType: contentType,
+        Body: listo.buffer,
+        ContentType: listo.mime,
         CacheControl: 'public, max-age=31536000, immutable',
       }),
     );
