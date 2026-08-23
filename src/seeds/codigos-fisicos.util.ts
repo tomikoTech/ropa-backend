@@ -1,3 +1,16 @@
+/**
+ * Emparejar los códigos físicos de demachine con el catálogo de MiPinta.
+ *
+ * El código de la variante dice **qué** es —modelo, talla y color, el mismo
+ * para todos los pares iguales—; este dice **cuál** es: el que está impreso en
+ * esa caja y el que lee la pistola. Sin él, dos líneas de la misma referencia
+ * en una factura son indistinguibles.
+ *
+ * Nada de esto es de una tienda en particular, aunque naciera con AMAWAD: lo
+ * usan AMAWAD (521 códigos, migrados) y Sportcali (2.742 en demachine, que su
+ * extractor original nunca leyó). Por eso el archivo ya no lleva el nombre de
+ * ninguna.
+ */
 import {
   StockUnitKind,
   StockUnitStatus,
@@ -436,4 +449,59 @@ export function previewPhysicalUnitImport(params: {
       aggregateDifference: resolvedPhysicalQuantity - aggregateQuantity,
     },
   };
+}
+
+/**
+ * Lo que impide meterle a una tienda los códigos de otra.
+ *
+ * Este script escribe en producción y lo corre una persona desde su terminal,
+ * a veces meses después de la última vez. Estas cuatro preguntas son lo único
+ * que hay entre un `MODE=apply` distraído y miles de códigos físicos en el
+ * inventario equivocado —que además no se deshacen limpio, porque cada código
+ * arrastra sus eventos—.
+ *
+ * Vivían sueltas dentro de `main()`, donde no se podían probar sin base de
+ * datos. Acá se prueban sin nada.
+ */
+export function revisarSalvaguardas(params: {
+  modo: 'preview' | 'apply' | 'reconcile';
+  slug: string;
+  confirmTenant: string | undefined;
+  checksumEsperado: string;
+  confirmChecksum: string | undefined;
+  filasExcluidas: number;
+  razonDeExclusion: string | null | undefined;
+  conflictos: number;
+}): void {
+  if (!params.slug.trim()) {
+    throw new Error(
+      'Falta TENANT_SLUG. Ejemplo: TENANT_SLUG=sportcali npm run importar:codigos-fisicos',
+    );
+  }
+  // El preview no escribe nada: exigirle confirmaciones dejaría a la gente sin
+  // poder mirar antes de decidir, que es para lo único que existe.
+  if (params.modo === 'preview') return;
+
+  if (params.confirmTenant !== params.slug) {
+    throw new Error(
+      `Operación bloqueada: falta CONFIRM_TENANT=${params.slug}.`,
+    );
+  }
+  if (params.confirmChecksum !== params.checksumEsperado) {
+    throw new Error(
+      `Operación bloqueada: CONFIRM_CHECKSUM debe ser ${params.checksumEsperado}.`,
+    );
+  }
+  if (params.filasExcluidas > 0 && !params.razonDeExclusion?.trim()) {
+    throw new Error(
+      'Operación bloqueada: toda exclusión exige EXCLUSION_REASON para quedar auditada.',
+    );
+  }
+  if (params.conflictos > 0) {
+    // Importar «casi todo» deja un inventario a medias que nadie sabe leer:
+    // los códigos que entraron y los que no se ven igual.
+    throw new Error(
+      `Operación bloqueada: hay ${params.conflictos} conflicto(s) en el reporte.`,
+    );
+  }
 }

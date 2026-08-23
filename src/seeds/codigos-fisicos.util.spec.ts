@@ -3,7 +3,7 @@ import {
   ExistingPhysicalUnit,
   LegacyPhysicalUnit,
   previewPhysicalUnitImport,
-} from './amawad-stock-units.util';
+} from './codigos-fisicos.util';
 import {
   StockUnitKind,
   StockUnitStatus,

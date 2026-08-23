@@ -1,9 +1,15 @@
 /**
- * Preview/aplicación/conciliación de códigos físicos AMAWAD extraídos desde
- * demachine.
+ * Preview / aplicación / conciliación de los códigos físicos por par que
+ * vienen de demachine.
+ *
+ * Nació para AMAWAD y ahora sirve a cualquier tienda migrada: la tienda se
+ * pasa por `TENANT_SLUG` y de ahí salen la carpeta del archivo extraído y el
+ * prefijo de `sourceRef` con el que se buscan sus productos. Antes estaba
+ * escrito a mano en seis sitios, y copiar el archivo para la siguiente tienda
+ * habría dejado dos versiones que se van separando.
  *
  * Por defecto SOLO genera reportes. Para importar códigos exige:
- *   MODE=apply CONFIRM_TENANT=amawad CONFIRM_CHECKSUM=<sha256 del preview>
+ *   MODE=apply TENANT_SLUG=<slug> CONFIRM_TENANT=<slug> CONFIRM_CHECKSUM=<sha256>
  * Para conciliar stock agregado exige además el token exacto publicado por el
  * preview y que todos los códigos ya hayan sido importados.
  */
@@ -27,7 +33,8 @@ import {
   buildReconciliationConfirmation,
   LegacyPhysicalUnit,
   previewPhysicalUnitImport,
-} from './amawad-stock-units.util.js';
+  revisarSalvaguardas,
+} from './codigos-fisicos.util.js';
 
 type ImportMode = 'preview' | 'apply' | 'reconcile';
 
@@ -82,9 +89,17 @@ async function main() {
     requestedMode === 'apply' || requestedMode === 'reconcile'
       ? requestedMode
       : 'preview';
+  // La tienda se pide con nombre y apellido: sin esto, correr el script en la
+  // carpeta equivocada le metería a una tienda los códigos de otra.
+  const slug = (process.env.TENANT_SLUG ?? '').trim();
+  if (!slug) {
+    throw new Error(
+      'Falta TENANT_SLUG. Ejemplo: TENANT_SLUG=sportcali npm run importar:codigos-fisicos',
+    );
+  }
   const payloadPath = path.resolve(
     process.env.PAYLOAD_PATH ??
-      path.join('..', 'migracion-amawad', 'out', 'stock-units.json'),
+      path.join('..', `migracion-${slug}`, 'out', 'stock-units.json'),
   );
   if (!fs.existsSync(payloadPath)) {
     throw new Error(`No existe el archivo extraído: ${payloadPath}`);
@@ -100,9 +115,9 @@ async function main() {
   await AppDataSource.initialize();
   try {
     const tenant = await AppDataSource.getRepository(Tenant).findOne({
-      where: { slug: 'amawad' },
+      where: { slug },
     });
-    if (!tenant) throw new Error('No existe el tenant amawad en MiPinta.');
+    if (!tenant) throw new Error(`No existe el tenant ${slug} en MiPinta.`);
 
     const excludedSourceCodes = new Set(
       (process.env.EXCLUDE_SOURCE_CODES ?? '')
@@ -123,7 +138,7 @@ async function main() {
       AppDataSource.getRepository(Product).find({
         where: {
           tenantId: tenant.id,
-          sourceRef: Like('demachine:amawad:%'),
+          sourceRef: Like(`demachine:${slug}:%`),
         },
         relations: { variants: true },
       }),
@@ -291,27 +306,22 @@ async function main() {
     );
     console.log(JSON.stringify(report, null, 2));
 
+    // Las salvaguardas viven en `codigos-fisicos.util.ts` y se prueban sin
+    // base de datos: son lo único que hay entre un `MODE=apply` distraído y
+    // miles de códigos en el inventario equivocado.
+    revisarSalvaguardas({
+      modo: mode,
+      slug,
+      confirmTenant: process.env.CONFIRM_TENANT,
+      checksumEsperado: document.meta.sha256,
+      confirmChecksum: process.env.CONFIRM_CHECKSUM,
+      filasExcluidas: excludedRows.length,
+      razonDeExclusion: process.env.EXCLUSION_REASON,
+      conflictos: preview.issues.length,
+    });
     if (mode === 'preview') {
       console.log('PREVIEW: no se escribió ninguna fila en MiPinta.');
       return;
-    }
-    if (process.env.CONFIRM_TENANT !== 'amawad') {
-      throw new Error('Operación bloqueada: falta CONFIRM_TENANT=amawad.');
-    }
-    if (process.env.CONFIRM_CHECKSUM !== document.meta.sha256) {
-      throw new Error(
-        `Operación bloqueada: CONFIRM_CHECKSUM debe ser ${document.meta.sha256}.`,
-      );
-    }
-    if (excludedRows.length > 0 && !process.env.EXCLUSION_REASON?.trim()) {
-      throw new Error(
-        'Operación bloqueada: toda exclusión exige EXCLUSION_REASON para quedar auditada.',
-      );
-    }
-    if (preview.issues.length > 0) {
-      throw new Error(
-        `Operación bloqueada: hay ${preview.issues.length} conflicto(s) en el reporte.`,
-      );
     }
 
     if (mode === 'reconcile') {
