@@ -86,9 +86,9 @@ export class PurchaseOrder extends TenantAwareEntity {
   @Column({ name: 'freight_allocation', default: 'BY_UNITS' })
   freightAllocation: 'BY_UNITS' | 'BY_VALUE';
 
-  /** Fecha estimada de llegada del embarque. */
+  /** Fecha estimada de llegada del embarque, como texto `AAAA-MM-DD`. */
   @Column({ name: 'arrival_date', type: 'date', nullable: true })
-  arrivalDate: Date | null;
+  arrivalDate: string | null;
 
   @Column({ type: 'decimal', precision: 14, scale: 2, default: 0 })
   subtotal: number;

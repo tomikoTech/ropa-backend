@@ -19,6 +19,7 @@ import { AccountsReceivable } from '../pos/entities/accounts-receivable.entity.j
 import { SaleStatus } from '../common/enums/sale-status.enum.js';
 import { SaleChannel } from '../common/enums/sale-channel.enum.js';
 import { IMPERIAL_INVOICE_699_2 } from './imperial-invoice-row.js';
+import { diaDeCalendario } from '../common/utils/dia-de-calendario.util.js';
 
 const TENANT_SLUG = 'distriamber';
 const INVOICE_NUMBER = 'FE-000699-2';
@@ -162,7 +163,8 @@ async function main(): Promise<void> {
         clientId: client.id,
         totalAmount: row.total,
         paidAmount: row.abonos,
-        dueDate: localNoon(row.vence),
+        // Un día, no un instante: ver `dia-de-calendario.util.ts`.
+        dueDate: diaDeCalendario(row.vence),
         isFullyPaid: false,
         fullyPaidAt: null as unknown as Date,
         notes: IMPORT_NOTE,

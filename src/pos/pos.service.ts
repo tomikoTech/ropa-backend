@@ -44,6 +44,7 @@ import { PaymentMethod } from '../common/enums/payment-method.enum.js';
 import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
 import { Promoter } from '../promoters/promoter.entity.js';
 import { randomUUID } from 'node:crypto';
+import { diaDeCalendario } from '../common/utils/dia-de-calendario.util.js';
 
 @Injectable()
 export class PosService {
@@ -731,7 +732,7 @@ export class PosService {
             clientId: clientId!,
             totalAmount: totalCredit,
             paidAmount: 0,
-            dueDate: new Date(dto.creditDueDate!),
+            dueDate: diaDeCalendario(dto.creditDueDate!),
             notes: dto.creditNotes,
             tenantId,
           });

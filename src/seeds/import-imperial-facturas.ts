@@ -53,6 +53,7 @@ import { Role } from '../common/enums/role.enum.js';
 import { SaleStatus } from '../common/enums/sale-status.enum.js';
 import { SaleChannel } from '../common/enums/sale-channel.enum.js';
 import { PaymentMethod } from '../common/enums/payment-method.enum.js';
+import { diaDeCalendario } from '../common/utils/dia-de-calendario.util.js';
 
 dotenv.config();
 
@@ -255,7 +256,8 @@ async function main() {
           clientId,
           totalAmount: f.total,
           paidAmount: f.paidAmount,
-          dueDate: f.vence ? localDate(f.vence) : saleDate,
+          // Un día, no un instante: ver `dia-de-calendario.util.ts`.
+          dueDate: diaDeCalendario(f.vence || saleDate),
           isFullyPaid: f.saldo <= 0,
           fullyPaidAt: f.saldo <= 0 ? saleDate : undefined,
           notes: `${MARKER} Factura ${f.fact}`,

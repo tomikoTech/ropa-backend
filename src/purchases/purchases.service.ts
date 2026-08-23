@@ -20,6 +20,7 @@ import { PurchaseOrderStatus } from '../common/enums/purchase-order-status.enum.
 import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
 import { StockLedgerService } from '../inventory/ledger/stock-ledger.service.js';
 import { StockUnitStatus } from '../inventory/entities/stock-unit.entity.js';
+import { diaDeCalendario } from '../common/utils/dia-de-calendario.util.js';
 
 @Injectable()
 export class PurchasesService {
@@ -262,7 +263,7 @@ export class PurchasesService {
       const ap = this.apRepository.create({
         purchaseOrderId: savedPo.id,
         amount: total,
-        dueDate: new Date(dto.paymentDueDate),
+        dueDate: diaDeCalendario(dto.paymentDueDate),
         tenantId,
       });
       await this.apRepository.save(ap);
@@ -529,7 +530,8 @@ export class PurchasesService {
       if (ap) {
         if (!ap.isPaid) {
           ap.amount = po.total;
-          if (dto.paymentDueDate) ap.dueDate = new Date(dto.paymentDueDate);
+          if (dto.paymentDueDate)
+            ap.dueDate = diaDeCalendario(dto.paymentDueDate);
           await apRepo.save(ap);
         }
       } else if (dto.paymentDueDate) {
@@ -537,7 +539,7 @@ export class PurchasesService {
           apRepo.create({
             purchaseOrderId: po.id,
             amount: po.total,
-            dueDate: new Date(dto.paymentDueDate),
+            dueDate: diaDeCalendario(dto.paymentDueDate),
             tenantId,
           }),
         );

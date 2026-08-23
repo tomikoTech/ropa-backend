@@ -21,6 +21,8 @@ import type {
   ReportQuery,
   ReportResult,
 } from '../engine/report-types.js';
+import { diaDeCalendario } from '../../common/utils/dia-de-calendario.util.js';
+import { diasDeMora } from '../../common/utils/vencimiento.js';
 
 const MAX_ROWS = 20000;
 const MODES = ['cobrar', 'pagar', 'bancos'] as const;
@@ -71,16 +73,50 @@ export class ReceivablesReportService {
     return this.receivable(query, tenantId);
   }
 
-  /** Días de mora; 0 si aún no vence o ya está pagada. */
+  /**
+   * Días de mora; 0 si aún no vence o ya está pagada.
+   *
+   * La aritmética vive en `vencimiento.ts` y se prueba sin base de datos.
+   *
+   * **Este no era el sitio del bug, y conviene decirlo.** Lo de antes
+   * —restar milisegundos contra `Date.now()`— daba el mismo número, pero solo
+   * porque el driver devuelve una columna `date` como `Date` a medianoche
+   * **local**. Si esa fila llegara como texto `2026-08-23`, `new Date` la
+   * leería como medianoche UTC y desde las 7 p. m. la cuenta ya sumaría un día
+   * de mora el mismo día en que se quedó de pagar. Y bajo un horario de verano
+   * se pierde un día en cada tramo largo.
+   *
+   * Dos líneas más arriba, la columna «Vence» sí se rompió por confiar en ese
+   * mismo detalle del driver. Por eso el cálculo ya no depende de él.
+   */
   private overdueDays(
     dueDate: string | number | boolean | null | undefined,
     saldo: number,
   ): number {
-    if (saldo <= 0 || !dueDate || typeof dueDate === 'boolean') return 0;
-    const due = new Date(dueDate);
-    if (Number.isNaN(due.getTime())) return 0;
-    const diff = Date.now() - due.getTime();
-    return diff > 0 ? Math.floor(diff / 86400000) : 0;
+    if (saldo <= 0 || typeof dueDate === 'boolean' || typeof dueDate === 'number')
+      return 0;
+    return diasDeMora(dueDate, diaDeCalendario());
+  }
+
+  /**
+   * El día del vencimiento como texto, `AAAA-MM-DD`.
+   *
+   * `getRawMany` no pasa por TypeORM, así que una columna `date` llega como
+   * `Date` y `String(fecha).slice(0, 10)` daba «Tue Aug 11»: en inglés, con el
+   * día de la semana en vez del año, y corrido. Así salía impresa la columna
+   * «Vence» del reporte de cartera.
+   */
+  private diaDeVencimiento(
+    vence: string | number | boolean | null | undefined | Date,
+  ): string {
+    if (!vence || typeof vence === 'boolean' || typeof vence === 'number') {
+      return '—';
+    }
+    try {
+      return diaDeCalendario(vence);
+    } catch {
+      return '—';
+    }
   }
 
   private status(total: number, abonado: number): string {
@@ -140,7 +176,7 @@ export class ReceivablesReportService {
       const saldo = money(total - abonado);
       return {
         fecha: String(r.fecha ?? ''),
-        vence: r.vence ? String(r.vence).slice(0, 10) : '—',
+        vence: this.diaDeVencimiento(r.vence),
         venta: String(r.venta ?? ''),
         factura: String(r.factura ?? ''),
         cliente: String(r.cliente ?? '').trim() || '—',
@@ -257,7 +293,7 @@ export class ReceivablesReportService {
       const saldo = money(total - abonado);
       return {
         fecha: String(r.fecha ?? ''),
-        vence: r.vence ? String(r.vence).slice(0, 10) : '—',
+        vence: this.diaDeVencimiento(r.vence),
         orden: String(r.orden ?? ''),
         factura: String(r.factura ?? ''),
         proveedor: String(r.proveedor ?? ''),

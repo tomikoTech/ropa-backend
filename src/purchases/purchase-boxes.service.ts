@@ -26,6 +26,7 @@ import {
   buildPurchaseBoxTemplate,
   readPurchaseBoxImport,
 } from './purchase-box-import.util.js';
+import { diaDeCalendario } from '../common/utils/dia-de-calendario.util.js';
 
 @Injectable()
 export class PurchaseBoxesService {
@@ -536,7 +537,9 @@ export class PurchaseBoxesService {
       if (dto.freightAllocation !== undefined)
         order.freightAllocation = dto.freightAllocation;
       if (dto.arrivalDate !== undefined) {
-        order.arrivalDate = dto.arrivalDate ? new Date(dto.arrivalDate) : null;
+        order.arrivalDate = dto.arrivalDate
+          ? diaDeCalendario(dto.arrivalDate)
+          : null;
       }
       await orderRepo.save(order);
       await this.recalculateOrderTotals(manager, orderId, tenantId);

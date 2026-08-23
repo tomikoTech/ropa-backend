@@ -38,8 +38,16 @@ export class AccountsPayable extends TenantAwareEntity {
   })
   paidAmount: number;
 
+  /**
+   * El día pactado, como texto `AAAA-MM-DD`.
+   *
+   * `string` y no `Date` a propósito: un día no es un instante.
+   * `new Date('2026-12-25')` es medianoche **UTC**, y al escribirla en una
+   * columna `date` el driver toma la fecha local y retrocede al 24. Ver
+   * `common/utils/dia-de-calendario.util.ts`.
+   */
   @Column({ name: 'due_date', type: 'date' })
-  dueDate: Date;
+  dueDate: string;
 
   @Column({ name: 'is_paid', default: false })
   isPaid: boolean;

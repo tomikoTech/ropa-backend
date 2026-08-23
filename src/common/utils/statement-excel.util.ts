@@ -1,3 +1,4 @@
+import { diaDeCalendario } from './dia-de-calendario.util.js';
 import ExcelJS from 'exceljs';
 
 export interface StatementItem {
@@ -40,11 +41,23 @@ const STATUS_ES: Record<string, string> = {
   PENDING: 'Pendiente',
 };
 
-function fmtDate(d: Date | string | null): string {
+/**
+ * El día que va a la celda, en la zona de la tienda.
+ *
+ * Antes era `toISOString().slice(0, 10)`, que es el día en **UTC**: una venta
+ * hecha a las ocho de la noche en Colombia salía en el estado de cuenta con la
+ * fecha del día siguiente, y el cliente que lo revisaba no encontraba su
+ * factura donde debía estar.
+ */
+export function fmtDate(d: Date | string | null): string {
   if (!d) return '';
-  const date = typeof d === 'string' ? new Date(d) : d;
-  if (Number.isNaN(date.getTime())) return '';
-  return date.toISOString().slice(0, 10);
+  try {
+    return diaDeCalendario(d);
+  } catch {
+    // Una fila vieja ilegible deja la celda en blanco; reventar dejaría al
+    // cliente sin el archivo entero.
+    return '';
+  }
 }
 
 /**
