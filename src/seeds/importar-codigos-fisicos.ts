@@ -154,6 +154,7 @@ async function main() {
     ]);
 
     const preview = previewPhysicalUnitImport({
+      origen: slug,
       rows: importRows,
       products: products.map((product) => ({
         id: product.id,

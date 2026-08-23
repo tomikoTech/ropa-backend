@@ -125,3 +125,66 @@ export function faltaPorExhibir(
   const cantidad = Math.min(falta, Math.max(0, estado.disponibleEnElLocal));
   return cantidad > 0 ? { cantidad } : null;
 }
+
+/** Lo mínimo que hace falta saber de una bodega para ubicarla. */
+export interface BodegaConVitrina {
+  id: string;
+  /** Qué local surte esta vitrina; `null` si no es una vitrina. */
+  exhibitionOfWarehouseId?: string | null;
+}
+
+/**
+ * Qué bodegas ve el mostrador donde se está cobrando.
+ *
+ * «Que me ponga la exhibición ahí como en otro colorcito.» Para poder pintarla
+ * distinta hay primero que traerla: el catálogo del POS filtraba por la bodega
+ * donde se cobra, así que los pares de la vitrina no llegaban a la pantalla,
+ * aunque la venta sí puede tomarlos —la cascada recorre todas las bodegas de
+ * la tienda—. El vendedor veía «3 disponibles» donde había 4, y el par de la
+ * muestra no aparecía por ningún lado.
+ *
+ * El local primero, que es donde se busca cuando el cliente pregunta, y sus
+ * vitrinas después en orden fijo. Hacia arriba no se mira: si se está
+ * cobrando **en** la vitrina, lo que hay en la bodega que la surte no está
+ * donde está parado el cliente.
+ */
+export function bodegasDelMostrador(
+  localDeVenta: string,
+  bodegas: BodegaConVitrina[],
+): string[] {
+  const vitrinas = bodegas
+    .filter((b) => b.exhibitionOfWarehouseId === localDeVenta)
+    .map((b) => b.id)
+    // Determinístico: una lista que se reordena sola al recargar hace dudar
+    // de los números que trae al lado.
+    .sort((a, b) => a.localeCompare(b))
+    .filter((id) => id !== localDeVenta);
+  return [localDeVenta, ...vitrinas];
+}
+
+/**
+ * De lo que hay, cuánto es la muestra.
+ *
+ * El número que decide en el mostrador: «hay 4, pero 1 es la muestra». Sin
+ * separarlo, vender los cuatro deja el local sin qué mostrar y nadie se entera
+ * hasta que el cliente siguiente pregunta por ese modelo.
+ */
+export function repartirVitrinaYBodega(
+  existencias: FilaDeExistencia[],
+  esVitrina: (warehouseId: string) => boolean,
+): { enBodega: number; enVitrina: number } {
+  let enBodega = 0;
+  let enVitrina = 0;
+  for (const fila of existencias) {
+    // Un descuadre en una bodega no puede hacer que la vitrina parezca tener
+    // de menos: cada lado se cuenta desde cero hacia arriba.
+    //
+    // `Number` y `Math.max` se protegen mutuamente —`Math.max` también
+    // convierte el texto que manda Postgres—, así que ninguna mutación de una
+    // sola las caza; la de las dos juntas sí. Se dejan las dos y se dice.
+    const cantidad = Math.max(0, Number(fila.quantity) || 0);
+    if (esVitrina(fila.warehouseId)) enVitrina += cantidad;
+    else enBodega += cantidad;
+  }
+  return { enBodega, enVitrina };
+}

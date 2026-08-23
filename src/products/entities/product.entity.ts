@@ -121,12 +121,21 @@ export class Product extends TenantAwareEntity {
   // Referencia de procedencia para migraciones/re-sync idempotentes.
   // Formato: "<sistema>:<instancia>:<id>" (ej. "demachine:sportcali:534").
   /**
-   * El producto se maneja por unidades etiquetadas (cajas con código propio)
-   * en vez de por cantidad agregada. Solo tiene efecto si la tienda tiene
-   * `unitTrackingEnabled`.
+   * Si este producto se etiqueta par por par, con su código único impreso.
+   *
+   * Tres estados, y el producto manda sobre la tienda:
+   *   - `true`  → se etiqueta, diga lo que diga la tienda
+   *   - `false` → **no** se etiqueta, diga lo que diga la tienda
+   *   - `null`  → lo que diga `StoreSettings.unitTrackingEnabled`
+   *
+   * `false` era antes lo mismo que `null` —la regla era un `OR`—, así que un
+   * producto no podía decir que no. Daba igual mientras el interruptor de la
+   * tienda estuviera apagado por defecto; al encenderlo para todas, una
+   * esencia de perfumería que se mide en gramos habría recibido una etiqueta
+   * por gramo. La regla vive en `inventory/ledger/lleva-unidades.ts`.
    */
-  @Column({ name: 'unit_tracking', default: false })
-  unitTracking: boolean;
+  @Column({ name: 'unit_tracking', type: 'boolean', nullable: true })
+  unitTracking: boolean | null;
 
   @Column({ name: 'source_ref', nullable: true })
   sourceRef: string;

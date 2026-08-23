@@ -35,6 +35,7 @@ const row = (
 });
 
 const catalog = {
+  origen: 'amawad',
   products: [
     {
       id: 'product-1',
@@ -236,5 +237,59 @@ describe('buildReconciliationConfirmation', () => {
         ],
       }),
     );
+  });
+});
+
+describe('el prefijo de procedencia es el de la tienda que se está importando', () => {
+  it('no busca los productos de otra tienda', () => {
+    // La que importa. El prefijo estaba escrito a mano como
+    // `demachine:amawad:` dentro de la utilidad, así que al correr el
+    // importador para Sportcali —2.742 códigos— **ninguna fila encontró su
+    // producto**: el reporte decía «MiPinta no tiene demachine:amawad:62»
+    // mientras se importaba Sportcali.
+    //
+    // Lo detuvo la salvaguarda de conflictos, no esta prueba. Que la próxima
+    // vez la detenga esta.
+    const preview = previewPhysicalUnitImport({
+      origen: 'sportcali',
+      rows: [row({ product_source_id: 62 })],
+      products: [
+        {
+          id: 'product-sc',
+          sourceRef: 'demachine:sportcali:62',
+          name: 'Zapato',
+          variants: [
+            {
+              id: 'variant-sc',
+              productId: 'product-sc',
+              sizeId: 'size-40',
+              size: '40',
+              colorId: 'color-fucsia',
+              color: 'FUCSIA',
+            },
+          ],
+        },
+      ],
+      warehouses: [{ id: 'warehouse-1', name: 'Amawad' }],
+      aggregateStock: [],
+      existing: [],
+    });
+    expect(preview.issues).toEqual([]);
+    expect(preview.summary.ready).toBe(1);
+  });
+
+  it('y no confunde el mismo id de dos tiendas distintas', () => {
+    // `demachine:amawad:62` y `demachine:sportcali:62` son productos que no
+    // tienen nada que ver. Sin el prefijo correcto, el código de un par de
+    // Sportcali terminaría colgado de un producto de AMAWAD.
+    const preview = previewPhysicalUnitImport({
+      ...catalog,
+      origen: 'sportcali',
+      rows: [row({ product_source_id: 47 })],
+      existing: [],
+    });
+    expect(preview.summary.ready).toBe(0);
+    expect(preview.issues[0].code).toBe('TARGET_PRODUCT_NOT_FOUND');
+    expect(preview.issues[0].message).toContain('demachine:sportcali:47');
   });
 });

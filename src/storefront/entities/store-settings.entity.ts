@@ -84,12 +84,19 @@ export class StoreSettings extends TenantAwareEntity {
   wavaMerchantKey: string;
 
   /**
-   * Habilita el inventario por unidades etiquetadas (cajas, curvas, stands).
-   * Es un interruptor por tienda: una perfumería vende por unidad suelta y no
-   * lo necesita; una importadora de calzado sí. Cada producto decide luego si
-   * se acoge (ver `Product.unitTracking`).
+   * Habilita el inventario por unidades etiquetadas: cada par con su código
+   * único impreso, el que el cliente ve en la caja y el vendedor escanea.
+   *
+   * **Encendido por defecto desde el 23 de agosto de 2026.** Antes nacía
+   * apagado, y el resultado era que casi ninguna tienda tenía ese código: en
+   * el POS, dos líneas de la misma referencia mostraban el mismo número y no
+   * había forma de saber cuál par era cuál. Apagarlo es ahora la excepción, no
+   * la regla.
+   *
+   * Lo que no encaja no es la tienda entera sino el producto: una esencia que
+   * se vende por gramos pone `Product.unitTracking = false` y se queda fuera.
    */
-  @Column({ name: 'unit_tracking_enabled', default: false })
+  @Column({ name: 'unit_tracking_enabled', default: true })
   unitTrackingEnabled: boolean;
 
   @Column({ name: 'cod_enabled', default: false })

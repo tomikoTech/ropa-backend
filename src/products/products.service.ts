@@ -24,6 +24,10 @@ import {
 import { CreateProductDto } from './dto/create-product.dto.js';
 import { UpdateProductDto } from './dto/update-product.dto.js';
 import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
+import {
+  bodegasDelMostrador,
+  repartirVitrinaYBodega,
+} from '../inventory/exhibicion.js';
 
 @Injectable()
 export class ProductsService {
@@ -54,21 +58,6 @@ export class ProductsService {
   // Crea un "Frasco {nombre}" en la categoría Frascos, con una variante y
   // stock 0 en la bodega FRASCOS, y lo vincula a la loción. Devuelve el
   // variantId del frasco (o null si no existe la categoría Frascos).
-  /**
-   * ¿Esta tienda trabaja con un código por par?
-   *
-   * Decide si un producto nuevo nace con seguimiento por unidad. Sin esto, en
-   * una importadora de calzado se colaban productos sin etiqueta y sus ventas
-   * dejaban el inventario descuadrado en silencio.
-   */
-  private async tiendaUsaCodigos(tenantId: string): Promise<boolean> {
-    const ajustes = await this.storeSettingsRepo.findOne({
-      where: { tenantId },
-      select: ['id', 'unitTrackingEnabled'],
-    });
-    return !!ajustes?.unitTrackingEnabled;
-  }
-
   private async createFrascoForProduct(
     locion: Product,
     tenantId: string,
@@ -441,11 +430,11 @@ export class ProductsService {
         imageUrl: dto.imageUrl || dto.imageUrls?.[0],
         imageUrls: dto.imageUrls ?? [],
         videoUrl: dto.videoUrl,
-        // Por defecto, lo que haga la tienda: si trabaja con códigos por par,
-        // un producto nuevo también los lleva. Dejarlo en `false` era como se
-        // colaban productos sin etiqueta en una tienda que sí las usa.
-        unitTracking:
-          dto.unitTracking ?? (await this.tiendaUsaCodigos(tenantId)),
+        // `null` = lo que diga la tienda, y sigue diciéndolo si más adelante
+        // cambia de opinión. Antes acá se copiaba el ajuste de la tienda al
+        // producto, así que uno creado con el interruptor apagado se quedaba
+        // sin etiquetas para siempre aunque después se encendiera.
+        unitTracking: dto.unitTracking ?? null,
         tenantId,
       });
 
@@ -982,10 +971,19 @@ export class ProductsService {
         looseStock: number;
         /** Pairs que siguen dentro de cajas mixtas cerradas. */
         boxedStock: number;
+        /**
+         * De lo disponible, cuánto está en la vitrina.
+         *
+         * «Que me ponga la exhibición ahí como en otro colorcito.» Es el
+         * número que decide en el mostrador: hay 4, pero 1 es la muestra.
+         */
+        exhibitionStock: number;
         stocks: { warehouseId: string; quantity: number }[];
       }[];
       /** Pairs físicos dentro de cajas cerradas, no asignados a una talla. */
       boxedStock: number;
+      /** Lo mismo que en la variante, sumado por referencia. */
+      exhibitionStock: number;
       closedBoxCount: number;
     }[];
     hasMore: boolean;
@@ -993,6 +991,26 @@ export class ProductsService {
     const limit = Math.min(Math.max(Number(opts?.limit) || 30, 1), 100);
     const offset = Math.max(Number(opts?.offset) || 0, 0);
     const cleanQuery = (query || '').trim();
+
+    // Qué bodegas ve este mostrador. Antes se filtraba por la bodega donde se
+    // cobra a secas, así que los pares de la vitrina no llegaban a la
+    // pantalla —aunque la venta sí puede tomarlos, porque la cascada recorre
+    // todas las bodegas de la tienda—: el vendedor veía «3 disponibles» donde
+    // había 4, y la muestra no aparecía por ningún lado. La regla vive en
+    // `exhibicion.ts`, probada aparte.
+    const vitrinas = new Set<string>();
+    let bodegasVisibles: string[] | undefined;
+    if (opts?.warehouseId) {
+      const bodegas = await this.warehouseRepository.find({
+        where: { tenantId },
+        select: ['id', 'isExhibition', 'exhibitionOfWarehouseId'],
+      });
+      for (const b of bodegas) if (b.isExhibition) vitrinas.add(b.id);
+      bodegasVisibles = bodegasDelMostrador(opts.warehouseId, bodegas);
+    }
+    const filtroDeBodega = bodegasVisibles
+      ? { warehouseId: In(bodegasVisibles) }
+      : {};
 
     // El total se calcula en una subconsulta para no multiplicarlo por el JOIN
     // usado únicamente para buscar SKU/barcode de alguna variante.
@@ -1003,7 +1021,7 @@ export class ProductsService {
         ON variant_sort.id = stock_sort.variant_id
       WHERE variant_sort.product_id = p.id
         AND stock_sort.tenant_id = :tenantId
-        ${opts?.warehouseId ? 'AND stock_sort.warehouse_id = :sortWarehouseId' : ''}
+        ${bodegasVisibles ? 'AND stock_sort.warehouse_id IN (:...sortWarehouseIds)' : ''}
     )`;
 
     const qb = this.productRepository
@@ -1021,8 +1039,8 @@ export class ProductsService {
       .andWhere('p.status = :status', { status: 'ACTIVE' })
       .distinct(true);
 
-    if (opts?.warehouseId) {
-      qb.setParameter('sortWarehouseId', opts.warehouseId);
+    if (bodegasVisibles) {
+      qb.setParameter('sortWarehouseIds', bodegasVisibles);
     }
     if (opts?.type === 'STANDARD') {
       qb.andWhere("(category.type = 'STANDARD' OR category.type IS NULL)");
@@ -1084,7 +1102,7 @@ export class ProductsService {
           where: {
             tenantId,
             variantId: In(variantIds),
-            ...(opts?.warehouseId ? { warehouseId: opts.warehouseId } : {}),
+            ...filtroDeBodega,
           },
         })
       : [];
@@ -1095,7 +1113,7 @@ export class ProductsService {
             variantId: In(variantIds),
             kind: StockUnitKind.BOX,
             status: StockUnitStatus.IN_STOCK,
-            ...(opts?.warehouseId ? { warehouseId: opts.warehouseId } : {}),
+            ...filtroDeBodega,
           },
         })
       : [];
@@ -1121,6 +1139,14 @@ export class ProductsService {
         .filter((variant) => variant.isActive)
         .map((variant) => {
           const variantStocks = stockByVariant.get(variant.id) ?? [];
+          const sueltosPorBodega = variantStocks.map((stock) => ({
+            ...stock,
+            quantity: Math.max(
+              0,
+              stock.quantity -
+                (boxedByKey.get(`${variant.id}|${stock.warehouseId}`) ?? 0),
+            ),
+          }));
           const boxedStock = variantStocks.reduce(
             (sum, stock) =>
               sum + (boxedByKey.get(`${variant.id}|${stock.warehouseId}`) ?? 0),
@@ -1143,14 +1169,13 @@ export class ProductsService {
             availableStock: Math.max(0, totalStock - boxedStock),
             looseStock: Math.max(0, totalStock - boxedStock),
             boxedStock,
-            stocks: variantStocks.map((stock) => ({
-              ...stock,
-              quantity: Math.max(
-                0,
-                stock.quantity -
-                  (boxedByKey.get(`${variant.id}|${stock.warehouseId}`) ?? 0),
-              ),
-            })),
+            // De lo disponible, cuánto es la muestra. Se cuenta sobre los
+            // sueltos —una caja cerrada no está exhibida— con la regla de
+            // `exhibicion.ts`.
+            exhibitionStock: repartirVitrinaYBodega(sueltosPorBodega, (id) =>
+              vitrinas.has(id),
+            ).enVitrina,
+            stocks: sueltosPorBodega,
           };
         });
       return [
@@ -1174,6 +1199,10 @@ export class ProductsService {
           gender: product.gender,
           totalStock: productVariants.reduce(
             (sum, variant) => sum + variant.availableStock,
+            0,
+          ),
+          exhibitionStock: productVariants.reduce(
+            (sum, variant) => sum + variant.exhibitionStock,
             0,
           ),
           boxedStock: productVariants.reduce(

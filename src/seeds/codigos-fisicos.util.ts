@@ -180,6 +180,15 @@ function sameExisting(
 }
 
 export function previewPhysicalUnitImport(params: {
+  /**
+   * La tienda de la que salieron estos códigos, como aparece en `sourceRef`.
+   *
+   * Estaba escrita a mano dentro de la función. Al correr el importador para
+   * Sportcali, las 2.742 filas buscaron su producto con el prefijo de AMAWAD y
+   * ninguna lo encontró. Lo detuvo la salvaguarda de conflictos, no una
+   * prueba.
+   */
+  origen: string;
   rows: LegacyPhysicalUnit[];
   products: TargetProduct[];
   warehouses: TargetWarehouse[];
@@ -248,15 +257,10 @@ export function previewPhysicalUnitImport(params: {
       );
       continue;
     }
-    const product = productsBySource.get(
-      `demachine:amawad:${row.product_source_id}`,
-    );
+    const referencia = `demachine:${params.origen}:${row.product_source_id}`;
+    const product = productsBySource.get(referencia);
     if (!product) {
-      issue(
-        row,
-        'TARGET_PRODUCT_NOT_FOUND',
-        `MiPinta no tiene demachine:amawad:${row.product_source_id}.`,
-      );
+      issue(row, 'TARGET_PRODUCT_NOT_FOUND', `MiPinta no tiene ${referencia}.`);
       continue;
     }
     const warehouseMatches =

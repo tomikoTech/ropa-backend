@@ -20,6 +20,7 @@ import { ProductVariant } from '../../products/entities/product-variant.entity.j
 import { MovementType } from '../../common/enums/movement-type.enum.js';
 import { buildStockBarcode, withCheckDigit } from '../barcode.util.js';
 import { StockIntegrityService } from './stock-integrity.service.js';
+import { llevaUnidades } from './lleva-unidades.js';
 
 /**
  * El único sitio por donde se mueve el inventario.
@@ -533,8 +534,13 @@ export class StockLedgerService {
     // columna (`p.unit_tracking`) no resuelve, y el resultado era `undefined`
     // —es decir, «este producto no lleva bultos»— en silencio. Un fallo así no
     // rompe nada visible: simplemente deja de mover los códigos.
-    const filas = await manager.query<{ lleva: boolean }[]>(
-      `SELECT (p.unit_tracking OR COALESCE(ss.unit_tracking_enabled, false)) AS lleva
+    //
+    // El SQL trae los dos valores crudos y la decisión la toma la regla pura:
+    // así se puede probar sin base de datos y sin montar un movimiento.
+    const filas = await manager.query<
+      { producto: boolean | null; tienda: boolean | null }[]
+    >(
+      `SELECT p.unit_tracking AS producto, ss.unit_tracking_enabled AS tienda
        FROM product_variants v
        JOIN products p ON p.id = v.product_id
        LEFT JOIN store_settings ss ON ss.tenant_id = v.tenant_id
@@ -542,7 +548,11 @@ export class StockLedgerService {
        LIMIT 1`,
       [variantId, tenantId],
     );
-    return !!filas[0]?.lleva;
+    if (!filas[0]) return false;
+    // La decisión no se resuelve en SQL: vive en `lleva-unidades.ts` y se
+    // prueba sin base de datos. Era un `OR`, y por eso un producto no podía
+    // decir que no.
+    return llevaUnidades(filas[0].producto, filas[0].tienda);
   }
 
   /**
