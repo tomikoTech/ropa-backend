@@ -45,6 +45,11 @@ import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
 import { Promoter } from '../promoters/promoter.entity.js';
 import { randomUUID } from 'node:crypto';
 import { diaDeCalendario } from '../common/utils/dia-de-calendario.util.js';
+import { repartirPorBodega } from './reparto-de-unidades.js';
+import {
+  paresVigentesDeLaVenta,
+  type MovimientoConPares,
+} from './pares-vigentes.js';
 
 @Injectable()
 export class PosService {
@@ -1161,39 +1166,84 @@ export class PosService {
     // Una sola consulta para toda la página: el listado abre el detalle con la
     // fila que ya tiene en memoria, así que si esto fuera por venta, ver
     // Ventas dispararía una consulta por cada factura de la página.
-    const filas: { sale_id: string; variant_id: string; barcode: string }[] =
-      await this.dataSource.query(
-        `SELECT m.reference_id AS sale_id, m.variant_id,
-                UNNEST(m.unit_barcodes) AS barcode
-           FROM stock_movements m
-          WHERE m.reference_id = ANY($1::text[])
-            AND m.tenant_id = $2
-            AND m.reference_type = 'SALE'
-            AND m.unit_barcodes IS NOT NULL`,
-        [conLineas.map((venta) => venta.id), tenantId],
-      );
+    // **Todos** los movimientos de la venta, no solo los de tipo `SALE`.
+    //
+    // Editar una factura deja tres: la salida original, la devolución de la
+    // edición y la salida nueva. Filtrando por `reference_type = 'SALE'` se
+    // colaban los códigos de la salida original —los que ya se devolvieron— y
+    // el detalle terminaba mostrando el par que el cliente trajo de vuelta.
+    // La cuenta se hace por signo en `pares-vigentes.ts`, probada aparte.
+    const filas: {
+      sale_id: string;
+      variant_id: string;
+      quantity: number;
+      unit_barcodes: string[] | null;
+      created_at: Date;
+    }[] = await this.dataSource.query(
+      `SELECT m.reference_id AS sale_id, m.variant_id, m.quantity,
+              m.unit_barcodes, m.created_at
+         FROM stock_movements m
+        WHERE m.reference_id = ANY($1::text[])
+          AND m.tenant_id = $2
+        ORDER BY m.created_at ASC, m.id ASC`,
+      [conLineas.map((venta) => venta.id), tenantId],
+    );
     if (!filas.length) return;
 
-    const porVenta = new Map<string, Map<string, string[]>>();
+    // Agrupadas por venta y variante, para netear cada grupo por separado: dos
+    // referencias distintas de la misma factura no se mezclan.
+    const movimientos = new Map<string, MovimientoConPares[]>();
     for (const fila of filas) {
+      const clave = `${fila.sale_id}|${fila.variant_id}`;
+      const lista = movimientos.get(clave);
+      const m = {
+        quantity: Number(fila.quantity),
+        unitBarcodes: fila.unit_barcodes,
+      };
+      if (lista) lista.push(m);
+      else movimientos.set(clave, [m]);
+    }
+
+    const porVenta = new Map<string, Map<string, string[]>>();
+    for (const [clave, lista] of movimientos) {
+      const [saleId, variantId] = clave.split('|');
+      const vigentes = paresVigentesDeLaVenta(lista);
+      if (!vigentes.length) continue;
       const porVariante =
-        porVenta.get(fila.sale_id) ?? new Map<string, string[]>();
-      const lista = porVariante.get(fila.variant_id);
-      if (lista) lista.push(fila.barcode);
-      else porVariante.set(fila.variant_id, [fila.barcode]);
-      porVenta.set(fila.sale_id, porVariante);
+        porVenta.get(saleId) ?? new Map<string, string[]>();
+      porVariante.set(variantId, vigentes);
+      porVenta.set(saleId, porVariante);
     }
 
     // Se reparten en orden entre las líneas de esa variante: si la factura
     // trae la misma referencia dos veces —distinto impulsador, distinto
     // descuento—, a cada una le tocan tantos códigos como unidades vendió.
+    // El id de cada bulto además del código: la pantalla muestra el código
+    // —que es el que está impreso— pero para editar la factura señalando un
+    // par concreto hay que mandarle al servidor su bulto.
+    const todos = [...porVenta.values()].flatMap((v) => [...v.values()].flat());
+    const idPorCodigo = new Map<string, string>();
+    if (todos.length) {
+      const unidades: { id: string; barcode: string }[] =
+        await this.dataSource.query(
+          `SELECT id, barcode FROM stock_units
+            WHERE tenant_id = $1 AND barcode = ANY($2::text[])`,
+          [tenantId, [...new Set(todos)]],
+        );
+      for (const u of unidades) idPorCodigo.set(u.barcode, u.id);
+    }
+
     for (const venta of conLineas) {
       const porVariante = porVenta.get(venta.id);
       if (!porVariante) continue;
       for (const item of venta.items) {
         const disponibles = porVariante.get(item.variantId);
         if (!disponibles?.length) continue;
-        item.unitBarcodes = disponibles.splice(0, item.quantity);
+        const suyos = disponibles.splice(0, item.quantity);
+        item.unitBarcodes = suyos;
+        item.stockUnitIds = suyos
+          .map((codigo) => idPorCodigo.get(codigo))
+          .filter((id): id is string => !!id);
       }
     }
   }
@@ -1302,6 +1352,8 @@ export class PosService {
               quantity: Number(item.quantity),
               unitPrice: Number(item.unitPrice),
               discountPercent: Number(item.discountPercent),
+              // Solo cambia el total: los pares siguen siendo los mismos.
+              stockUnitIds: item.stockUnitId ? [item.stockUnitId] : undefined,
             }))
           : undefined);
 
@@ -1586,7 +1638,44 @@ export class PosService {
                 tenantId,
               });
             } else {
-              let remaining = item.quantity;
+              // Los pares que la edición señaló por su código, si los hay.
+              //
+              // Sin esto el inventario elige por antigüedad, y el par que queda
+              // registrado como vendido no es el que el cliente se llevó: el
+              // código impreso en la caja que sigue en su casa figura como
+              // devuelto. La regla del reparto vive en
+              // `reparto-de-unidades.ts` y se prueba sin base de datos.
+              const pedidos = item.stockUnitIds?.length
+                ? await manager.getRepository(StockUnit).find({
+                    where: {
+                      id: In(item.stockUnitIds),
+                      tenantId,
+                      variantId: variant.id,
+                      status: StockUnitStatus.IN_STOCK,
+                    },
+                  })
+                : [];
+              const reparto = repartirPorBodega(
+                pedidos.map((u) => ({ id: u.id, warehouseId: u.warehouseId })),
+                item.quantity,
+              );
+              for (const grupo of reparto.porBodega) {
+                await this.ledger.mover(manager, {
+                  variantId: variant.id,
+                  warehouseId: grupo.warehouseId,
+                  cantidad: -grupo.unidades.length,
+                  motivo: 'SALE',
+                  referenciaId: sale.id,
+                  notas: `Edición venta ${sale.saleNumber}`,
+                  usuarioId: userId,
+                  unidades: grupo.unidades,
+                  tenantId,
+                });
+              }
+
+              // Lo que los pares elegidos no cubran sale de la cascada de
+              // siempre: quien no elige, no cambia de comportamiento.
+              let remaining = reparto.faltan;
               for (const stock of itemStocks) {
                 if (remaining <= 0) break;
                 // Fresco: `itemStocks` se relee dentro del bucle de ítems.

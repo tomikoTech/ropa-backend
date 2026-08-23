@@ -21,6 +21,23 @@ export class UpdateSaleItemDto {
   @Min(1)
   quantity: number;
 
+  /**
+   * Qué pares concretos se lleva esta línea, por su bulto.
+   *
+   * Sin esto, al editar una factura el inventario elige por antigüedad: el
+   * cliente devuelve **uno** de los dos pares que compró, se baja la cantidad
+   * de dos a uno, y el par que queda registrado como vendido no es el que el
+   * cliente se llevó. El código impreso en la caja que sigue en su casa figura
+   * como devuelto.
+   *
+   * Opcional: quien no elige sigue con la cascada de siempre. Si se eligen
+   * menos de los que dice `quantity`, el resto sale de la cascada.
+   */
+  @IsArray()
+  @IsOptional()
+  @IsUUID('4', { each: true })
+  stockUnitIds?: string[];
+
   // Precio histórico corregido para esta línea. No cambia el precio del
   // catálogo: actualiza únicamente el snapshot de la venta.
   @IsNumber()

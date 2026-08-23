@@ -60,6 +60,15 @@ export class SaleItem extends TenantAwareEntity {
   unitBarcodes?: string[] | null;
 
   /**
+   * Los bultos de esos mismos códigos, para poder señalar un par al editar.
+   *
+   * No es una columna: se calcula al leer, igual que `unitBarcodes`. La
+   * pantalla muestra el código —que es el que está impreso en la caja— y el
+   * servidor necesita el bulto.
+   */
+  stockUnitIds?: string[] | null;
+
+  /**
    * Qué se vendió: una caja cerrada, un par etiquetado, o nada de eso.
    *
    * Es un snapshot y no una consulta al bulto a propósito: la caja se abre,
