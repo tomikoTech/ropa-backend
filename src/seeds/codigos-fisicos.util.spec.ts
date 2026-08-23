@@ -80,6 +80,7 @@ describe('previewPhysicalUnitImport', () => {
       physicalQuantity: 1,
       ready: 1,
       alreadyImported: 0,
+      toUpdate: 0,
       conflicts: 0,
       stockMismatches: 0,
       aggregateQuantity: 1,
@@ -375,5 +376,85 @@ describe('una caja que ya existe no cambia por el catálogo', () => {
       existing: [parSuelto],
     });
     expect(preview.issues[0].code).toBe('EXISTING_BARCODE_CONFLICT');
+  });
+});
+
+describe('cuando la fuente manda, una unidad divergente se corrige', () => {
+  /**
+   * demachine es la fuente de verdad para AMAWAD y Sportcali. Si un par que ya
+   * está en MiPinta aparece allá con otra talla, la que vale es la de allá:
+   * la etiqueta física está pegada a ese par y dice esa talla.
+   *
+   * Sin esto solo quedaba reportarlo y arreglarlo a mano, uno por uno.
+   */
+  const divergente = (): ExistingPhysicalUnit => ({
+    id: 'unidad-1',
+    barcode: '260412000500200103',
+    productId: 'product-1',
+    variantId: 'variant-41',
+    colorId: 'color-fucsia',
+    sizeId: 'size-41',
+    warehouseId: 'warehouse-1',
+    kind: StockUnitKind.BOX,
+    status: StockUnitStatus.IN_STOCK,
+    quantity: 1,
+    cost: 70,
+  });
+
+  it('por defecto sigue siendo un conflicto y no se toca nada', () => {
+    // Corregir en silencio sería peor: cambia la talla de un par que alguien
+    // puede tener apartado.
+    const preview = previewPhysicalUnitImport({
+      ...catalog,
+      rows: [row({ size: '40' })],
+      existing: [divergente()],
+    });
+    expect(preview.issues[0].code).toBe('EXISTING_BARCODE_CONFLICT');
+    expect(preview.summary.toUpdate).toBe(0);
+  });
+
+  it('pidiéndolo, sale para corregir en vez de bloquear', () => {
+    const preview = previewPhysicalUnitImport({
+      ...catalog,
+      rows: [row({ size: '40' })],
+      existing: [divergente()],
+      corregirDivergentes: true,
+    });
+    expect(preview.issues).toEqual([]);
+    expect(preview.summary.toUpdate).toBe(1);
+    const [aCorregir] = preview.divergentes;
+    expect(aCorregir.id).toBe('unidad-1');
+    expect(aCorregir.sizeId).toBe('size-40');
+    expect(aCorregir.variantId).toBe('variant-40');
+  });
+
+  it('lo que ya coincide no entra a corregirse', () => {
+    // Reescribir 2.741 filas iguales llena la auditoría de ruido y esconde
+    // los cambios de verdad.
+    const igual: ExistingPhysicalUnit = {
+      ...divergente(),
+      variantId: 'variant-40',
+      sizeId: 'size-40',
+      kind: StockUnitKind.UNIT,
+    };
+    const preview = previewPhysicalUnitImport({
+      ...catalog,
+      rows: [row({ size: '40' })],
+      existing: [igual],
+      corregirDivergentes: true,
+    });
+    expect(preview.summary.toUpdate).toBe(0);
+    expect(preview.summary.alreadyImported).toBe(1);
+  });
+
+  it('un código que todavía no existe no es una corrección', () => {
+    const preview = previewPhysicalUnitImport({
+      ...catalog,
+      rows: [row({ size: '40' })],
+      existing: [],
+      corregirDivergentes: true,
+    });
+    expect(preview.summary.toUpdate).toBe(0);
+    expect(preview.summary.ready).toBe(1);
   });
 });

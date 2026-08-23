@@ -153,6 +153,11 @@ async function main() {
 
     const preview = previewPhysicalUnitImport({
       origen: slug,
+      // «demachine manda»: un par que allá aparece con otra talla se corrige
+      // acá, porque la etiqueta física está pegada a ese par. Se pide a
+      // propósito; corregir en silencio cambiaría la talla de algo que puede
+      // estar apartado.
+      corregirDivergentes: process.env.UPDATE_DIVERGENT === '1',
       rows: importRows,
       products: products.map((product) => ({
         id: product.id,
@@ -479,6 +484,25 @@ async function main() {
         );
       }
       const unitRepo = manager.getRepository(StockUnit);
+      // Primero las correcciones: son las que cambian algo que ya existe, y
+      // conviene verlas separadas de las altas en el registro.
+      for (const unidad of preview.divergentes) {
+        await unitRepo.update(
+          { id: unidad.id, tenantId: tenant.id },
+          {
+            productId: unidad.productId,
+            variantId: unidad.variantId,
+            colorId: unidad.colorId,
+            sizeId: unidad.sizeId,
+            warehouseId: unidad.warehouseId,
+            kind: unidad.kind,
+            status: unidad.status,
+            quantity: unidad.quantity,
+            cost: unidad.cost,
+          },
+        );
+      }
+
       const saved = await unitRepo.save(
         ready.map((unit) =>
           unitRepo.create({
@@ -533,7 +557,7 @@ async function main() {
       );
     });
     console.log(
-      `APPLY completado: ${ready.length} código(s) insertados; ${preview.summary.alreadyImported} ya existían.`,
+      `APPLY completado: ${ready.length} código(s) insertados; ${preview.summary.toUpdate} corregido(s); ${preview.summary.alreadyImported} ya existían.`,
     );
   } finally {
     await AppDataSource.destroy();

@@ -211,6 +211,17 @@ export function previewPhysicalUnitImport(params: {
    * prueba.
    */
   origen: string;
+  /**
+   * Si un código que ya está en MiPinta con otros atributos se corrige para
+   * quedar como dice la fuente, en vez de bloquear la importación.
+   *
+   * Apagado por defecto: corregir en silencio cambiaría la talla de un par que
+   * alguien puede tener apartado. Se pide a propósito, con
+   * `UPDATE_DIVERGENT=1`, y solo tiene sentido cuando la fuente manda —que es
+   * el caso de AMAWAD y Sportcali frente a demachine, porque la etiqueta
+   * física está pegada a ese par y dice lo que dice allá—.
+   */
+  corregirDivergentes?: boolean;
   rows: LegacyPhysicalUnit[];
   products: TargetProduct[];
   warehouses: TargetWarehouse[];
@@ -223,6 +234,8 @@ export function previewPhysicalUnitImport(params: {
 }) {
   const issues: ImportIssue[] = [];
   const resolved: ResolvedPhysicalUnit[] = [];
+  /** Las que ya están pero no coinciden con la fuente, y hay que corregir. */
+  const divergentes: (ResolvedPhysicalUnit & { id: string })[] = [];
   const productsBySource = new Map(
     params.products
       .filter((product) => product.sourceRef)
@@ -350,11 +363,20 @@ export function previewPhysicalUnitImport(params: {
     };
     const existing = existingByBarcode.get(row.barcode);
     if (existing && !sameExisting(existing, candidate)) {
-      issue(
-        row,
-        'EXISTING_BARCODE_CONFLICT',
-        'El código ya existe en MiPinta con atributos diferentes.',
-      );
+      if (!params.corregirDivergentes) {
+        issue(
+          row,
+          'EXISTING_BARCODE_CONFLICT',
+          'El código ya existe en MiPinta con atributos diferentes.',
+        );
+        continue;
+      }
+      divergentes.push({
+        id: existing.id,
+        source: row,
+        alreadyImported: true,
+        ...candidate,
+      });
       continue;
     }
     resolved.push({
@@ -460,6 +482,7 @@ export function previewPhysicalUnitImport(params: {
 
   return {
     resolved,
+    divergentes,
     issues,
     stockMismatches,
     productTotals,
@@ -468,6 +491,7 @@ export function previewPhysicalUnitImport(params: {
       physicalQuantity: params.rows.reduce((sum, row) => sum + row.quantity, 0),
       ready: resolved.filter((row) => !row.alreadyImported).length,
       alreadyImported: resolved.filter((row) => row.alreadyImported).length,
+      toUpdate: divergentes.length,
       conflicts: issues.length,
       stockMismatches: stockMismatches.length,
       aggregateQuantity,

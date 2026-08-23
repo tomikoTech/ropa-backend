@@ -21,6 +21,10 @@ import { MovementType } from '../../common/enums/movement-type.enum.js';
 import { buildStockBarcode, withCheckDigit } from '../barcode.util.js';
 import { StockIntegrityService } from './stock-integrity.service.js';
 import { llevaUnidades } from './lleva-unidades.js';
+import {
+  prefijoDelDia,
+  siguienteConsecutivoDelDia,
+} from '../consecutivo-del-dia.js';
 
 /**
  * El único sitio por donde se mueve el inventario.
@@ -861,17 +865,35 @@ export class StockLedgerService {
   }
 
   /** El siguiente renglón del día para lo que entra sin orden de compra. */
+  /**
+   * El consecutivo del día para la mercancía que entra sin orden de compra.
+   *
+   * Dos cuidados, los dos aprendidos por las malas:
+   *
+   * 1. **Solo cuentan los códigos nuestros.** En la misma tabla conviven los
+   *    de demachine —18 dígitos y sin verificador, porque son los que están
+   *    impresos en las cajas y no se pueden cambiar—. Antes se contaba
+   *    cualquier código que empezara igual, así que uno ajeno empujaba el
+   *    número hacia arriba y al pasar de 999 la tienda se quedaba sin poder
+   *    etiquetar el resto del día. La regla está en `consecutivo-del-dia.ts`
+   *    y se prueba sin base de datos.
+   *
+   * 2. **Un candado por tienda y día.** Dos ingresos simultáneos leían el
+   *    mismo máximo y armaban el mismo código; el índice único lo atajaba,
+   *    pero tumbando una de las dos operaciones con un error que no dice nada.
+   *    El candado es de transacción —se suelta solo al terminar— y solo
+   *    serializa a quien está creando etiquetas ese mismo día en esa misma
+   *    tienda.
+   */
   private async siguienteConsecutivo(
     manager: EntityManager,
     fecha: Date,
     tenantId: string,
   ): Promise<number> {
-    const prefijo = buildStockBarcode({
-      date: fecha,
-      orderSequence: 0,
-      lineConsecutive: 0,
-      unitSequence: 0,
-    }).slice(0, 10);
+    const prefijo = prefijoDelDia(fecha);
+    await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+      `codigos:${tenantId}:${prefijo}`,
+    ]);
     const filas = await manager
       .getRepository(StockUnit)
       .createQueryBuilder('u')
@@ -879,12 +901,10 @@ export class StockLedgerService {
       .where('u.tenantId = :tenantId', { tenantId })
       .andWhere('u.barcode LIKE :prefijo', { prefijo: `${prefijo}%` })
       .getRawMany<{ barcode: string }>();
-    let max = 0;
-    for (const f of filas) {
-      const n = Number(f.barcode.slice(10, 13));
-      if (!Number.isNaN(n) && n > max) max = n;
-    }
-    return max + 1;
+    return siguienteConsecutivoDelDia(
+      filas.map((f) => f.barcode),
+      fecha,
+    );
   }
 
   /** En qué queda el bulto según lo que le pasó. */
