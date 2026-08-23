@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Observable, tap } from 'rxjs';
 import { AuditService } from './audit.service.js';
+import { limpiarParaAuditoria } from './limpiar-para-auditoria.js';
 
 const AUDITED_METHODS = ['POST', 'PUT', 'PATCH', 'DELETE'];
 
@@ -51,7 +52,14 @@ export class AuditInterceptor implements NestInterceptor {
             action,
             entityType,
             entityId,
-            newValues: method !== 'DELETE' ? req.body : undefined,
+            // El cuerpo pasa por el filtro. Antes se guardaba entero, y eso
+            // dejó en producción 293 contraseñas en texto plano, 900 tokens de
+            // sesión, los secretos de la pasarela de pagos y 90 MB de fotos en
+            // base64. La regla vive en `limpiar-para-auditoria.ts`.
+            newValues:
+              method !== 'DELETE'
+                ? limpiarParaAuditoria(req.body)
+                : undefined,
             ip,
             tenantId,
           })

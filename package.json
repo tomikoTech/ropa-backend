@@ -28,6 +28,7 @@
     "sync:imperial-abonos-2026-08-08": "nest build && node dist/seeds/sync-imperial-abonos-2026-08-08.js",
     "extract:amawad-stock-units": "python3 scripts/extract-amawad-stock-units.py",
     "extract:sportcali-stock-units": "python3 ../migracion-sportcali/extract-stock-units.py",
+    "limpiar:bitacora": "nest build && node dist/seeds/limpiar-bitacora.js",
     "importar:codigos-fisicos": "nest build && node dist/seeds/importar-codigos-fisicos.js",
     "reconciliar:bultos": "nest build && node dist/seeds/reconciliar-bultos.js"
   },
