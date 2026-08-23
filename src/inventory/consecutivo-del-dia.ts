@@ -52,10 +52,52 @@ export function siguienteConsecutivoDelDia(
   if (max >= BARCODE_LIMITS.line) {
     // Reventar acá, con un mensaje que se entienda, es mejor que armar un
     // código con un dígito de más que la pistola no lee.
-    throw new Error(
-      `Ya se usaron los ${BARCODE_LIMITS.line} consecutivos de hoy sin orden de compra. ` +
-        'La mercancía que falta hay que ingresarla mañana o por una orden de compra.',
-    );
+    throw new ConsecutivoAgotadoError();
   }
   return max + 1;
+}
+
+/**
+ * Se acabaron los consecutivos del día.
+ *
+ * Tiene tipo propio para que quien llama pueda distinguirlo: sin eso salía
+ * como `Error` pelado y el filtro global lo convertía en **500 «Error interno
+ * del servidor»**, justo cuando el sistema sabía exactamente qué había pasado.
+ * Recibir una compra le contestaba eso al vendedor.
+ *
+ * El mensaje dice **el hecho y nada más**. El consejo depende de por dónde
+ * esté entrando la mercancía, y quien conoce eso es quien llama —ver
+ * `explicarConsecutivoAgotado`—.
+ */
+export class ConsecutivoAgotadoError extends Error {
+  constructor() {
+    super(
+      `Ya se usaron los ${BARCODE_LIMITS.line} códigos que caben hoy en este tramo.`,
+    );
+    this.name = 'ConsecutivoAgotadoError';
+  }
+}
+
+/**
+ * El mismo hecho, con el consejo que sí aplica.
+ *
+ * Antes el mensaje decía siempre «ingrésala mañana o por una orden de compra».
+ * A quien estaba **recibiendo una orden de compra** eso le pedía hacer lo que
+ * ya estaba haciendo: un callejón sin salida con apariencia de ayuda.
+ *
+ * El tramo de 999 es el reservado para lo que entra con `orden = 0000`, y hoy
+ * la recepción de una compra también consume de ahí (ver PENDIENTES B11): por
+ * eso a esos dos orígenes lo único honesto que se les puede decir es que
+ * esperen al día siguiente.
+ */
+export function explicarConsecutivoAgotado(motivo: string): string {
+  const hecho = `Ya se usaron los ${BARCODE_LIMITS.line} códigos que caben hoy en este tramo.`;
+  const vienePorOrden = motivo === 'PURCHASE' || motivo === 'PURCHASE_BOX_LINE';
+  if (vienePorOrden) {
+    return `${hecho} Lo que falte por etiquetar hay que recibirlo mañana; la orden queda parcial y se puede terminar de recibir.`;
+  }
+  if (motivo === 'STOCK_UNIT_INTAKE') {
+    return `${hecho} La mercancía que falta se puede ingresar mañana, o hoy mismo por una orden de compra.`;
+  }
+  return `${hecho} Lo que falte hay que ingresarlo mañana.`;
 }

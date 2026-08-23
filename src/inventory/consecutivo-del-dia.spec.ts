@@ -1,4 +1,7 @@
-import { siguienteConsecutivoDelDia } from './consecutivo-del-dia.js';
+import {
+  ConsecutivoAgotadoError,
+  explicarConsecutivoAgotado,
+  siguienteConsecutivoDelDia } from './consecutivo-del-dia.js';
 
 /**
  * El consecutivo del día con el que se arma un código nuevo.
@@ -102,5 +105,60 @@ describe('siguienteConsecutivoDelDia', () => {
     expect(() => siguienteConsecutivoDelDia([nuestro(999)], HOY)).toThrow(
       /999/,
     );
+  });
+
+  it('lo que lanza es reconocible, no un Error cualquiera', () => {
+    // Quien llama tiene que poder distinguirlo para contestar 409 y no 500:
+    // el vendedor veía «Error interno del servidor» cuando el sistema sabía
+    // perfectamente qué había pasado y cómo salir.
+    expect(() => siguienteConsecutivoDelDia([nuestro(999)], HOY)).toThrow(
+      ConsecutivoAgotadoError,
+    );
+  });
+
+  it('no da consejos: el consejo depende de quién esté ingresando', () => {
+    // Decía «ingrésala por una orden de compra» siempre — incluso a quien
+    // estaba recibiendo justamente una orden de compra, que es un consejo
+    // imposible de seguir. El hecho lo dice la regla; el consejo, quien
+    // conoce el origen.
+    try {
+      siguienteConsecutivoDelDia([nuestro(999)], HOY);
+      throw new Error('debió lanzar');
+    } catch (e) {
+      expect(e).toBeInstanceOf(ConsecutivoAgotadoError);
+      expect((e as Error).message).not.toMatch(/orden de compra/i);
+    }
+  });
+});
+
+describe('explicarConsecutivoAgotado', () => {
+  it('a quien recibe una compra le dice lo que sí puede hacer', () => {
+    const mensaje = explicarConsecutivoAgotado('PURCHASE');
+    expect(mensaje).toMatch(/999/);
+    // Lo que NO puede hacer es «ingresarla por una orden de compra»: ya viene
+    // por una.
+    expect(mensaje).not.toMatch(/por una orden de compra/i);
+    // Y le dice lo que de verdad le sirve saber: la orden no se pierde, queda
+    // parcial y mañana se termina de recibir. Eso es lo que un mensaje
+    // genérico no puede decirle.
+    expect(mensaje).toMatch(/parcial/i);
+    expect(mensaje).toMatch(/mañana/i);
+  });
+
+  it('lo mismo para las cajas de una compra', () => {
+    expect(explicarConsecutivoAgotado('PURCHASE_BOX_LINE')).toBe(
+      explicarConsecutivoAgotado('PURCHASE'),
+    );
+  });
+
+  it('a quien ingresa sin orden sí le sirve el consejo', () => {
+    const mensaje = explicarConsecutivoAgotado('STOCK_UNIT_INTAKE');
+    expect(mensaje).toMatch(/por una orden de compra/i);
+  });
+
+  it('cualquier otro origen recibe el hecho, sin consejos que no apliquen', () => {
+    const mensaje = explicarConsecutivoAgotado('ADJUSTMENT');
+    expect(mensaje).toMatch(/999/);
+    expect(mensaje).not.toMatch(/por una orden de compra/i);
   });
 });

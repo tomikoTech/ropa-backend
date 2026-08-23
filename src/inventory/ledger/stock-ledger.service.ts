@@ -3,6 +3,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  ConflictException,
 } from '@nestjs/common';
 import { DataSource, EntityManager, In } from 'typeorm';
 import { Stock } from '../entities/stock.entity.js';
@@ -22,6 +23,8 @@ import { buildStockBarcode, withCheckDigit } from '../barcode.util.js';
 import { StockIntegrityService } from './stock-integrity.service.js';
 import { llevaUnidades } from './lleva-unidades.js';
 import {
+  ConsecutivoAgotadoError,
+  explicarConsecutivoAgotado,
   prefijoDelDia,
   siguienteConsecutivoDelDia,
 } from '../consecutivo-del-dia.js';
@@ -824,11 +827,19 @@ export class StockLedgerService {
 
     const repo = manager.getRepository(StockUnit);
     const hoy = new Date();
-    const consecutivo = await this.siguienteConsecutivo(
-      manager,
-      hoy,
-      orden.tenantId,
-    );
+    let consecutivo: number;
+    try {
+      consecutivo = await this.siguienteConsecutivo(manager, hoy, orden.tenantId);
+    } catch (error) {
+      // Se acabaron los códigos del día. Es una condición del negocio, no una
+      // falla del servidor: salía como 500 «Error interno del servidor» y el
+      // vendedor se quedaba sin saber qué hacer con la mercancía en la mano.
+      // El consejo lo pone `explicarConsecutivoAgotado` según de dónde venga.
+      if (error instanceof ConsecutivoAgotadoError) {
+        throw new ConflictException(explicarConsecutivoAgotado(orden.motivo));
+      }
+      throw error;
+    }
     const nuevas: StockUnit[] = [];
     for (let i = 0; i < cantidad; i++) {
       nuevas.push(
