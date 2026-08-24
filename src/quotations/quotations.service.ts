@@ -12,7 +12,10 @@ import { CreateQuotationDto } from './dto/create-quotation.dto.js';
 import { UpdateQuotationDto } from './dto/update-quotation.dto.js';
 import { ConvertQuotationDto } from './dto/convert-quotation.dto.js';
 import { ProductVariant } from '../products/entities/product-variant.entity.js';
-import { soloLasSuyas } from './ventas-por-autorizar.js';
+import {
+  ESTADOS_PENDIENTES,
+  soloLasSuyas,
+} from './ventas-por-autorizar.js';
 import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
 import {
   TaxService,
@@ -161,6 +164,31 @@ export class QuotationsService {
       relations: ['client', 'items'],
       order: { createdAt: 'DESC' },
     });
+  }
+
+  /**
+   * Cuántas ventas están esperando algo, para el contador del menú.
+   *
+   * Se cuenta en el servidor: traer la lista entera cada minuto para contarla
+   * en el navegador es lo que ya se corrigió con los traslados. Y respeta el
+   * mismo alcance que el listado — quien no autoriza cuenta solo las suyas.
+   */
+  async contarPendientes(
+    tenantId: string,
+    quien: { usuarioId: string; puedeAutorizar: boolean },
+  ): Promise<{ total: number }> {
+    const soloDe = soloLasSuyas(
+      { puedeAutorizar: quien.puedeAutorizar },
+      quien.usuarioId,
+    );
+    const total = await this.quotationRepo.count({
+      where: {
+        tenantId,
+        status: In([...ESTADOS_PENDIENTES]),
+        ...(soloDe ? { createdById: soloDe } : {}),
+      },
+    });
+    return { total };
   }
 
   async findOne(

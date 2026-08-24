@@ -59,3 +59,17 @@ export function soloLasSuyas(
 ): string | null {
   return quien.puedeAutorizar ? null : usuarioId;
 }
+
+/**
+ * Qué estados están **esperando** algo de alguien.
+ *
+ * `CONVERTED` ya es una venta y `EXPIRED` se venció sola: ninguna de las dos
+ * pide acción. Las demás sí, y son las que el contador del menú tiene que
+ * mostrar — a quien vende, para saber qué le falta que le aprueben; a quien
+ * autoriza, para saber qué tiene encima.
+ */
+export const ESTADOS_PENDIENTES = ['DRAFT', 'SENT', 'APPROVED'] as const;
+
+export function estaPendiente(estado: string): boolean {
+  return (ESTADOS_PENDIENTES as readonly string[]).includes(estado);
+}

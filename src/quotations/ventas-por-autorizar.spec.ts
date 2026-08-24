@@ -1,4 +1,5 @@
 import {
+  estaPendiente,
   rotulosDeVentasPendientes,
   soloLasSuyas,
 } from './ventas-por-autorizar.js';
@@ -44,5 +45,26 @@ describe('soloLasSuyas', () => {
 
   it('quien autoriza las ve todas: es su trabajo', () => {
     expect(soloLasSuyas({ puedeAutorizar: true }, 'u1')).toBeNull();
+  });
+});
+
+describe('estaPendiente', () => {
+  it('lo que espera acción de alguien cuenta', () => {
+    for (const estado of ['DRAFT', 'SENT', 'APPROVED']) {
+      expect(estaPendiente(estado)).toBe(true);
+    }
+  });
+
+  it('lo ya convertido no: es una venta, no un pendiente', () => {
+    expect(estaPendiente('CONVERTED')).toBe(false);
+  });
+
+  it('lo vencido tampoco: se venció solo, nadie tiene que hacer nada', () => {
+    // Si contara, el número del menú no bajaría nunca y dejaría de mirarse.
+    expect(estaPendiente('EXPIRED')).toBe(false);
+  });
+
+  it('un estado desconocido no infla el contador', () => {
+    expect(estaPendiente('LO_QUE_SEA')).toBe(false);
   });
 });

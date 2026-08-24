@@ -8,7 +8,7 @@ import {
   Param,
   ParseUUIDPipe,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { QuotationsService } from './quotations.service.js';
 import { CreateQuotationDto } from './dto/create-quotation.dto.js';
 import { UpdateQuotationDto } from './dto/update-quotation.dto.js';
@@ -60,6 +60,22 @@ export class QuotationsController {
       usuarioId: user.id,
       puedeAutorizar: await this.access.userCan(user, 'quotations', 'edit'),
     };
+  }
+
+  @Get('pendientes/conteo')
+  @ApiOperation({
+    summary: 'Cuántas ventas están esperando autorización (para el menú)',
+    description:
+      'Quien no puede autorizar cuenta solo las suyas, igual que en el listado.',
+  })
+  async contarPendientes(
+    @CurrentUser() user: { id: string; role: Role; accessRoleId: string | null },
+    @TenantId() tenantId: string,
+  ) {
+    return this.quotationsService.contarPendientes(
+      tenantId,
+      await this.quienMira(user),
+    );
   }
 
   @Get(':id')
