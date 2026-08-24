@@ -326,6 +326,18 @@ export class PurchasesService {
     if (!po) {
       throw new NotFoundException('Orden de compra no encontrada');
     }
+
+    // Los renglones de caja **también son la orden**.
+    //
+    // No viajaban en el detalle, y por eso una orden hecha de cajas se veía
+    // vacía por todas partes: «Ver detalle» mostraba solo proveedor, bodega y
+    // total —ni una línea de qué se compró— y el diálogo de «Recibir» salía
+    // sin filas, contestando «Ingrese al menos una cantidad» a quien no tenía
+    // dónde escribirla. Un callejón sin salida con apariencia de botón.
+    po.boxLines = await this.dataSource.getRepository(PurchaseBoxLine).find({
+      where: { purchaseOrderId: po.id, tenantId },
+      order: { consecutive: 'ASC' },
+    });
     return po;
   }
 

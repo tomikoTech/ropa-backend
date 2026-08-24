@@ -14,6 +14,7 @@ import { Warehouse } from '../../inventory/entities/warehouse.entity.js';
 import { User } from '../../users/entities/user.entity.js';
 import { PurchaseOrderItem } from './purchase-order-item.entity.js';
 import { AccountsPayable } from './accounts-payable.entity.js';
+import type { PurchaseBoxLine } from './purchase-box-line.entity.js';
 import { PurchaseOrderStatus } from '../../common/enums/purchase-order-status.enum.js';
 import { TenantAwareEntity } from '../../common/entities/tenant-aware.entity.js';
 
@@ -121,6 +122,15 @@ export class PurchaseOrder extends TenantAwareEntity {
     cascade: true,
   })
   items: PurchaseOrderItem[];
+
+  /**
+   * Los renglones de caja de esta orden.
+   *
+   * No es una relación de TypeORM a propósito: `PurchaseBoxLine` vive en su
+   * propio módulo y traerla con `relations` arrastraría producto, color y
+   * curva en cada listado. La llena `findOne`, que es donde hace falta.
+   */
+  boxLines?: PurchaseBoxLine[];
 
   @OneToMany(() => AccountsPayable, (ap) => ap.purchaseOrder)
   accountsPayable: AccountsPayable[];
