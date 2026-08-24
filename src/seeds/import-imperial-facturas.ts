@@ -121,11 +121,34 @@ async function main() {
     database: process.env.DB_DATABASE || 'ropa_pos',
     ...(isLocal ? {} : { ssl: { rejectUnauthorized: false } }),
     entities: [
-      Tenant, User, RefreshToken, Category, Product, ProductVariant, Warehouse,
-      Stock, StockMovement, Client, Sale, SaleItem, Payment, AccountsReceivable,
-      AccountsReceivablePayment, Supplier, PurchaseOrder, PurchaseOrderItem,
-      AccountsPayable, AccountsPayablePayment, Promotion, Return, ReturnItem,
-      CreditNote, AuditLog, StoreSettings, EcommerceOrder, EcommerceOrderItem,
+      Tenant,
+      User,
+      RefreshToken,
+      Category,
+      Product,
+      ProductVariant,
+      Warehouse,
+      Stock,
+      StockMovement,
+      Client,
+      Sale,
+      SaleItem,
+      Payment,
+      AccountsReceivable,
+      AccountsReceivablePayment,
+      Supplier,
+      PurchaseOrder,
+      PurchaseOrderItem,
+      AccountsPayable,
+      AccountsPayablePayment,
+      Promotion,
+      Return,
+      ReturnItem,
+      CreditNote,
+      AuditLog,
+      StoreSettings,
+      EcommerceOrder,
+      EcommerceOrderItem,
       EcommerceCustomer,
     ],
     synchronize: false,
@@ -149,9 +172,10 @@ async function main() {
         where: { tenantId: tenant.id, role: Role.ADMIN },
         order: { createdAt: 'ASC' },
       })) ??
-      (await ds
-        .getRepository(User)
-        .findOne({ where: { tenantId: tenant.id }, order: { createdAt: 'ASC' } }));
+      (await ds.getRepository(User).findOne({
+        where: { tenantId: tenant.id },
+        order: { createdAt: 'ASC' },
+      }));
     if (!user) throw new Error('No hay usuario para asignar las ventas');
     const warehouse = await ds
       .getRepository(Warehouse)

@@ -101,7 +101,6 @@ function slugify(s: string): string {
     .replace(/(^-|-$)/g, '');
 }
 
-
 function genderOf(g: string): Gender {
   if (g === 'MUJER') return Gender.MUJER;
   if (g === 'HOMBRE') return Gender.HOMBRE;
@@ -111,13 +110,21 @@ function genderOf(g: string): Gender {
 async function main() {
   const payloadPath =
     process.env.PAYLOAD_PATH ||
-    path.resolve(process.cwd(), '..', 'migracion-sportcali', 'out', 'payload.json');
+    path.resolve(
+      process.cwd(),
+      '..',
+      'migracion-sportcali',
+      'out',
+      'payload.json',
+    );
   if (!fs.existsSync(payloadPath)) {
     throw new Error(`No existe el payload: ${payloadPath}`);
   }
   const payload: Payload = JSON.parse(fs.readFileSync(payloadPath, 'utf8'));
   console.log(`Payload: ${payloadPath}`);
-  console.log(`  productos=${payload.products.length} bodegas=${payload.warehouses.length} staff=${payload.staff.length}`);
+  console.log(
+    `  productos=${payload.products.length} bodegas=${payload.warehouses.length} staff=${payload.staff.length}`,
+  );
 
   const host = process.env.DB_HOST || 'localhost';
   const isLocal = esHostLocal(host);
@@ -129,14 +136,25 @@ async function main() {
     password: process.env.DB_PASSWORD || '',
     database: process.env.DB_DATABASE || 'ropa_pos',
     entities: [
-      Tenant, User, Category, Product, ProductVariant, Warehouse, Stock, StockMovement, StoreSettings,
-      Size, Color,
+      Tenant,
+      User,
+      Category,
+      Product,
+      ProductVariant,
+      Warehouse,
+      Stock,
+      StockMovement,
+      StoreSettings,
+      Size,
+      Color,
     ],
     synchronize: isLocal, // en local crea las columnas nuevas (brand, source_ref); en prod NO
     ...(!isLocal && { ssl: { rejectUnauthorized: false } }),
   });
   await dataSource.initialize();
-  console.log(`Conectado a ${host}/${process.env.DB_DATABASE || 'ropa_pos'} (local=${isLocal}, dryRun=${DRY_RUN})`);
+  console.log(
+    `Conectado a ${host}/${process.env.DB_DATABASE || 'ropa_pos'} (local=${isLocal}, dryRun=${DRY_RUN})`,
+  );
 
   const tenantRepo = dataSource.getRepository(Tenant);
   const userRepo = dataSource.getRepository(User);
@@ -190,7 +208,8 @@ async function main() {
       console.log(`  Bodega creada: ${w.name}`);
     }
     whMap.set(String(w.source_id), wh.id);
-    if (w.name.toUpperCase().includes('PPAL') || !firstWarehouseId) firstWarehouseId = wh.id;
+    if (w.name.toUpperCase().includes('PPAL') || !firstWarehouseId)
+      firstWarehouseId = wh.id;
   }
 
   // ── 3. Staff -> Users ──
@@ -280,7 +299,10 @@ async function main() {
       product.costPrice = p.cost_price;
       cambios.push('costo');
     }
-    if (p.wholesale_price && Number(product.wholesalePrice || 0) !== p.wholesale_price) {
+    if (
+      p.wholesale_price &&
+      Number(product.wholesalePrice || 0) !== p.wholesale_price
+    ) {
       product.wholesalePrice = p.wholesale_price;
       cambios.push('mayorista');
     }
@@ -301,8 +323,13 @@ async function main() {
     stats.fieldsUpdated++;
   };
 
-  const reconcileExistingProduct = async (product: Product, p: PayloadProduct) => {
-    const variants = await variantRepo.find({ where: { tenantId, productId: product.id } });
+  const reconcileExistingProduct = async (
+    product: Product,
+    p: PayloadProduct,
+  ) => {
+    const variants = await variantRepo.find({
+      where: { tenantId, productId: product.id },
+    });
     const byKey = new Map<string, ProductVariant>();
     for (const variant of variants) {
       byKey.set(`${variant.sizeId || ''}|${variant.colorId || ''}`, variant);
@@ -342,11 +369,15 @@ async function main() {
       desired.set(key, (desired.get(key) || 0) + (row.qty || 0));
     }
 
-    const variantIds = [...byKey.values()].map((variant) => variant.id).filter(Boolean);
+    const variantIds = [...byKey.values()]
+      .map((variant) => variant.id)
+      .filter(Boolean);
     const currentRows = variantIds.length
       ? await stockRepo.find({ where: { tenantId, variantId: In(variantIds) } })
       : [];
-    const currentByKey = new Map(currentRows.map((row) => [`${row.variantId}|${row.warehouseId}`, row]));
+    const currentByKey = new Map(
+      currentRows.map((row) => [`${row.variantId}|${row.warehouseId}`, row]),
+    );
     const keys = new Set([...currentByKey.keys(), ...desired.keys()]);
     for (const key of keys) {
       const current = currentByKey.get(key);
@@ -355,18 +386,22 @@ async function main() {
       if (before === target) continue;
       const [variantId, warehouseId] = key.split('|');
       if (!DRY_RUN) {
-        const row = current || stockRepo.create({ variantId, warehouseId, tenantId, minStock: 0 });
+        const row =
+          current ||
+          stockRepo.create({ variantId, warehouseId, tenantId, minStock: 0 });
         row.quantity = target;
         await stockRepo.save(row);
-        await movementRepo.save(movementRepo.create({
-          variantId,
-          warehouseId,
-          movementType: MovementType.ADJUSTMENT,
-          quantity: Math.abs(target - before),
-          referenceType: 'RECONCILE_SPORTCALI',
-          notes: `Conciliación demachine ${SOURCE}:${p.source_id} (${before} -> ${target})`,
-          tenantId,
-        }));
+        await movementRepo.save(
+          movementRepo.create({
+            variantId,
+            warehouseId,
+            movementType: MovementType.ADJUSTMENT,
+            quantity: Math.abs(target - before),
+            referenceType: 'RECONCILE_SPORTCALI',
+            notes: `Conciliación demachine ${SOURCE}:${p.source_id} (${before} -> ${target})`,
+            tenantId,
+          }),
+        );
       }
       stats.stockAdjustments++;
     }
@@ -375,7 +410,9 @@ async function main() {
 
   for (const p of payload.products) {
     const sourceRef = `${SOURCE}:${p.source_id}`;
-    const existing = await productRepo.findOne({ where: { tenantId, sourceRef } });
+    const existing = await productRepo.findOne({
+      where: { tenantId, sourceRef },
+    });
     if (existing) {
       stats.skippedExisting++;
       await updateExistingFields(existing, p);
@@ -386,7 +423,10 @@ async function main() {
     // skuPrefix único por tenant: `code` de demachine si existe; si no, SC<id>.
     let skuPrefix = p.code ? `${p.code}` : `SC${p.source_id}`;
     let n = 1;
-    while (usedSkuPrefixes.has(skuPrefix) || (await productRepo.findOne({ where: { tenantId, skuPrefix } }))) {
+    while (
+      usedSkuPrefixes.has(skuPrefix) ||
+      (await productRepo.findOne({ where: { tenantId, skuPrefix } }))
+    ) {
       n++;
       skuPrefix = `${p.code || 'SC' + p.source_id}-${n}`;
     }
@@ -395,7 +435,10 @@ async function main() {
     const baseSlug = slugify(p.name) || `producto-${p.source_id}`;
     let slug = baseSlug;
     let sn = 1;
-    while (usedSlugs.has(slug) || (await productRepo.findOne({ where: { tenantId, slug } }))) {
+    while (
+      usedSlugs.has(slug) ||
+      (await productRepo.findOne({ where: { tenantId, slug } }))
+    ) {
       sn++;
       slug = `${baseSlug}-${sn}`;
     }
@@ -437,7 +480,8 @@ async function main() {
         for (const v of p.variants) {
           let sku = `${skuPrefix}-${skuPart(v.size || '')}-${skuPart(v.color || '')}`;
           let k2 = 1;
-          while (skuSeen.has(sku)) sku = `${skuPrefix}-${skuPart(v.size || '')}-${skuPart(v.color || '')}-${++k2}`;
+          while (skuSeen.has(sku))
+            sku = `${skuPrefix}-${skuPart(v.size || '')}-${skuPart(v.color || '')}-${++k2}`;
           skuSeen.add(sku);
           const barcode = `78${stamp}${String(barcodeCounter++).padStart(6, '0')}`;
           const variant = await m.getRepository(ProductVariant).save(
@@ -467,7 +511,13 @@ async function main() {
         for (const [kk, qty] of stockAgg) {
           const [variantId, warehouseId] = kk.split('|');
           await m.getRepository(Stock).save(
-            m.getRepository(Stock).create({ variantId, warehouseId, quantity: qty, minStock: 0, tenantId }),
+            m.getRepository(Stock).create({
+              variantId,
+              warehouseId,
+              quantity: qty,
+              minStock: 0,
+              tenantId,
+            }),
           );
           if (qty > 0) {
             await m.getRepository(StockMovement).save(
@@ -486,42 +536,59 @@ async function main() {
         }
       });
       stats.products++;
-      if (stats.products % 50 === 0) console.log(`  … ${stats.products} productos`);
+      if (stats.products % 50 === 0)
+        console.log(`  … ${stats.products} productos`);
     } catch (e: any) {
       failures.push({ source_id: p.source_id, error: e?.message || String(e) });
       // liberar los identificadores reservados para no dejar huecos
       usedSkuPrefixes.delete(skuPrefix);
       usedSlugs.delete(slug);
-      console.error(`  ✗ producto ${p.source_id} (${p.name}): ${e?.message || e}`);
+      console.error(
+        `  ✗ producto ${p.source_id} (${p.name}): ${e?.message || e}`,
+      );
     }
   }
-  if (failures.length) console.log(`\n⚠️  ${failures.length} productos fallaron:`, failures.slice(0, 10));
+  if (failures.length)
+    console.log(
+      `\n⚠️  ${failures.length} productos fallaron:`,
+      failures.slice(0, 10),
+    );
 
   // Si una referencia desaparece del reporte fuente, no la borramos: dejamos
   // su stock en cero y registramos el ajuste para no conservar pares obsoletos.
   if (RECONCILE_STOCK) {
-    const sourceRefs = new Set(payload.products.map((p) => `${SOURCE}:${p.source_id}`));
-    const sourceProducts = await productRepo.find({ where: { tenantId, sourceRef: Like(`${SOURCE}:%`) } });
+    const sourceRefs = new Set(
+      payload.products.map((p) => `${SOURCE}:${p.source_id}`),
+    );
+    const sourceProducts = await productRepo.find({
+      where: { tenantId, sourceRef: Like(`${SOURCE}:%`) },
+    });
     for (const product of sourceProducts) {
       if (!product.sourceRef || sourceRefs.has(product.sourceRef)) continue;
-      const variants = await variantRepo.find({ where: { tenantId, productId: product.id } });
+      const variants = await variantRepo.find({
+        where: { tenantId, productId: product.id },
+      });
       for (const variant of variants) {
-        const rows = await stockRepo.find({ where: { tenantId, variantId: variant.id } });
+        const rows = await stockRepo.find({
+          where: { tenantId, variantId: variant.id },
+        });
         for (const row of rows) {
           if (row.quantity === 0) continue;
           const before = row.quantity;
           row.quantity = 0;
           if (!DRY_RUN) {
             await stockRepo.save(row);
-            await movementRepo.save(movementRepo.create({
-              variantId: variant.id,
-              warehouseId: row.warehouseId,
-              movementType: MovementType.ADJUSTMENT,
-              quantity: Math.abs(before),
-              referenceType: 'RECONCILE_SPORTCALI_STALE',
-              notes: `Referencia ausente del reporte demachine ${product.sourceRef} (${before} -> 0)`,
-              tenantId,
-            }));
+            await movementRepo.save(
+              movementRepo.create({
+                variantId: variant.id,
+                warehouseId: row.warehouseId,
+                movementType: MovementType.ADJUSTMENT,
+                quantity: Math.abs(before),
+                referenceType: 'RECONCILE_SPORTCALI_STALE',
+                notes: `Referencia ausente del reporte demachine ${product.sourceRef} (${before} -> 0)`,
+                tenantId,
+              }),
+            );
           }
           stats.staleStockAdjustments++;
         }
@@ -545,7 +612,9 @@ async function main() {
 
   console.log('\n===== RESUMEN =====');
   console.log(JSON.stringify(stats, null, 2));
-  console.log(DRY_RUN ? '(DRY_RUN: no se escribió nada)' : 'Importación completada.');
+  console.log(
+    DRY_RUN ? '(DRY_RUN: no se escribió nada)' : 'Importación completada.',
+  );
   await dataSource.destroy();
 }
 

@@ -73,7 +73,13 @@ export function ajustesDeStock(
     const hasta = deseado.get(k) ?? 0;
     if (desde === hasta) continue;
     const [variantId, warehouseId] = k.split('|');
-    ajustes.push({ variantId, warehouseId, desde, hasta, delta: hasta - desde });
+    ajustes.push({
+      variantId,
+      warehouseId,
+      desde,
+      hasta,
+      delta: hasta - desde,
+    });
   }
   return ajustes;
 }

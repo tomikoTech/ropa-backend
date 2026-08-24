@@ -14,9 +14,10 @@
  * obligatorio**: sin él el script se niega en vez de adivinar, porque adivinar
  * mal significa meter un usuario ajeno en la tienda de otro cliente.
  *
- * `BODEGA` es el nombre de la bodega a la que tendrá acceso; si no se pasa,
- * usa la primera activa. La clave se imprime **una sola vez**, al crearla; se
- * puede fijar con `CLAVE`, y si no, sale al azar.
+ * `BODEGA` es la bodega a la que tendrá acceso. Acepta un nombre, varios
+ * separados por coma, o `todas`. Sin ella usa la primera activa. La clave se
+ * imprime **una sola vez**, al crearla; se puede fijar con `CLAVE`, y si no,
+ * sale al azar.
  */
 import 'dotenv/config';
 import { randomBytes } from 'crypto';
@@ -24,6 +25,8 @@ import * as bcrypt from 'bcrypt';
 import { AppDataSource } from '../config/data-source.js';
 import { findRoleTemplate } from '../access/role-templates.js';
 import { escogerTienda, type Tienda } from './escoger-tienda.js';
+import { escogerBodegas, type Bodega } from './escoger-bodegas.js';
+import { rolAUsar } from './reusar-rol.js';
 
 const CORREO = process.env.CORREO || 'vendedor.externo@ejemplo.co';
 
@@ -44,33 +47,29 @@ async function main() {
     );
     const tenant = escogerTienda(tiendas, process.env.TENANT);
 
-    const bodegas = await consultar<{ id: string; name: string }>(
+    const bodegas = await consultar<Bodega>(
       `SELECT id, name FROM warehouses
         WHERE tenant_id = $1 AND is_active = true
         ORDER BY name`,
       [tenant.id],
     );
-    if (bodegas.length === 0) throw new Error('La tienda no tiene bodegas.');
-    const bodega = process.env.BODEGA
-      ? bodegas.find((b) => b.name === process.env.BODEGA)
-      : bodegas[0];
-    if (!bodega) {
-      throw new Error(
-        `No existe la bodega "${process.env.BODEGA}". Hay: ${bodegas.map((b) => b.name).join(', ')}`,
-      );
-    }
+    const escogidas = escogerBodegas(bodegas, process.env.BODEGA);
 
     const plantilla = findRoleTemplate('vendedor-externo');
     if (!plantilla) throw new Error('Falta la plantilla vendedor-externo.');
 
     console.log(`Tienda:  ${tenant.name} (${tenant.slug})`);
-    console.log(`Bodega:  ${bodega.name} (la única que verá)`);
-    if (bodegas.length > 1) {
+    console.log(
+      escogidas === null
+        ? `Bodegas: todas (${bodegas.length}), incluidas las que creen después`
+        : `Bodegas: ${escogidas.map((b) => b.name).join(', ')} — y ninguna más`,
+    );
+    if (escogidas !== null && bodegas.length > escogidas.length) {
       console.log(
-        `         otras: ${bodegas
-          .filter((b) => b.id !== bodega.id)
+        `         no verá: ${bodegas
+          .filter((b) => !escogidas.some((e) => e.id === b.id))
           .map((b) => b.name)
-          .join(', ')} — se escogen con BODEGA="<nombre>"`,
+          .join(', ')} — se cambia con BODEGA="<nombre>" o BODEGA=todas`,
       );
     }
     console.log(`Correo:  ${CORREO}`);
@@ -100,40 +99,54 @@ async function main() {
     const clave =
       process.env.CLAVE || `Ve-${randomBytes(6).toString('base64url')}`;
     await AppDataSource.transaction(async (m) => {
-      const [rol]: { id: string }[] = await m.query(
-        `INSERT INTO access_roles (tenant_id, name, description)
-         VALUES ($1, $2, $3) RETURNING id`,
-        [tenant.id, plantilla.name, plantilla.description],
+      // El rol es de la tienda, no del usuario: `access_roles` tiene
+      // UNIQUE (tenant_id, name), así que el segundo vendedor externo de la
+      // misma tienda comparte el del primero.
+      const [yaHayRol]: { id: string }[] = await m.query(
+        `SELECT id FROM access_roles WHERE tenant_id = $1 AND name = $2`,
+        [tenant.id, plantilla.name],
       );
-      // La matriz se guarda con una columna por acción. Lo que importa acá:
-      // `can_edit` en falso sobre cotizaciones es lo que impide que el
-      // vendedor autorice su propia venta.
-      for (const permiso of plantilla.permissions) {
-        await m.query(
-          `INSERT INTO role_permissions
-             (tenant_id, role_id, module, can_list, can_create, can_edit, can_delete)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-          [
-            tenant.id,
-            rol.id,
-            permiso.module,
-            permiso.list,
-            permiso.create,
-            permiso.edit,
-            permiso.delete,
-          ],
+      const decision = rolAUsar(yaHayRol);
+      let rolId = decision.id;
+      if (decision.crear) {
+        const [creado]: { id: string }[] = await m.query(
+          `INSERT INTO access_roles (tenant_id, name, description)
+           VALUES ($1, $2, $3) RETURNING id`,
+          [tenant.id, plantilla.name, plantilla.description],
         );
+        rolId = creado.id;
+        for (const permiso of plantilla.permissions) {
+          await m.query(
+            `INSERT INTO role_permissions
+               (tenant_id, role_id, module, can_list, can_create, can_edit, can_delete)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+            [
+              tenant.id,
+              rolId,
+              permiso.module,
+              permiso.list,
+              permiso.create,
+              permiso.edit,
+              permiso.delete,
+            ],
+          );
+        }
       }
+
       const [usuario]: { id: string }[] = await m.query(
         `INSERT INTO users (tenant_id, email, password_hash, first_name, last_name, role, is_active, access_role_id)
          VALUES ($1, $2, $3, 'Vendedor', 'Externo', 'COLABORADOR', true, $4)
          RETURNING id`,
-        [tenant.id, CORREO, await bcrypt.hash(clave, 10), rol.id],
+        [tenant.id, CORREO, await bcrypt.hash(clave, 10), rolId],
       );
-      await m.query(
-        `INSERT INTO user_warehouses (tenant_id, user_id, warehouse_id) VALUES ($1, $2, $3)`,
-        [tenant.id, usuario.id, bodega.id],
-      );
+      // Sin filas = sin restricción. Por eso «todas» no inserta nada en vez
+      // de insertarlas una por una.
+      for (const b of escogidas ?? []) {
+        await m.query(
+          `INSERT INTO user_warehouses (tenant_id, user_id, warehouse_id) VALUES ($1, $2, $3)`,
+          [tenant.id, usuario.id, b.id],
+        );
+      }
     });
 
     console.log('\nCuenta creada.');

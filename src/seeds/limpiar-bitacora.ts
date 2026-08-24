@@ -45,11 +45,11 @@ async function main() {
 
   await AppDataSource.initialize();
   try {
-    const antes = (await AppDataSource.query(
+    const antes = await AppDataSource.query(
       `SELECT pg_size_pretty(pg_total_relation_size('audit_logs')) AS tamano,
               count(*)::int AS filas
          FROM audit_logs`,
-    )) as { tamano: string; filas: number }[];
+    );
     console.log(
       `Bitácora: ${antes[0].filas} filas, ${antes[0].tamano} antes de empezar.`,
     );
@@ -61,14 +61,14 @@ async function main() {
     let desde = '00000000-0000-0000-0000-000000000000';
 
     for (;;) {
-      const filas = (await AppDataSource.query(
+      const filas = await AppDataSource.query(
         `SELECT id, old_values, new_values
            FROM audit_logs
           WHERE id > $1
           ORDER BY id
           LIMIT $2`,
         [desde, POR_TANDA],
-      )) as Fila[];
+      );
       if (filas.length === 0) break;
       desde = filas[filas.length - 1].id;
 
@@ -114,7 +114,9 @@ async function main() {
     // muertas y las reusa. `VACUUM FULL` lo devuelve al disco, pero bloquea la
     // tabla, así que se pide aparte y a conciencia.
     console.log('\nListo. Para devolver el espacio al disco:');
-    console.log('  VACUUM FULL audit_logs;   -- bloquea la tabla mientras corre');
+    console.log(
+      '  VACUUM FULL audit_logs;   -- bloquea la tabla mientras corre',
+    );
   } finally {
     await AppDataSource.destroy();
   }

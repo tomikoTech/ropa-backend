@@ -68,11 +68,15 @@ describe('revisarSalvaguardas', () => {
   it('excluir referencias exige decir por qué', () => {
     // La exclusión es la decisión más fácil de olvidar y la más difícil de
     // reconstruir seis meses después.
+    expect(() => revisarSalvaguardas({ ...base, filasExcluidas: 3 })).toThrow(
+      /EXCLUSION_REASON/,
+    );
     expect(() =>
-      revisarSalvaguardas({ ...base, filasExcluidas: 3 }),
-    ).toThrow(/EXCLUSION_REASON/);
-    expect(() =>
-      revisarSalvaguardas({ ...base, filasExcluidas: 3, razonDeExclusion: '  ' }),
+      revisarSalvaguardas({
+        ...base,
+        filasExcluidas: 3,
+        razonDeExclusion: '  ',
+      }),
     ).toThrow(/EXCLUSION_REASON/);
   });
 
