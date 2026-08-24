@@ -38,6 +38,7 @@ import { ReceiptService, ReceiptData } from './services/receipt.service.js';
 import { InvoiceEmailService } from '../common/services/invoice-email.service.js';
 import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
 import { mayoreoPorReferencia, precioDelRenglon } from './precio-mayorista.js';
+import { reversarAbono } from './reversar-abono.js';
 import { Reservation } from '../reservations/entities/reservation.entity.js';
 import { SaleStatus } from '../common/enums/sale-status.enum.js';
 import { SaleChannel } from '../common/enums/sale-channel.enum.js';
@@ -2466,6 +2467,100 @@ export class PosService {
         relations: ['sale', 'client', 'payments'],
       });
       return updated!;
+    });
+  }
+
+  /**
+   * Deshace un abono de cartera.
+   *
+   * Sin esto, anular una venta a crédito ya abonada era imposible por
+   * cualquier vía: la anulación pedía «reversa los abonos antes» y reversar no
+   * existía. El caso es corriente —el cliente abona y después devuelve la
+   * mercancía—.
+   *
+   * **No borra: compensa.** Un contra-abono con el monto en negativo y su
+   * propia fecha deja intacto el cuadre del día en que entró la plata —que
+   * puede estar cerrado— y descuenta el del día en que salió. Los dos
+   * renglones quedan a la vista. La aritmética y las guardas viven en
+   * `reversar-abono.ts`, sin base de datos.
+   */
+  async reverseArPayment(
+    arId: string,
+    paymentId: string,
+    tenantId: string,
+    reversadoPor?: string,
+    motivo?: string,
+  ): Promise<AccountsReceivable> {
+    return this.dataSource.transaction(async (manager) => {
+      const arRepo = manager.getRepository(AccountsReceivable);
+      const arPayRepo = manager.getRepository(AccountsReceivablePayment);
+
+      const ar = await arRepo
+        .createQueryBuilder('ar')
+        .setLock('pessimistic_write')
+        .where('ar.id = :arId', { arId })
+        .andWhere('ar.tenantId = :tenantId', { tenantId })
+        .getOne();
+      if (!ar) {
+        throw new NotFoundException('Cuenta por cobrar no encontrada');
+      }
+
+      const abonos = await arPayRepo.find({
+        where: { accountReceivableId: arId, tenantId },
+      });
+      const decision = reversarAbono({
+        abonos: abonos.map((a) => ({
+          id: a.id,
+          centavos: Math.round(Number(a.amount) * 100),
+          reversaA: a.reversesPaymentId,
+        })),
+        abonoId: paymentId,
+      });
+      if (!decision.ok) {
+        throw new BadRequestException(decision.motivo);
+      }
+
+      const original = abonos.find((a) => a.id === paymentId)!;
+      const contra = arPayRepo.create({
+        accountReceivableId: arId,
+        amount: decision.centavosDelContra / 100,
+        // Mismo método y mismo banco que el original: la plata sale por donde
+        // entró, y así el cuadre resta de la columna correcta.
+        method: original.method,
+        bankId: original.bankId ?? null,
+        reference: original.reference,
+        reversesPaymentId: original.id,
+        notes: [
+          `Reversa del abono de $${Number(original.amount).toLocaleString('es-CO')}`,
+          motivo,
+        ]
+          .filter(Boolean)
+          .join(' · '),
+        userId: reversadoPor ?? null,
+        tenantId,
+      });
+      await arPayRepo.save(contra);
+
+      // La cuenta vuelve a estar pendiente: si estaba saldada, deja de estarlo.
+      await arRepo.update(
+        { id: arId, tenantId },
+        {
+          paidAmount: decision.abonadoQueQueda / 100,
+          isFullyPaid:
+            decision.abonadoQueQueda >= Math.round(Number(ar.totalAmount) * 100),
+          fullyPaidAt:
+            decision.abonadoQueQueda >=
+            Math.round(Number(ar.totalAmount) * 100)
+              ? ar.fullyPaidAt
+              : null,
+        },
+      );
+
+      const actualizada = await arRepo.findOne({
+        where: { id: arId, tenantId },
+        relations: ['sale', 'client', 'payments'],
+      });
+      return actualizada!;
     });
   }
 

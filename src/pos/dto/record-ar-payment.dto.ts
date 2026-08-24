@@ -6,8 +6,10 @@ import {
   IsString,
   IsOptional,
   IsUUID,
+  MaxLength,
   Min,
 } from 'class-validator';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import { PaymentMethod } from '../../common/enums/payment-method.enum.js';
 
 export class RecordArPaymentDto {
@@ -47,4 +49,19 @@ export class CollectAccountsDto extends RecordArPaymentDto {
   @ArrayNotEmpty()
   @IsUUID('4', { each: true })
   accountIds: string[];
+}
+
+/**
+ * Por qué se deshace un abono.
+ *
+ * Opcional a propósito: exigir una explicación para arreglar un error de
+ * digitación es la clase de fricción que hace que la gente prefiera dejar el
+ * dato mal. Cuando se escribe, queda en las notas del contra-abono.
+ */
+export class ReverseArPaymentDto {
+  @ApiPropertyOptional({ example: 'El cliente devolvió la mercancía' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  motivo?: string;
 }

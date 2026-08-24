@@ -47,6 +47,16 @@ export class AccountsReceivablePayment extends TenantAwareEntity {
    * mostrador ese día, y el cuadre pregunta por vendedor. Nulo en las filas
    * anteriores a que existiera la columna.
    */
+  /**
+   * El abono que este renglón compensa.
+   *
+   * Un abono no se borra: se le pone un contra-abono con el monto en negativo
+   * y su propia fecha. Así el cuadre del día en que entró la plata no se
+   * reescribe —puede estar cerrado— y el día en que salió la descuenta.
+   */
+  @Column({ name: 'reverses_payment_id', type: 'uuid', nullable: true })
+  reversesPaymentId: string | null;
+
   @Column({ name: 'user_id', type: 'uuid', nullable: true })
   userId: string | null;
 

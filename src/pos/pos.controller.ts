@@ -25,6 +25,7 @@ import { MarkSalePaidDto } from './dto/mark-sale-paid.dto.js';
 import {
   CollectAccountsDto,
   RecordArPaymentDto,
+  ReverseArPaymentDto
 } from './dto/record-ar-payment.dto.js';
 import { SendInvoiceDto } from './dto/send-invoice.dto.js';
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
@@ -164,6 +165,29 @@ export class PosController {
     @UserId() cobradoPor: string,
   ) {
     return this.posService.recordArPayment(id, dto, tenantId, cobradoPor);
+  }
+
+  @Post('accounts-receivable/:id/payment/:paymentId/reverse')
+  @ApiOperation({
+    summary: 'Deshacer un abono: le pone su contra-abono y reabre el saldo',
+    description:
+      'No borra el abono. Le agrega un renglón en negativo con su propia ' +
+      'fecha, para no reescribir el cuadre del día en que entró la plata.',
+  })
+  reverseArPayment(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('paymentId', ParseUUIDPipe) paymentId: string,
+    @Body() dto: ReverseArPaymentDto,
+    @TenantId() tenantId: string,
+    @UserId() userId: string,
+  ) {
+    return this.posService.reverseArPayment(
+      id,
+      paymentId,
+      tenantId,
+      userId,
+      dto?.motivo,
+    );
   }
 
   @Post('accounts-receivable/collect')
