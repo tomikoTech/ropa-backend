@@ -74,6 +74,13 @@ export class Consignment extends TenantAwareEntity {
   @Column({ name: 'sale_date', type: 'timestamptz' })
   saleDate: Date;
 
+  /**
+   * Quien la registro. `null` en las filas viejas: se escribieron antes de que
+   * esto existiera y nadie puede decir de quien eran.
+   */
+  @Column({ name: 'user_id', type: 'uuid', nullable: true })
+  userId: string | null;
+
   @Column({ type: 'text', nullable: true })
   notes: string;
 

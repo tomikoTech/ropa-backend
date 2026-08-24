@@ -19,17 +19,61 @@ import { ConsignmentsService } from './consignments.service.js';
 import { CreateConsignmentDto } from './dto/create-consignment.dto.js';
 import { UpdateConsignmentDto } from './dto/update-consignment.dto.js';
 import { TenantId } from '../common/decorators/tenant-id.decorator.js';
+import { CurrentUser } from '../common/decorators/current-user.decorator.js';
+import { AccessService } from '../access/access.service.js';
+import { Role } from '../common/enums/role.enum.js';
+import { soloLoSuyo } from '../access/solo-lo-suyo.js';
+import { MODULO_PANTALLA_SIMPLE } from '../access/pantalla-de-ventas.js';
+import { MODULO_POS_TERCEROS } from '../access/pos-de-terceros.js';
 
 @ApiTags('Ventas de Terceros')
 @ApiBearerAuth()
 @Controller('consignments')
 export class ConsignmentsController {
-  constructor(private readonly service: ConsignmentsService) {}
+  constructor(
+    private readonly service: ConsignmentsService,
+    private readonly access: AccessService,
+  ) {}
+
+  /**
+   * A quién limitar lo que ve, o `null` para no limitarlo.
+   *
+   * La regla vive en `solo-lo-suyo.ts`; acá solo se resuelven los dos permisos
+   * que esa regla mira. El filtro lo pone el servidor: mandar otro id a mano
+   * no abre la puerta.
+   */
+  private async deQuien(user: {
+    id: string;
+    role: Role;
+    accessRoleId: string | null;
+  }): Promise<string | null> {
+    const [simple, terceros] = await Promise.all([
+      this.access.userCan(user, MODULO_PANTALLA_SIMPLE, 'list'),
+      this.access.userCan(user, MODULO_POS_TERCEROS, 'list'),
+    ]);
+    return soloLoSuyo(
+      (modulo) =>
+        modulo === MODULO_PANTALLA_SIMPLE
+          ? simple
+          : modulo === MODULO_POS_TERCEROS
+            ? terceros
+            : false,
+      user.id,
+      {
+        // `userCan` le dice que sí a todo a quien no tiene matriz.
+        sinMatriz: !user.accessRoleId || user.role === Role.SUPER_ADMIN,
+      },
+    );
+  }
 
   @Post()
   @ApiOperation({ summary: 'Registrar venta de tercero (consignación)' })
-  create(@Body() dto: CreateConsignmentDto, @TenantId() tenantId: string) {
-    return this.service.create(dto, tenantId);
+  create(
+    @Body() dto: CreateConsignmentDto,
+    @TenantId() tenantId: string,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.service.create(dto, tenantId, user.id);
   }
 
   @Get()
@@ -37,13 +81,16 @@ export class ConsignmentsController {
   @ApiQuery({ name: 'thirdParty', required: false })
   @ApiQuery({ name: 'clientPaid', required: false })
   @ApiQuery({ name: 'supplierPaid', required: false })
-  findAll(
+  async findAll(
+    @CurrentUser()
+    user: { id: string; role: Role; accessRoleId: string | null },
     @TenantId() tenantId: string,
     @Query('thirdParty') thirdParty?: string,
     @Query('clientPaid') clientPaid?: string,
     @Query('supplierPaid') supplierPaid?: string,
   ) {
     return this.service.findAll(tenantId, {
+      userId: await this.deQuien(user),
       thirdParty: thirdParty || undefined,
       clientPaid: clientPaid === undefined ? undefined : clientPaid === 'true',
       supplierPaid:
@@ -53,8 +100,14 @@ export class ConsignmentsController {
 
   @Get('summary')
   @ApiOperation({ summary: 'Resumen: utilidad, por cobrar y por pagar' })
-  summary(@TenantId() tenantId: string) {
-    return this.service.summary(tenantId);
+  async summary(
+    @CurrentUser()
+    user: { id: string; role: Role; accessRoleId: string | null },
+    @TenantId() tenantId: string,
+  ) {
+    // Su contabilidad, no la de la tienda: cuánto vendió, cuánto le costó y
+    // cuánto ganó **él**.
+    return this.service.summary(tenantId, await this.deQuien(user));
   }
 
   @Get('third-parties')

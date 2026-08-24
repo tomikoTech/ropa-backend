@@ -11,6 +11,8 @@ export interface ConsignmentFilters {
   thirdParty?: string;
   clientPaid?: boolean;
   supplierPaid?: boolean;
+  /** A quien limitar. `null` o ausente = sin limitar. */
+  userId?: string | null;
 }
 
 @Injectable()
@@ -25,6 +27,7 @@ export class ConsignmentsService {
   async create(
     dto: CreateConsignmentDto,
     tenantId: string,
+    usuarioId?: string,
   ): Promise<Consignment> {
     const entity = this.repo.create({
       thirdPartyName: dto.thirdPartyName.trim(),
@@ -40,6 +43,7 @@ export class ConsignmentsService {
       paymentMethod: dto.paymentMethod?.trim() || '',
       saleDate: dto.saleDate ? new Date(dto.saleDate) : new Date(),
       notes: dto.notes?.trim() || undefined,
+      userId: usuarioId ?? null,
       tenantId,
     });
     const guardada = await this.repo.save(entity);
@@ -136,6 +140,11 @@ export class ConsignmentsService {
     if (filters.supplierPaid !== undefined) {
       qb.andWhere('c.supplierPaid = :sp', { sp: filters.supplierPaid });
     }
+    // Cada quien lleva su contabilidad: dos personas naturales en la misma
+    // tienda no pueden verse la plata.
+    if (filters.userId) {
+      qb.andWhere('c.userId = :uid', { uid: filters.userId });
+    }
     return qb
       .orderBy('c.saleDate', 'DESC')
       .addOrderBy('c.createdAt', 'DESC')
@@ -183,7 +192,10 @@ export class ConsignmentsService {
    * Resumen: utilidad total, cuánto te deben los clientes (CxC) y cuánto le
    * debes a los terceros (CxP), + desglose por tercero.
    */
-  async summary(tenantId: string): Promise<{
+  async summary(
+    tenantId: string,
+    usuarioId?: string | null,
+  ): Promise<{
     count: number;
     totalSale: number;
     totalCost: number;
@@ -197,7 +209,9 @@ export class ConsignmentsService {
       owedToThem: number;
     }[];
   }> {
-    const rows = await this.repo.find({ where: { tenantId } });
+    const rows = await this.repo.find({
+      where: usuarioId ? { tenantId, userId: usuarioId } : { tenantId },
+    });
     let totalSale = 0;
     let totalCost = 0;
     let owedByClients = 0;
