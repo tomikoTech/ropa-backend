@@ -37,10 +37,7 @@ import { ProductStatus } from '../common/enums/product-status.enum.js';
 import { ReceiptService, ReceiptData } from './services/receipt.service.js';
 import { InvoiceEmailService } from '../common/services/invoice-email.service.js';
 import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
-import {
-  mayoreoPorReferencia,
-  precioDelRenglon,
-} from './precio-mayorista.js';
+import { mayoreoPorReferencia, precioDelRenglon } from './precio-mayorista.js';
 import { Reservation } from '../reservations/entities/reservation.entity.js';
 import { SaleStatus } from '../common/enums/sale-status.enum.js';
 import { SaleChannel } from '../common/enums/sale-channel.enum.js';
