@@ -507,4 +507,16 @@ export class StoreSettings extends TenantAwareEntity {
    */
   @Column({ name: 'exhibicion_objetivo', type: 'int', default: 1 })
   exhibicionObjetivo: number;
+
+  /**
+   * Desde cuántas unidades de la **misma referencia** se cobra al por mayor.
+   *
+   * En cero —el valor de nacimiento— el mayoreo sigue disparándose solo por
+   * caja cerrada, que es como funcionaba antes. Cada tienda pone su número
+   * porque la docena de una zapatería no es la docena de una perfumería.
+   *
+   * La regla vive en `src/pos/precio-mayorista.ts`, sin base de datos.
+   */
+  @Column({ name: 'mayorista_desde', type: 'int', default: 0 })
+  mayoristaDesde: number;
 }

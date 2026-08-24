@@ -618,4 +618,14 @@ export class UpdateStoreSettingsDto {
   @IsInt()
   @Min(0)
   exhibicionObjetivo?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'Desde cuántas unidades de la misma referencia se cobra al por mayor. 0 = apagado (solo por caja).',
+    example: 12,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  mayoristaDesde?: number;
 }

@@ -37,6 +37,10 @@ import { ProductStatus } from '../common/enums/product-status.enum.js';
 import { ReceiptService, ReceiptData } from './services/receipt.service.js';
 import { InvoiceEmailService } from '../common/services/invoice-email.service.js';
 import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
+import {
+  mayoreoPorReferencia,
+  precioDelRenglon,
+} from './precio-mayorista.js';
 import { Reservation } from '../reservations/entities/reservation.entity.js';
 import { SaleStatus } from '../common/enums/sale-status.enum.js';
 import { SaleChannel } from '../common/enums/sale-channel.enum.js';
@@ -202,6 +206,41 @@ export class PosService {
           if (arr) arr.push(s);
           else stocksByVariant.set(s.variantId, [s]);
         }
+
+        // ¿Esta venta llega al volumen que la tienda considera mayoreo?
+        // Se decide **antes** del bucle porque la pregunta es de la venta
+        // entera: doce pares del mismo modelo repartidos en tres renglones
+        // son doce, y renglón por renglón no se ven. La regla vive en
+        // `precio-mayorista.ts`, sin base de datos.
+        //
+        // Va en el servidor y no solo en el punto de venta: el precio que
+        // vale es el que se guarda, y un carrito viejo o una integración
+        // pueden mandar el de mostrador.
+        const variantesDeLaVenta = await variantRepo.find({
+          where: { id: In(allVariantIds), tenantId },
+          relations: ['product'],
+        });
+        const productoDeVariante = new Map(
+          variantesDeLaVenta.map((v) => [
+            v.id,
+            {
+              productId: v.productId,
+              precioMayorista: v.product?.wholesalePrice ?? null,
+            },
+          ]),
+        );
+        const renglonesParaMayoreo = dto.items.map((item) => {
+          const info = productoDeVariante.get(item.variantId);
+          return {
+            productId: info?.productId ?? '',
+            cantidad: item.quantity,
+            precioMayorista: info?.precioMayorista ?? null,
+          };
+        });
+        const mayoreo = mayoreoPorReferencia(
+          renglonesParaMayoreo,
+          storeSettings?.mayoristaDesde,
+        );
         // Cuáles de esas bodegas son la vitrina. Se leen una sola vez para
         // toda la factura: son pocas y no cambian a mitad de una venta.
         const vitrinas = await this.vitrinasDelTenant(manager, tenantId);
@@ -321,7 +360,18 @@ export class PosService {
               `"${variant.product.name}" ${variant.sizeName}/${variant.colorName}: ${resuelto.error}`,
             );
           }
-          const unitPrice = resuelto.precio!;
+          // Y si la venta llegó al volumen de mayoreo, ese es el precio.
+          // Nunca sube: si el renglón ya venía más barato —negociado por el
+          // vendedor— se queda como estaba.
+          const unitPrice = precioDelRenglon(
+            {
+              productId: variant.productId,
+              cantidad: item.quantity,
+              precioMayorista: variant.product?.wholesalePrice ?? null,
+            },
+            resuelto.precio!,
+            mayoreo,
+          );
 
           const lineCalc = this.taxService.calculateLine(
             unitPrice,

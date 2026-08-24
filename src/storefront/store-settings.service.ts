@@ -131,6 +131,8 @@ export class StoreSettingsService {
       settings.exhibicionEnabled = dto.exhibicionEnabled;
     if (dto.exhibicionObjetivo !== undefined)
       settings.exhibicionObjetivo = dto.exhibicionObjetivo;
+    if (dto.mayoristaDesde !== undefined)
+      settings.mayoristaDesde = dto.mayoristaDesde;
     if (dto.autoReplenishEnabled !== undefined)
       settings.autoReplenishEnabled = dto.autoReplenishEnabled;
     if (dto.autoReplenishThreshold !== undefined)

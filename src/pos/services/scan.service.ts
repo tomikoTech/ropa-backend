@@ -65,6 +65,14 @@ export interface ScanResult {
    * no es una venta de mostrador.
    */
   priceSource: 'WHOLESALE' | 'PURCHASE' | 'BASE';
+  /**
+   * El precio al por mayor del producto, tenga o no que aplicarse ahora.
+   *
+   * Viaja siempre porque el mayoreo por volumen se decide en el carrito, con
+   * todos los renglones a la vista: un par suelto no sabe todavía si va a ser
+   * el número doce de su referencia. Nulo si el producto no tiene.
+   */
+  wholesalePrice: number | null;
   /** Precio de un par. El total de la línea es este por la cantidad. */
   unitPrice: number;
 }
@@ -174,6 +182,7 @@ export class ScanService {
         suggestedPrice: basePrice * unit.quantity,
         unitPrice: basePrice,
         priceSource,
+        wholesalePrice: mayorista > 0 ? mayorista : null,
         contents,
         stockUnitId: unit.id,
         kind: unit.kind,
@@ -228,6 +237,9 @@ export class ScanService {
 
     return {
       source: 'VARIANT',
+      // También acá: un par suelto no sabe todavía si va a ser el doceavo de
+      // su referencia en el carrito.
+      wholesalePrice: Number(variant.product?.wholesalePrice ?? 0) || null,
       variantId: variant.id,
       productId: variant.productId,
       sku: variant.sku,
