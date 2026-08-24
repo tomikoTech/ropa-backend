@@ -20,6 +20,17 @@ export class HttpExceptionFilter implements ExceptionFilter {
 
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
     let message: string | string[] = 'Error interno del servidor';
+    /**
+     * Lo que la excepción quiso decir además del mensaje.
+     *
+     * Hay rechazos que **no son errores**: el servidor pide una confirmación y
+     * espera que la pantalla reintente. Para distinguirlos hace falta un
+     * código, y el filtro lo estaba tirando —solo dejaba pasar `message`—, así
+     * que la pantalla no podía saber si preguntar o mostrar un error rojo.
+     *
+     * Se copia todo menos lo que el filtro ya arma por su cuenta.
+     */
+    let extra: Record<string, unknown> = {};
 
     if (exception instanceof HttpException) {
       status = exception.getStatus();
@@ -30,7 +41,10 @@ export class HttpExceptionFilter implements ExceptionFilter {
         typeof exceptionResponse === 'object' &&
         exceptionResponse !== null
       ) {
-        message = (exceptionResponse as any).message || exception.message;
+        const cuerpo = exceptionResponse as Record<string, unknown>;
+        message = (cuerpo.message as string) || exception.message;
+        const { message: _m, statusCode: _s, error: _e, ...resto } = cuerpo;
+        extra = resto;
       }
     } else if (this.isPayloadTooLarge(exception)) {
       // body-parser lanza PayloadTooLargeError cuando el JSON supera el límite.
@@ -60,6 +74,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     response.status(status).json({
       statusCode: status,
       message,
+      ...extra,
       timestamp: new Date().toISOString(),
     });
   }

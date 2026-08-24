@@ -1,5 +1,6 @@
 import {
   Injectable,
+  ConflictException,
   NotFoundException,
   BadRequestException,
   Logger,
@@ -37,8 +38,13 @@ import { ProductStatus } from '../common/enums/product-status.enum.js';
 import { ReceiptService, ReceiptData } from './services/receipt.service.js';
 import { InvoiceEmailService } from '../common/services/invoice-email.service.js';
 import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
+import { Warehouse } from '../inventory/entities/warehouse.entity.js';
 import { mayoreoPorReferencia, precioDelRenglon } from './precio-mayorista.js';
 import { reversarAbono } from './reversar-abono.js';
+import {
+  explicarOtraBodega,
+  faltaEnElLocal,
+} from './venta-desde-otra-bodega.js';
 import { Reservation } from '../reservations/entities/reservation.entity.js';
 import { SaleStatus } from '../common/enums/sale-status.enum.js';
 import { SaleChannel } from '../common/enums/sale-channel.enum.js';
@@ -198,6 +204,13 @@ export class PosService {
         const allStocks = await stockRepo.find({
           where: { variantId: In(allVariantIds), tenantId },
         });
+        // Los nombres de las bodegas, para poder decir **de dónde** saldría
+        // la mercancía en vez de mostrar un uuid.
+        const nombreDeBodega = new Map(
+          (
+            await manager.getRepository(Warehouse).find({ where: { tenantId } })
+          ).map((w) => [w.id, w.name]),
+        );
         const stocksByVariant = new Map<string, Stock[]>();
         for (const s of allStocks) {
           const arr = stocksByVariant.get(s.variantId);
@@ -644,6 +657,39 @@ export class PosService {
             });
             anotarSaldo(data.variant.id, soldUnit.warehouseId, movido.saldo);
           } else {
+            // ¿Esta línea se va a llevar mercancía de otro local?
+            //
+            // La cascada de abajo lo hacía **en silencio**: la venta se hacía
+            // en el Local y el par salía de la Sucursal. El cliente se queda
+            // sin su mercancía y el inventario de la otra bodega baja sin que
+            // nadie mueva nada. La cascada se conserva —hay tiendas que
+            // trabajan así— pero ahora la decide quien vende.
+            const falta = faltaEnElLocal({
+              bodegaDeLaVenta: dto.warehouseId,
+              pedido: data.quantity,
+              existencias: data.stocks.map((stock) => ({
+                warehouseId: stock.warehouseId,
+                nombre: nombreDeBodega.get(stock.warehouseId) ?? 'otra bodega',
+                disponible: disponible(
+                  data.variant.id,
+                  stock.warehouseId,
+                  stock,
+                ),
+              })),
+            });
+            if (falta && !dto.confirmarOtraBodega) {
+              throw new ConflictException({
+                message: explicarOtraBodega(
+                  `${data.variant.product.name} ${data.variant.sizeName}/${data.variant.colorName}`,
+                  falta,
+                ),
+                // Marca para que la pantalla sepa que esto se puede confirmar,
+                // en vez de tratarlo como un error cualquiera.
+                codigo: 'CONFIRMAR_OTRA_BODEGA',
+                falta,
+              });
+            }
+
             // Cascada: primero la bodega de la venta, luego las demás por
             // existencia. Se relee el saldo porque el ledger ya bloqueó y
             // pudo cambiar la fila que teníamos en memoria.

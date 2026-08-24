@@ -120,6 +120,17 @@ export class CreateSaleDto {
   @IsOptional()
   creditNotes?: string;
 
+  /**
+   * Quien vende ya sabe que parte de la mercancía sale de otro local, y acepta.
+   *
+   * Sin esto la venta se rechaza con un 409 y el motivo: el punto de venta lo
+   * pregunta y reintenta con la confirmación. Antes la cascada se llevaba
+   * mercancía de otra bodega sin decir nada.
+   */
+  @IsBoolean()
+  @IsOptional()
+  confirmarOtraBodega?: boolean;
+
   @IsEnum(SaleChannel)
   @IsOptional()
   saleChannel?: SaleChannel;
