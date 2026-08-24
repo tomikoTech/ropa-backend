@@ -9,7 +9,12 @@ import {
   Query,
   ParseUUIDPipe,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiQuery,
+} from '@nestjs/swagger';
 import { ConsignmentsService } from './consignments.service.js';
 import { CreateConsignmentDto } from './dto/create-consignment.dto.js';
 import { UpdateConsignmentDto } from './dto/update-consignment.dto.js';
@@ -40,8 +45,7 @@ export class ConsignmentsController {
   ) {
     return this.service.findAll(tenantId, {
       thirdParty: thirdParty || undefined,
-      clientPaid:
-        clientPaid === undefined ? undefined : clientPaid === 'true',
+      clientPaid: clientPaid === undefined ? undefined : clientPaid === 'true',
       supplierPaid:
         supplierPaid === undefined ? undefined : supplierPaid === 'true',
     });
@@ -59,9 +63,33 @@ export class ConsignmentsController {
     return this.service.thirdParties(tenantId);
   }
 
+  @Get('productos')
+  @ApiOperation({
+    summary: 'La libreta: productos de tercero que ya se vendieron',
+    description:
+      'Se llena sola al registrar cada venta. No es inventario —no hay ' +
+      'existencias ni bodega— sino lo que ya se vendio alguna vez, para no ' +
+      'volver a escribirlo. Ordenada por lo que mas se vende.',
+  })
+  productos(
+    @TenantId() tenantId: string,
+    @Query('q') q?: string,
+    @Query('thirdParty') thirdParty?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.service.productos(tenantId, {
+      q,
+      thirdParty,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Obtener una venta de tercero' })
-  findOne(@Param('id', ParseUUIDPipe) id: string, @TenantId() tenantId: string) {
+  findOne(
+    @Param('id', ParseUUIDPipe) id: string,
+    @TenantId() tenantId: string,
+  ) {
     return this.service.findOne(id, tenantId);
   }
 

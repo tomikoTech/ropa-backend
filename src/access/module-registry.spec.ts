@@ -14,6 +14,7 @@ import {
   soloSusVentas,
   usaPantallaSimple,
 } from './pantalla-de-ventas.js';
+import { MODULO_POS_TERCEROS, soloVendeDeTerceros } from './pos-de-terceros.js';
 import {
   ROLE_TEMPLATES,
   emptyMatrix,
@@ -77,11 +78,22 @@ describe('catálogo de módulos', () => {
     // muestran. Que sí hace algo lo comprueban las dos pruebas de abajo, para
     // que esta excepción no se vuelva el hueco por donde entra un permiso
     // muerto.
-    const sinRutaPropia = [MODULO_PANTALLA_SIMPLE];
+    const sinRutaPropia = [MODULO_PANTALLA_SIMPLE, MODULO_POS_TERCEROS];
     const huerfanos = MODULE_KEYS.filter(
       (k) => !alcanzados.has(k) && !sinRutaPropia.includes(k),
     );
     expect(huerfanos).toEqual([]);
+  });
+
+  it('la excepción `pos-terceros` gobierna el modo del punto de venta', () => {
+    const con =
+      (m: Record<string, string[]>) =>
+      (modulo: string, accion = 'list') =>
+        (m[modulo] ?? []).includes(accion);
+    expect(soloVendeDeTerceros(con({ [MODULO_POS_TERCEROS]: ['list'] }))).toBe(
+      true,
+    );
+    expect(soloVendeDeTerceros(con({ sales: ['list', 'create'] }))).toBe(false);
   });
 
   it('la excepción `vender` gobierna la pantalla', () => {
@@ -298,7 +310,7 @@ describe('resolvePermission', () => {
 });
 
 describe('plantillas de rol', () => {
-  it('están las seis del sistema anterior, más los dos de ventas', () => {
+  it('están las seis del sistema anterior, más los perfiles de ventas', () => {
     // Las seis primeras son las que existían en demachine y no se tocan: si
     // una desaparece o cambia de nombre, alguien se queda sin su rol.
     // Los dos de ventas se agregaron en agosto de 2026: ven la misma pantalla
@@ -309,6 +321,7 @@ describe('plantillas de rol', () => {
       'Cajero',
       'Vendedor externo',
       'Vendedor (cobra directo)',
+      'Revendedor (persona natural)',
       'Jefe de Bodega',
       'Inventario',
       'Consulta',

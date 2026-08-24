@@ -11,7 +11,10 @@ import {
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateConsignmentDto {
-  @ApiProperty({ example: 'Proveedor', description: 'Dueño del producto (tercero)' })
+  @ApiProperty({
+    example: 'Proveedor',
+    description: 'Dueño del producto (tercero)',
+  })
   @IsString()
   @IsNotEmpty()
   thirdPartyName: string;
@@ -37,7 +40,10 @@ export class CreateConsignmentDto {
   @Min(1)
   quantity?: number;
 
-  @ApiProperty({ example: 120000, description: 'Costo unitario (le debes al tercero)' })
+  @ApiProperty({
+    example: 120000,
+    description: 'Costo unitario (le debes al tercero)',
+  })
   @IsNumber()
   @Min(0)
   costPrice: number;
@@ -67,7 +73,9 @@ export class CreateConsignmentDto {
   @IsString()
   paymentMethod?: string;
 
-  @ApiPropertyOptional({ description: 'Fecha de la venta (ISO). Default: ahora.' })
+  @ApiPropertyOptional({
+    description: 'Fecha de la venta (ISO). Default: ahora.',
+  })
   @IsOptional()
   @IsDateString()
   saleDate?: string;

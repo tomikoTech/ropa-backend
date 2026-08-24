@@ -184,6 +184,25 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
     }),
   },
   {
+    // Persona natural: compra al detal en una tienda y revende. No tiene
+    // bodega ni proveedores, y no lleva inventario porque no hay nada que
+    // llevar: compra el lunes y anota cuando vende.
+    key: 'revendedor',
+    name: 'Revendedor (persona natural)',
+    description:
+      'Solo el punto de venta, y con una sola forma de vender: la de ' +
+      'terceros. No ve inventario, ni bodegas, ni proveedores, ni compras. ' +
+      'El producto que vende queda anotado solo, para no volver a escribirlo ' +
+      'la proxima vez.',
+    permissions: build(NONE, {
+      'pos-terceros': R,
+      // Registrar la venta y ver las suyas. Es todo lo que hace.
+      consignments: RCE,
+      // Para poder decir a quien le vendio.
+      clients: RC,
+    }),
+  },
+  {
     key: 'jefe-bodega',
     name: 'Jefe de Bodega',
     description:

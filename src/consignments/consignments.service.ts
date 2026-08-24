@@ -2,6 +2,8 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Consignment } from './entities/consignment.entity.js';
+import { ThirdPartyProduct } from './entities/third-party-product.entity.js';
+import { claveDeProducto } from './producto-de-tercero.js';
 import { CreateConsignmentDto } from './dto/create-consignment.dto.js';
 import { UpdateConsignmentDto } from './dto/update-consignment.dto.js';
 
@@ -16,9 +18,14 @@ export class ConsignmentsService {
   constructor(
     @InjectRepository(Consignment)
     private readonly repo: Repository<Consignment>,
+    @InjectRepository(ThirdPartyProduct)
+    private readonly libretaRepo: Repository<ThirdPartyProduct>,
   ) {}
 
-  async create(dto: CreateConsignmentDto, tenantId: string): Promise<Consignment> {
+  async create(
+    dto: CreateConsignmentDto,
+    tenantId: string,
+  ): Promise<Consignment> {
     const entity = this.repo.create({
       thirdPartyName: dto.thirdPartyName.trim(),
       productDescription: dto.productDescription.trim(),
@@ -35,7 +42,80 @@ export class ConsignmentsService {
       notes: dto.notes?.trim() || undefined,
       tenantId,
     });
-    return this.repo.save(entity);
+    const guardada = await this.repo.save(entity);
+    await this.anotarEnLaLibreta(guardada);
+    return guardada;
+  }
+
+  /**
+   * Deja el producto anotado para la proxima vez.
+   *
+   * No falla la venta si esto falla: la venta es el hecho, la libreta es una
+   * comodidad. Perder la comodidad no puede costar el registro de la plata.
+   */
+  private async anotarEnLaLibreta(venta: Consignment): Promise<void> {
+    try {
+      const clave = claveDeProducto(venta);
+      const ya = await this.libretaRepo.findOne({
+        where: { tenantId: venta.tenantId, clave },
+      });
+      const cuando = venta.saleDate ?? new Date();
+      if (ya) {
+        // Lo **ultimo**, no un promedio: quien revende compra cada semana a
+        // otro precio, y lo que sirve para la proxima venta es lo de la vez
+        // pasada.
+        ya.lastCostPrice = venta.costPrice;
+        ya.lastSalePrice = venta.salePrice;
+        ya.timesSold += 1;
+        ya.lastSoldAt = cuando;
+        await this.libretaRepo.save(ya);
+        return;
+      }
+      await this.libretaRepo.save(
+        this.libretaRepo.create({
+          tenantId: venta.tenantId,
+          clave,
+          thirdPartyName: venta.thirdPartyName,
+          productDescription: venta.productDescription,
+          size: venta.size || '',
+          color: venta.color || '',
+          lastCostPrice: venta.costPrice,
+          lastSalePrice: venta.salePrice,
+          timesSold: 1,
+          lastSoldAt: cuando,
+        }),
+      );
+    } catch {
+      // Dos cajas registrando el mismo par a la vez chocan contra el indice
+      // unico. La segunda no tiene nada que arreglar: el producto ya quedo.
+    }
+  }
+
+  /** La libreta: lo que ya se vendio, para no volver a escribirlo. */
+  async productos(
+    tenantId: string,
+    filtros: { q?: string; thirdParty?: string; limit?: number } = {},
+  ): Promise<ThirdPartyProduct[]> {
+    const qb = this.libretaRepo
+      .createQueryBuilder('p')
+      .where('p.tenant_id = :tenantId', { tenantId });
+    if (filtros.thirdParty) {
+      qb.andWhere('p.third_party_name ILIKE :duenyo', {
+        duenyo: `%${filtros.thirdParty}%`,
+      });
+    }
+    if (filtros.q) {
+      qb.andWhere(
+        '(p.product_description ILIKE :q OR p.third_party_name ILIKE :q)',
+        { q: `%${filtros.q}%` },
+      );
+    }
+    // Lo que mas se vende primero: en el mostrador, lo de siempre esta arriba.
+    return qb
+      .orderBy('p.times_sold', 'DESC')
+      .addOrderBy('p.last_sold_at', 'DESC')
+      .limit(Math.min(filtros.limit ?? 50, 200))
+      .getMany();
   }
 
   async findAll(
@@ -46,7 +126,9 @@ export class ConsignmentsService {
       .createQueryBuilder('c')
       .where('c.tenantId = :tenantId', { tenantId });
     if (filters.thirdParty) {
-      qb.andWhere('c.thirdPartyName ILIKE :tp', { tp: `%${filters.thirdParty}%` });
+      qb.andWhere('c.thirdPartyName ILIKE :tp', {
+        tp: `%${filters.thirdParty}%`,
+      });
     }
     if (filters.clientPaid !== undefined) {
       qb.andWhere('c.clientPaid = :cp', { cp: filters.clientPaid });
@@ -54,7 +136,10 @@ export class ConsignmentsService {
     if (filters.supplierPaid !== undefined) {
       qb.andWhere('c.supplierPaid = :sp', { sp: filters.supplierPaid });
     }
-    return qb.orderBy('c.saleDate', 'DESC').addOrderBy('c.createdAt', 'DESC').getMany();
+    return qb
+      .orderBy('c.saleDate', 'DESC')
+      .addOrderBy('c.createdAt', 'DESC')
+      .getMany();
   }
 
   async findOne(id: string, tenantId: string): Promise<Consignment> {
@@ -69,7 +154,8 @@ export class ConsignmentsService {
     tenantId: string,
   ): Promise<Consignment> {
     const item = await this.findOne(id, tenantId);
-    if (dto.thirdPartyName !== undefined) item.thirdPartyName = dto.thirdPartyName.trim();
+    if (dto.thirdPartyName !== undefined)
+      item.thirdPartyName = dto.thirdPartyName.trim();
     if (dto.productDescription !== undefined)
       item.productDescription = dto.productDescription.trim();
     if (dto.size !== undefined) item.size = dto.size.trim();
@@ -80,7 +166,8 @@ export class ConsignmentsService {
     if (dto.clientName !== undefined) item.clientName = dto.clientName.trim();
     if (dto.clientPaid !== undefined) item.clientPaid = dto.clientPaid;
     if (dto.supplierPaid !== undefined) item.supplierPaid = dto.supplierPaid;
-    if (dto.paymentMethod !== undefined) item.paymentMethod = dto.paymentMethod.trim();
+    if (dto.paymentMethod !== undefined)
+      item.paymentMethod = dto.paymentMethod.trim();
     if (dto.saleDate !== undefined) item.saleDate = new Date(dto.saleDate);
     if (dto.notes !== undefined) item.notes = dto.notes.trim();
     return this.repo.save(item);
@@ -117,7 +204,12 @@ export class ConsignmentsService {
     let owedToThirdParties = 0;
     const byTp = new Map<
       string,
-      { thirdPartyName: string; count: number; profit: number; owedToThem: number }
+      {
+        thirdPartyName: string;
+        count: number;
+        profit: number;
+        owedToThem: number;
+      }
     >();
     for (const r of rows) {
       const qty = r.quantity || 1;
@@ -128,9 +220,12 @@ export class ConsignmentsService {
       if (!r.clientPaid) owedByClients += sale;
       if (!r.supplierPaid) owedToThirdParties += cost;
       const key = r.thirdPartyName || '(sin nombre)';
-      const agg =
-        byTp.get(key) ||
-        { thirdPartyName: key, count: 0, profit: 0, owedToThem: 0 };
+      const agg = byTp.get(key) || {
+        thirdPartyName: key,
+        count: 0,
+        profit: 0,
+        owedToThem: 0,
+      };
       agg.count += 1;
       agg.profit += sale - cost;
       if (!r.supplierPaid) agg.owedToThem += cost;

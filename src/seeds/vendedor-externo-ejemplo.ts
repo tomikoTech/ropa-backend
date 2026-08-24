@@ -31,7 +31,11 @@ import { rolAUsar } from './reusar-rol.js';
 const CORREO = process.env.CORREO || 'vendedor.externo@ejemplo.co';
 // Los dos perfiles de ventas ven lo mismo; el de «directo» además cobra.
 const PLANTILLA =
-  process.env.PERFIL === 'directo' ? 'vendedor-directo' : 'vendedor-externo';
+  process.env.PERFIL === 'directo'
+    ? 'vendedor-directo'
+    : process.env.PERFIL === 'revendedor'
+      ? 'revendedor'
+      : 'vendedor-externo';
 
 async function main() {
   const aplicar = process.env.MODE === 'apply';

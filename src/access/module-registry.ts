@@ -58,6 +58,18 @@ export const MODULES: ModuleDef[] = [
   },
   { key: 'web-sales', label: 'Ventas web', group: 'Ventas' },
   { key: 'consignments', label: 'Ventas de terceros', group: 'Ventas' },
+  {
+    // Para la persona natural que compra al detal y revende: no tiene bodega,
+    // ni proveedores, ni existencias que cuadrar. Todo lo que vende es de un
+    // tercero.
+    key: 'pos-terceros',
+    label: 'Punto de venta solo de terceros',
+    group: 'Ventas',
+    hint:
+      '"Ver" deja el punto de venta con una sola forma de vender: la de ' +
+      'terceros · Sin catalogo propio, sin bodegas y sin inventario · El ' +
+      'producto queda anotado solo para no volver a escribirlo',
+  },
   { key: 'quotations', label: 'Cotizaciones', group: 'Ventas' },
   {
     // No se deduce de otros permisos a propósito. La primera versión la
