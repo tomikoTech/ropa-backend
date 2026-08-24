@@ -32,7 +32,17 @@ export type MetodoDePago =
  * (`accounts_receivable_payments`). Un cuadre que solo mire la primera le
  * queda debiendo a la tienda.
  */
-export type OrigenDeCaja = 'VENTA' | 'ABONO';
+/**
+ * De dónde sale un movimiento del día.
+ *
+ * `GASTO` llega con los centavos **en negativo**: la plata sale del cajón. Se
+ * suma por el mismo camino que lo demás, sin un caso especial que mantener.
+ *
+ * Hasta agosto el cuadre solo sumaba lo que entraba, y la tarjeta de efectivo
+ * decía «En el cajón»: quien le pagara al domiciliario de la registradora y
+ * cerrara el día veía un faltante que no era faltante.
+ */
+export type OrigenDeCaja = 'VENTA' | 'ABONO' | 'GASTO';
 
 export interface MovimientoDeCaja {
   id: string;
@@ -71,6 +81,13 @@ export interface Totales {
   totalCents: number;
   ventasCents: number;
   abonosCents: number;
+  /**
+   * Lo que salió, en positivo.
+   *
+   * Ya está restado de los demás totales; esto es para poder **mostrarlo**.
+   * Sin la línea, el vendedor ve un número más chico y no sabe por qué.
+   */
+  gastosCents: number;
 }
 
 export interface Grupo {
@@ -106,6 +123,7 @@ function totalesEnCero(): Totales {
     totalCents: 0,
     ventasCents: 0,
     abonosCents: 0,
+    gastosCents: 0,
   };
 }
 
@@ -116,7 +134,8 @@ function acumular(t: Totales, m: MovimientoDeCaja): void {
   else if (m.metodo === 'TARJETA') t.tarjetaCents += c;
   else t.otrosCents += c;
 
-  if (m.origen === 'ABONO') t.abonosCents += c;
+  if (m.origen === 'GASTO') t.gastosCents += Math.abs(c);
+  else if (m.origen === 'ABONO') t.abonosCents += c;
   else t.ventasCents += c;
 
   t.totalCents += c;
@@ -265,7 +284,11 @@ export function descuadresDelDesglose(cuadre: Cuadre): Descuadre[] {
     });
   }
 
-  const porOrigen = totales.ventasCents + totales.abonosCents;
+  // Menos los gastos: el total es lo que **queda**, no lo que entró. Sin esta
+  // resta el cuadre se acusaba a sí mismo de estar descuadrado en todos los
+  // días con un gasto.
+  const porOrigen =
+    totales.ventasCents + totales.abonosCents - totales.gastosCents;
   if (porOrigen !== totales.totalCents) {
     fallas.push({
       concepto: 'por origen',

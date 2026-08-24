@@ -378,3 +378,89 @@ describe('diaLocal', () => {
     );
   });
 });
+
+describe('los gastos del día salen del cajón', () => {
+  /**
+   * El cuadre sumaba solo lo que **entró** —ventas y abonos— y la tarjeta de
+   * efectivo decía «En el cajón». Quien le pagara al domiciliario de la
+   * registradora y cerrara el día vería un faltante que no es faltante: la
+   * plata salió por la puerta y quedó registrada en Egresos.
+   *
+   * Un gasto entra como un movimiento más, con el monto **en negativo**: el
+   * mismo camino, sin un caso especial que mantener.
+   */
+  const gasto = (centavos: number, metodo = 'EFECTIVO'): MovimientoDeCaja => ({
+    id: `g${centavos}`,
+    origen: 'GASTO',
+    metodo: metodo as MovimientoDeCaja['metodo'],
+    centavos: -Math.abs(centavos),
+    localId: 'l1',
+    localNombre: 'Local',
+    usuarioId: 'u1',
+    usuarioNombre: 'Vendedor',
+    bancoId: null,
+    bancoNombre: null,
+    comprobanteUrl: null,
+    referencia: null,
+    documento: 'GA-000001',
+    registradoEn: new Date('2026-08-24T15:00:00Z'),
+    anulado: false,
+  });
+
+  const venta = (centavos: number): MovimientoDeCaja => ({
+    ...gasto(0),
+    id: `v${centavos}`,
+    origen: 'VENTA',
+    centavos,
+    documento: 'FE-0001',
+  });
+
+  it('un gasto en efectivo baja lo que debería haber en el cajón', () => {
+    const c = cuadrarDia([venta(240_000_00), gasto(90_000_00)]);
+    expect(c.totales.efectivoCents).toBe(150_000_00);
+    expect(c.totales.totalCents).toBe(150_000_00);
+  });
+
+  it('y se puede ver aparte, no solo restado', () => {
+    // Sin la línea, el vendedor ve un número más chico y no sabe por qué.
+    const c = cuadrarDia([venta(240_000_00), gasto(90_000_00)]);
+    expect(c.totales.gastosCents).toBe(90_000_00);
+  });
+
+  it('un gasto no es una venta ni un abono', () => {
+    const c = cuadrarDia([venta(240_000_00), gasto(90_000_00)]);
+    expect(c.totales.ventasCents).toBe(240_000_00);
+    expect(c.totales.abonosCents).toBe(0);
+  });
+
+  it('un gasto por transferencia baja la transferencia, no el efectivo', () => {
+    const c = cuadrarDia([venta(100_000_00), gasto(40_000_00, 'TRANSFERENCIA')]);
+    expect(c.totales.efectivoCents).toBe(100_000_00);
+    expect(c.totales.transferenciaCents).toBe(-40_000_00);
+    expect(c.totales.gastosCents).toBe(40_000_00);
+  });
+
+  it('sin gastos, el cuadre da exactamente lo de antes', () => {
+    const c = cuadrarDia([venta(240_000_00)]);
+    expect(c.totales.efectivoCents).toBe(240_000_00);
+    expect(c.totales.gastosCents).toBe(0);
+  });
+
+  it('el gasto también baja el total de su local y de su vendedor', () => {
+    // El cuadre se mira por local y por vendedor: si el gasto solo bajara el
+    // total general, cada local seguiría cuadrando mal por separado.
+    const c = cuadrarDia([venta(240_000_00), gasto(90_000_00)]);
+    expect(c.porLocal[0].totales.efectivoCents).toBe(150_000_00);
+    expect(c.porLocal[0].porUsuario[0].totales.efectivoCents).toBe(150_000_00);
+  });
+
+  it('el desglose por origen sigue cuadrando con gastos de por medio', () => {
+    // `descuadresDelDesglose` compara el total contra la suma por método, por
+    // origen, por local y por vendedor: si dos caminos no coinciden lo dice.
+    // Con los gastos, «por origen» ya no es ventas + abonos, es
+    // ventas + abonos − gastos. Sin esto el cuadre se acusaba a sí mismo de
+    // estar descuadrado **en todos los días con un gasto**.
+    const c = cuadrarDia([venta(240_000_00), gasto(90_000_00)]);
+    expect(descuadresDelDesglose(c)).toEqual([]);
+  });
+});

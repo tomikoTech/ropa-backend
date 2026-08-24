@@ -151,6 +151,13 @@ export class CajaService {
     const filtroUsuarioAbono = userId
       ? ` AND ${cobrador} = $${params.length}`
       : '';
+    // Los gastos: el local es el suyo, y el vendedor quien lo registró.
+    const filtroLocalGasto = warehouseId
+      ? ` AND e.warehouse_id = $${params.indexOf(warehouseId) + 1}`
+      : '';
+    const filtroUsuarioGasto = userId
+      ? ` AND e.created_by = $${params.indexOf(userId) + 1}`
+      : '';
 
     const sql = `
       SELECT p.id::text AS id,
@@ -203,6 +210,37 @@ export class CajaService {
        WHERE ap.tenant_id = $1
          AND ap.created_at >= $2 AND ap.created_at < $3
          ${filtroLocal}${filtroUsuarioAbono}
+
+      UNION ALL
+
+      -- Lo que **salió** del cajón. Va en negativo: el cuadre lo suma por el
+      -- mismo camino que lo demás. Sin esto, quien le pagaba al domiciliario de
+      -- la registradora y cerraba el día veía un faltante que no era faltante.
+      --
+      -- Se cuenta por la fecha del gasto, no por cuándo se
+      -- digitó: un gasto de ayer registrado hoy es de ayer.
+      SELECT e.id::text,
+             'GASTO'::text,
+             COALESCE(e.payment_method, 'EFECTIVO')::text,
+             (-e.amount)::text,
+             e.warehouse_id::text,
+             COALESCE(we.name, 'Sin local'),
+             e.created_by::text,
+             TRIM(CONCAT(ue.first_name, ' ', ue.last_name)),
+             e.bank_id::text,
+             be.name,
+             NULL,
+             NULL,
+             CONCAT('Gasto ', e.expense_number),
+             e.expense_date::timestamptz,
+             false
+        FROM expenses e
+        LEFT JOIN warehouses we ON we.id = e.warehouse_id
+        LEFT JOIN users ue ON ue.id = e.created_by
+        LEFT JOIN banks be ON be.id = e.bank_id
+       WHERE e.tenant_id = $1
+         AND e.expense_date >= ($2)::date AND e.expense_date < ($3)::date
+         ${filtroLocalGasto}${filtroUsuarioGasto}
     `;
 
     return this.dataSource.query<FilaDeCaja[]>(sql, params);
