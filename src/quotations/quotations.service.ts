@@ -12,14 +12,8 @@ import { CreateQuotationDto } from './dto/create-quotation.dto.js';
 import { UpdateQuotationDto } from './dto/update-quotation.dto.js';
 import { ConvertQuotationDto } from './dto/convert-quotation.dto.js';
 import { ProductVariant } from '../products/entities/product-variant.entity.js';
-import {
-  ESTADOS_PENDIENTES,
-  soloLasSuyas,
-} from './ventas-por-autorizar.js';
-import {
-  puedeRechazarse,
-  ESTADO_RECHAZADA,
-} from './rechazar-solicitud.js';
+import { ESTADOS_PENDIENTES, soloLasSuyas } from './ventas-por-autorizar.js';
+import { puedeRechazarse, ESTADO_RECHAZADA } from './rechazar-solicitud.js';
 import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
 import {
   TaxService,

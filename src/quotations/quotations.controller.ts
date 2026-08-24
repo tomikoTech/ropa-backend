@@ -70,7 +70,8 @@ export class QuotationsController {
       'Quien no puede autorizar cuenta solo las suyas, igual que en el listado.',
   })
   async contarPendientes(
-    @CurrentUser() user: { id: string; role: Role; accessRoleId: string | null },
+    @CurrentUser()
+    user: { id: string; role: Role; accessRoleId: string | null },
     @TenantId() tenantId: string,
   ) {
     return this.quotationsService.contarPendientes(
