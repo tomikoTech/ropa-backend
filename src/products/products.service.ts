@@ -879,6 +879,16 @@ export class ProductsService {
     const qb = this.variantRepository
       .createQueryBuilder('v')
       .leftJoinAndSelect('v.product', 'p')
+      // La talla y el color van con **Select**, no solo con join.
+      //
+      // `size` y `color` no son columnas: los llena `@AfterLoad` leyendo
+      // `sizeRef`/`colorRef`, y con `QueryBuilder` las relaciones marcadas
+      // `eager` no se cargan solas. Sin esto el buscador devolvía `size: ''`
+      // para **todas** las variantes, y cada pantalla que lo usa mostraba
+      // «Única» donde decía 40: se vio pidiendo una talla a otra bodega, con
+      // el SKU `BOTAAG-40-CAF` al lado desmintiéndolo.
+      .leftJoinAndSelect('v.sizeRef', 'sz')
+      .leftJoinAndSelect('v.colorRef', 'cl')
       .leftJoin('p.category', 'c')
       .where('v.is_active = true')
       .andWhere('p.status = :status', { status: 'ACTIVE' })
