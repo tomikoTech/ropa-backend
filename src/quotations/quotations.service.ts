@@ -12,6 +12,7 @@ import { CreateQuotationDto } from './dto/create-quotation.dto.js';
 import { UpdateQuotationDto } from './dto/update-quotation.dto.js';
 import { ConvertQuotationDto } from './dto/convert-quotation.dto.js';
 import { ProductVariant } from '../products/entities/product-variant.entity.js';
+import { soloLasSuyas } from './ventas-por-autorizar.js';
 import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
 import {
   TaxService,
@@ -141,20 +142,45 @@ export class QuotationsService {
     return this.findOne(saved.id, tenantId);
   }
 
-  async findAll(tenantId: string): Promise<Quotation[]> {
+  /**
+   * Las ventas pendientes que le tocan a quien pregunta.
+   *
+   * Devolvía **todas las del tenant**: un vendedor externo veía los pedidos de
+   * los demás vendedores, con sus clientes y sus precios. Quien no puede
+   * autorizar solo ve las suyas. La regla vive en `ventas-por-autorizar.ts`.
+   */
+  async findAll(
+    tenantId: string,
+    quien?: { usuarioId: string; puedeAutorizar: boolean },
+  ): Promise<Quotation[]> {
+    const soloDe = quien
+      ? soloLasSuyas({ puedeAutorizar: quien.puedeAutorizar }, quien.usuarioId)
+      : null;
     return this.quotationRepo.find({
-      where: { tenantId },
+      where: soloDe ? { tenantId, createdById: soloDe } : { tenantId },
       relations: ['client', 'items'],
       order: { createdAt: 'DESC' },
     });
   }
 
-  async findOne(id: string, tenantId: string): Promise<Quotation> {
+  async findOne(
+    id: string,
+    tenantId: string,
+    quien?: { usuarioId: string; puedeAutorizar: boolean },
+  ): Promise<Quotation> {
     const quotation = await this.quotationRepo.findOne({
       where: { id, tenantId },
       relations: ['client', 'items'],
     });
     if (!quotation) throw new NotFoundException('Cotización no encontrada');
+    // Entrar por la URL no puede saltarse el listado: quien no autoriza solo
+    // llega a las suyas.
+    const soloDe = quien
+      ? soloLasSuyas({ puedeAutorizar: quien.puedeAutorizar }, quien.usuarioId)
+      : null;
+    if (soloDe && quotation.createdById !== soloDe) {
+      throw new NotFoundException('Cotización no encontrada');
+    }
     return quotation;
   }
 

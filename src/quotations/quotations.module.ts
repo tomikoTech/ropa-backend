@@ -6,6 +6,7 @@ import { ProductVariant } from '../products/entities/product-variant.entity.js';
 import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
 import { QuotationsService } from './quotations.service.js';
 import { QuotationsController } from './quotations.controller.js';
+import { AccessModule } from '../access/access.module.js';
 import { TaxService } from '../pos/services/tax.service.js';
 import { PosModule } from '../pos/pos.module.js';
 
@@ -17,6 +18,9 @@ import { PosModule } from '../pos/pos.module.js';
       ProductVariant,
       StoreSettings,
     ]),
+    // Para saber si quien pregunta puede autorizar: de eso dependen los
+    // rótulos y qué ventas se le listan.
+    AccessModule,
     PosModule, // provee PosService (convertir cotización → venta)
   ],
   controllers: [QuotationsController],

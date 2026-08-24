@@ -263,15 +263,36 @@ describe('resolvePermission', () => {
 });
 
 describe('plantillas de rol', () => {
-  it('están las seis del sistema anterior', () => {
+  it('están las seis del sistema anterior, más el vendedor externo', () => {
+    // Las seis primeras son las que existían en demachine y no se tocan: si
+    // una desaparece o cambia de nombre, alguien se queda sin su rol.
+    // «Vendedor externo» se agregó en agosto de 2026 para quien vende
+    // mercancía de un local sin tener inventario propio.
     expect(ROLE_TEMPLATES.map((t) => t.name)).toEqual([
       'Administrador',
       'Gerente',
       'Cajero',
+      'Vendedor externo',
       'Jefe de Bodega',
       'Inventario',
       'Consulta',
     ]);
+  });
+
+  it('el vendedor externo puede proponer una venta pero no autorizarla', () => {
+    // Es todo el sentido del perfil: `create` sin `edit` sobre cotizaciones.
+    // Autorizar es `edit`, y con él podría aprobarse a sí mismo.
+    const perfil = ROLE_TEMPLATES.find((t) => t.key === 'vendedor-externo');
+    expect(perfil).toBeTruthy();
+    const cotizaciones = perfil!.permissions.find(
+      (p) => p.module === 'quotations',
+    );
+    expect(cotizaciones?.create).toBe(true);
+    expect(cotizaciones?.edit).toBe(false);
+    // Y tampoco puede cerrar una venta directo, que sería el otro atajo.
+    const ventas = perfil!.permissions.find((p) => p.module === 'sales');
+    expect(ventas?.list).toBe(true);
+    expect(ventas?.create).toBe(false);
   });
 
   it('toda plantilla cubre todos los módulos y ninguno queda sin definir', () => {

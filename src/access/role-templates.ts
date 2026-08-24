@@ -132,6 +132,33 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
     }),
   },
   {
+    key: 'vendedor-externo',
+    name: 'Vendedor externo',
+    description:
+      'Vende de las bodegas que se le asignen, pero **no cierra la venta**: la ' +
+      'deja esperando autorización. No ve costos, ni compras, ni la plata de ' +
+      'la tienda. Pensado para quien vende mercancía de un local sin tener ' +
+      'inventario propio.',
+    permissions: build(NONE, {
+      // Crear la venta pendiente, y ver las suyas. **Sin `edit`**, que es lo
+      // que exige autorizarla: quien vende no se aprueba a sí mismo, y esa
+      // separación es todo el sentido de este perfil.
+      // **Ver** ventas, no crearlas: el buscador de productos del punto de
+      // venta vive en este módulo. Con `create` podría cerrar una venta
+      // directo y saltarse la autorización, que es justo lo que no puede.
+      sales: R,
+      quotations: RC,
+      // Ve qué hay para vender, no lo mueve. El costo lo borra el
+      // interceptor de visibilidad al no tener el módulo de productos.
+      inventory: R,
+      // El punto de venta pregunta de qué bodega sale; solo verá las suyas,
+      // que las limita el alcance por bodega del usuario.
+      warehouses: R,
+      // Para poder decir a quién le vendió.
+      clients: RC,
+    }),
+  },
+  {
     key: 'jefe-bodega',
     name: 'Jefe de Bodega',
     description:
