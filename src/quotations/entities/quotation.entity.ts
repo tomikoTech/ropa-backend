@@ -18,7 +18,8 @@ export type QuotationStatus =
   | 'SENT'
   | 'APPROVED'
   | 'CONVERTED'
-  | 'EXPIRED';
+  | 'EXPIRED'
+  | 'REJECTED';
 
 // Cotización (borrador de venta). NO afecta inventario ni registra pagos.
 // Al aprobarse se convierte en una venta real (que sí descuenta stock).
@@ -69,6 +70,16 @@ export class Quotation extends TenantAwareEntity {
 
   @Column({ type: 'text', nullable: true })
   notes?: string | null;
+
+  // El motivo lo lee el vendedor, que no estuvo en la conversación.
+  @Column({ name: 'rejection_reason', type: 'text', nullable: true })
+  rejectionReason?: string | null;
+
+  @Column({ name: 'rejected_at', type: 'timestamptz', nullable: true })
+  rejectedAt?: Date | null;
+
+  @Column({ name: 'rejected_by_user_id', type: 'uuid', nullable: true })
+  rejectedByUserId?: string | null;
 
   @Column({ name: 'expires_at', type: 'timestamptz', nullable: true })
   expiresAt?: Date | null;

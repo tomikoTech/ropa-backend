@@ -13,6 +13,7 @@ import { QuotationsService } from './quotations.service.js';
 import { CreateQuotationDto } from './dto/create-quotation.dto.js';
 import { UpdateQuotationDto } from './dto/update-quotation.dto.js';
 import { ConvertQuotationDto } from './dto/convert-quotation.dto.js';
+import { RejectQuotationDto } from './dto/reject-quotation.dto.js';
 import { AccessService } from '../access/access.service.js';
 import { Role } from '../common/enums/role.enum.js';
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
@@ -109,6 +110,23 @@ export class QuotationsController {
     @TenantId() tenantId: string,
   ) {
     return this.quotationsService.convert(id, dto, user.id, tenantId);
+  }
+
+  @Post(':id/reject')
+  @ApiOperation({
+    summary: 'Decir «no» a una venta que espera autorización',
+    description:
+      'Solo quien puede autorizar: es un POST sobre algo que ya existe, así ' +
+      'que el permiso que pide es «editar» cotizaciones — el mismo que impide ' +
+      'que el vendedor se apruebe a sí mismo.',
+  })
+  reject(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RejectQuotationDto,
+    @CurrentUser() user: { id: string },
+    @TenantId() tenantId: string,
+  ) {
+    return this.quotationsService.reject(id, dto.reason, user.id, tenantId);
   }
 
   @Delete(':id')

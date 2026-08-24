@@ -16,6 +16,10 @@ import {
   ESTADOS_PENDIENTES,
   soloLasSuyas,
 } from './ventas-por-autorizar.js';
+import {
+  puedeRechazarse,
+  ESTADO_RECHAZADA,
+} from './rechazar-solicitud.js';
 import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
 import {
   TaxService,
@@ -173,6 +177,35 @@ export class QuotationsService {
    * en el navegador es lo que ya se corrigió con los traslados. Y respeta el
    * mismo alcance que el listado — quien no autoriza cuenta solo las suyas.
    */
+  /**
+   * Decir «no» a una venta que espera autorización.
+   *
+   * No se borra: queda con su motivo, para que el vendedor sepa por qué y no
+   * vuelva a mandar la misma.
+   */
+  async reject(
+    id: string,
+    motivo: string,
+    usuarioId: string,
+    tenantId: string,
+  ) {
+    const solicitud = await this.quotationRepo.findOne({
+      where: { id, tenantId },
+    });
+    if (!solicitud) {
+      throw new NotFoundException('Esa solicitud no existe.');
+    }
+    const veredicto = puedeRechazarse(solicitud.status, motivo);
+    if (!veredicto.permitido) {
+      throw new BadRequestException(veredicto.porque);
+    }
+    solicitud.status = ESTADO_RECHAZADA;
+    solicitud.rejectionReason = motivo.trim();
+    solicitud.rejectedAt = new Date();
+    solicitud.rejectedByUserId = usuarioId;
+    return this.quotationRepo.save(solicitud);
+  }
+
   async contarPendientes(
     tenantId: string,
     quien: { usuarioId: string; puedeAutorizar: boolean },
