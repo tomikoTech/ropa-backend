@@ -295,14 +295,18 @@ export const UNCHECKED_ROUTES = UNCHECKED_PREFIXES;
  * aplicación siquiera se dibuje, con el motivo.
  *
  * Son la diferencia entre "este rol no ve Productos" y "este rol no puede
- * entrar". Todas son de lectura y ninguna expone algo que el usuario no viera
- * antes de que existieran los permisos.
+ * entrar". Todas son de lectura y **ninguna expone plata**.
+ *
+ * Aquí estuvo `GET reports/dashboard`, con el motivo «las tarjetas del inicio
+ * las ve cualquier usuario desde antes de los permisos». Devuelve las ventas
+ * del día y del mes: la plata de la tienda. Con roles restringidos —el
+ * revendedor, el vendedor externo— eso es una fuga, y el permiso de Reportes
+ * dice en su propia ficha que incluye costos y utilidad. Quien no lo tenga ve
+ * las tarjetas vacías, que es lo correcto.
  */
 const ALWAYS_ALLOWED: Record<string, string> = {
   // Nombre de la tienda, módulos activos, tema: lo consume el menú entero.
   'GET store-settings': 'Configuración que necesita toda la interfaz',
-  // Tarjetas del inicio; las ve cualquier usuario desde antes de los permisos.
-  'GET reports/dashboard': 'Resumen del inicio',
   // Un usuario tiene derecho a saber qué puede hacer.
   'GET access/me': 'Permisos del propio usuario',
   // Encontrar una referencia no es un módulo: es lo primero que hace quien
