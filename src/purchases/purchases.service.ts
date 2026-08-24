@@ -258,16 +258,26 @@ export class PurchasesService {
     );
     await this.poItemRepository.save(items);
 
-    // Create accounts payable if due date provided
-    if (dto.paymentDueDate) {
-      const ap = this.apRepository.create({
+    // La deuda con el proveedor nace **siempre**, no solo cuando alguien puso
+    // fecha de vencimiento.
+    //
+    // El campo se llama «Vencimiento de pago (opcional)» y decidía, sin
+    // decirlo, si la deuda existía. Una compra de $480.000 sin fecha quedaba
+    // sin cuenta por pagar, desaparecía de «cuánto le debemos a cada
+    // proveedor», y el listado la mostraba **«Pagada»** desde que era
+    // borrador. Un campo opcional no puede decidir si se debe plata.
+    //
+    // Sin fecha, se debe **hoy**: es lo que pasa cuando nadie pactó plazo.
+    await this.apRepository.save(
+      this.apRepository.create({
         purchaseOrderId: savedPo.id,
         amount: total,
-        dueDate: diaDeCalendario(dto.paymentDueDate),
+        dueDate: dto.paymentDueDate
+          ? diaDeCalendario(dto.paymentDueDate)
+          : diaDeCalendario(new Date()),
         tenantId,
-      });
-      await this.apRepository.save(ap);
-    }
+      }),
+    );
 
     return this.findOne(savedPo.id, tenantId);
   }
@@ -534,12 +544,16 @@ export class PurchasesService {
             ap.dueDate = diaDeCalendario(dto.paymentDueDate);
           await apRepo.save(ap);
         }
-      } else if (dto.paymentDueDate) {
+      } else {
+        // Una orden anterior a este arreglo puede no tener cuenta: editarla es
+        // la ocasión de creársela, con o sin fecha.
         await apRepo.save(
           apRepo.create({
             purchaseOrderId: po.id,
             amount: po.total,
-            dueDate: diaDeCalendario(dto.paymentDueDate),
+            dueDate: dto.paymentDueDate
+              ? diaDeCalendario(dto.paymentDueDate)
+              : diaDeCalendario(new Date()),
             tenantId,
           }),
         );
