@@ -135,7 +135,7 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
     key: 'vendedor-externo',
     name: 'Vendedor externo',
     description:
-      'Vende de las bodegas que se le asignen, pero **no cierra la venta**: la ' +
+      'Vende de las bodegas que se le asignen, pero no cierra la venta: la ' +
       'deja esperando autorización. No ve costos, ni compras, ni la plata de ' +
       'la tienda. Pensado para quien vende mercancía de un local sin tener ' +
       'inventario propio.',
@@ -170,8 +170,8 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
     name: 'Vendedor (cobra directo)',
     description:
       'Ve la misma pantalla simplificada del vendedor externo —catálogo con ' +
-      'precio de venta y sus propias ventas— pero **cierra la venta ahí ' +
-      'mismo**, sin esperar autorización. Sigue sin ver costos, compras, ni ' +
+      'precio de venta y sus propias ventas— pero cierra la venta ahí ' +
+      'mismo, sin esperar autorización. Sigue sin ver costos, compras, ni ' +
       'la plata de los demás.',
     permissions: build(NONE, {
       vender: R,

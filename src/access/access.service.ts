@@ -9,6 +9,8 @@ import { DataSource, In, Repository } from 'typeorm';
 import { AccessRole } from './entities/access-role.entity.js';
 import { RolePermission } from './entities/role-permission.entity.js';
 import { UserWarehouse } from './entities/user-warehouse.entity.js';
+import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
+import { necesitaCotizaciones } from './lo-que-el-perfil-necesita.js';
 import { User } from '../users/entities/user.entity.js';
 import { Warehouse } from '../inventory/entities/warehouse.entity.js';
 import { Role } from '../common/enums/role.enum.js';
@@ -54,6 +56,8 @@ export class AccessService {
     private readonly roleRepo: Repository<AccessRole>,
     @InjectRepository(RolePermission)
     private readonly permRepo: Repository<RolePermission>,
+    @InjectRepository(StoreSettings)
+    private readonly settingsRepo: Repository<StoreSettings>,
     @InjectRepository(UserWarehouse)
     private readonly userWarehouseRepo: Repository<UserWarehouse>,
     @InjectRepository(User)
@@ -199,7 +203,62 @@ export class AccessService {
       return role;
     });
 
-    return this.getRole(saved.id, tenantId);
+    const encendido = await this.encenderLoQueNecesita(permissions, tenantId);
+    const rol = await this.getRole(saved.id, tenantId);
+    // Se devuelve para que quien administra lo vea en pantalla: encender algo
+    // sin decirlo es magia a espaldas suyas.
+    return { ...rol, seEncendio: encendido };
+  }
+
+  /**
+   * El rol de una plantilla, creándolo si todavía no está.
+   *
+   * Existe para que dar de alta un vendedor sea **una** pantalla: antes había
+   * que ir a Ajustes, crear el rol, volver a Usuarios y asignarlo. Y como
+   * `createRole` choca si el nombre ya existe, el segundo vendedor de la
+   * tienda fallaba.
+   */
+  async roleFromTemplate(templateKey: string, tenantId: string) {
+    const plantilla = this.template(templateKey);
+    const yaEsta = await this.roleRepo.findOne({
+      where: { tenantId, name: plantilla.name },
+    });
+    if (yaEsta) {
+      // Aunque ya exista, la tienda puede seguir sin lo que el perfil
+      // necesita: el interruptor se apaga a mano y el rol no se entera.
+      const encendido = await this.encenderLoQueNecesita(
+        plantilla.permissions,
+        tenantId,
+      );
+      const rol = await this.getRole(yaEsta.id, tenantId);
+      return { ...rol, seEncendio: encendido, yaExistia: true };
+    }
+    const creado = await this.createRole(
+      {
+        name: plantilla.name,
+        description: plantilla.description,
+        templateKey,
+      },
+      tenantId,
+    );
+    return { ...creado, yaExistia: false };
+  }
+
+  /**
+   * Enciende en la tienda lo que este perfil necesita para servir de algo.
+   *
+   * Devuelve qué se encendió, o `null` si no hizo falta tocar nada.
+   */
+  private async encenderLoQueNecesita(
+    permissions: ModulePermission[],
+    tenantId: string,
+  ): Promise<string | null> {
+    if (!necesitaCotizaciones(permissions)) return null;
+    const settings = await this.settingsRepo.findOne({ where: { tenantId } });
+    if (!settings || settings.quotationsEnabled) return null;
+    settings.quotationsEnabled = true;
+    await this.settingsRepo.save(settings);
+    return 'Ventas por autorizar';
   }
 
   async updateRole(
@@ -241,7 +300,13 @@ export class AccessService {
       }
     });
 
-    return this.getRole(id, tenantId);
+    // Editar un rol para que pase a pedir autorización necesita lo mismo que
+    // crearlo así.
+    const encendido = data.permissions
+      ? await this.encenderLoQueNecesita(data.permissions, tenantId)
+      : null;
+    const actualizado = await this.getRole(id, tenantId);
+    return { ...actualizado, seEncendio: encendido };
   }
 
   /** Reescribe la matriz completa del rol (una fila por módulo con algo activo). */

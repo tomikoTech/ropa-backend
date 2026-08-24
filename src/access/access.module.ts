@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AccessRole } from './entities/access-role.entity.js';
 import { RolePermission } from './entities/role-permission.entity.js';
 import { UserWarehouse } from './entities/user-warehouse.entity.js';
+import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
 import { User } from '../users/entities/user.entity.js';
 import { Warehouse } from '../inventory/entities/warehouse.entity.js';
 import { AccessService } from './access.service.js';
@@ -24,6 +25,7 @@ import { AccessController } from './access.controller.js';
       UserWarehouse,
       User,
       Warehouse,
+      StoreSettings,
     ]),
   ],
   controllers: [AccessController],

@@ -107,6 +107,23 @@ export class AccessController {
     return this.access.getRole(id, tenantId);
   }
 
+  @Post('roles/desde-plantilla/:templateKey')
+  @UseGuards(RolesGuard)
+  @Roles(Role.ADMIN)
+  @ApiOperation({
+    summary: 'El rol de una plantilla, creándolo si falta',
+    description:
+      'Idempotente: si ya existe lo devuelve. Sirve para dar de alta un ' +
+      'vendedor sin salir de la pantalla de usuarios, y enciende de paso lo ' +
+      'que ese perfil necesita en la tienda (lo dice en `seEncendio`).',
+  })
+  roleFromTemplate(
+    @Param('templateKey') templateKey: string,
+    @TenantId() tenantId: string,
+  ) {
+    return this.access.roleFromTemplate(templateKey, tenantId);
+  }
+
   @Post('roles')
   @UseGuards(RolesGuard)
   @Roles(Role.ADMIN)

@@ -315,6 +315,14 @@ describe('plantillas de rol', () => {
     ]);
   });
 
+  // Se mostró en pantalla con los asteriscos crudos: la descripción es texto
+  // que lee el dueño, no un comentario de código.
+  it('ninguna descripción trae marcas de markdown', () => {
+    for (const t of ROLE_TEMPLATES) {
+      expect(`${t.name}: ${t.description}`).not.toMatch(/\*\*|__/);
+    }
+  });
+
   it('los dos perfiles de ventas ven la misma pantalla', () => {
     const pantalla = (key: string) =>
       ROLE_TEMPLATES.find((t) => t.key === key)?.permissions.find(
