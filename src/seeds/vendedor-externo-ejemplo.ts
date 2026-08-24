@@ -66,10 +66,12 @@ async function main() {
     console.log(`Tienda:  ${tenant.name} (${tenant.slug})`);
     console.log(`Bodega:  ${bodega.name} (la única que verá)`);
     if (bodegas.length > 1) {
-      console.log(`         otras: ${bodegas
-        .filter((b) => b.id !== bodega.id)
-        .map((b) => b.name)
-        .join(', ')} — se escogen con BODEGA="<nombre>"`);
+      console.log(
+        `         otras: ${bodegas
+          .filter((b) => b.id !== bodega.id)
+          .map((b) => b.name)
+          .join(', ')} — se escogen con BODEGA="<nombre>"`,
+      );
     }
     console.log(`Correo:  ${CORREO}`);
     console.log(`Rol:     ${plantilla.name} — ${plantilla.description}`);
@@ -95,7 +97,8 @@ async function main() {
     // y una clave escrita en el código es la misma para todos. `CLAVE` existe
     // para las cuentas de prueba, donde poder dictarla por teléfono importa
     // más que su fortaleza.
-    const clave = process.env.CLAVE || `Ve-${randomBytes(6).toString('base64url')}`;
+    const clave =
+      process.env.CLAVE || `Ve-${randomBytes(6).toString('base64url')}`;
     await AppDataSource.transaction(async (m) => {
       const [rol]: { id: string }[] = await m.query(
         `INSERT INTO access_roles (tenant_id, name, description)
