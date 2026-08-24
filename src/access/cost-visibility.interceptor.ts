@@ -8,6 +8,7 @@ import { Observable, from, map, switchMap } from 'rxjs';
 import type { Request } from 'express';
 import { Role } from '../common/enums/role.enum.js';
 import { AccessService } from './access.service.js';
+import { puedeVerElCosto } from './costo-visible.js';
 
 /**
  * Campos que llevan el costo de la mercancía en las respuestas.
@@ -45,6 +46,11 @@ const MAX_DEPTH = 12;
  * Tiene una puerta de salida rápida: si el usuario no está restringido (o es de
  * la plataforma) la respuesta pasa intacta y no se recorre nada.
  *
+ * **La excepción de las ventas de terceros.** Ahí el costo es lo que se le
+ * debe al dueño del producto: la plata de quien vendió, no el costo de la
+ * mercancía de una tienda. Taparlo a quien revende le escondía la mitad de su
+ * contabilidad. La regla vive en `costo-visible.ts`.
+ *
  * **Lo que esto NO cubre, a propósito:** los reportes de costo y utilidad. Esos
  * se controlan con el permiso de **Reportes**, cuya ficha ya dice "incluye
  * costos, utilidad y cartera": dar Reportes es dar visibilidad del costo, y es
@@ -69,9 +75,14 @@ export class CostVisibilityInterceptor implements NestInterceptor {
       return next.handle();
     }
 
-    return from(this.access.userCan(user, 'products', 'list')).pipe(
-      switchMap((seesCost) =>
-        seesCost
+    return from(
+      Promise.all([
+        this.access.userCan(user, 'products', 'list'),
+        this.access.userCan(user, 'consignments', 'list'),
+      ]),
+    ).pipe(
+      switchMap(([veProductos, veTerceros]) =>
+        puedeVerElCosto(request.path, { veProductos, veTerceros })
           ? next.handle()
           : next.handle().pipe(map((body) => stripCosts(body))),
       ),

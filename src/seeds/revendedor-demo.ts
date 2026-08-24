@@ -33,8 +33,8 @@ const PLANTILLA = 'revendedor';
  * recordar el ultimo precio.
  */
 const VENTAS = [
-  ['Don Jose', 'Nike Air Force 1', '40', 'Blanco', 95000, 150000, 'Efectivo'],
-  ['Don Jose', 'Nike Air Force 1', '42', 'Blanco', 95000, 150000, 'Efectivo'],
+  ['Don Jose', 'Nike Air Force 1', '40', 'Blanco', 95000, 150000, 'EFECTIVO'],
+  ['Don Jose', 'Nike Air Force 1', '42', 'Blanco', 95000, 150000, 'EFECTIVO'],
   [
     'Don Jose',
     'Nike Air Force 1',
@@ -42,15 +42,15 @@ const VENTAS = [
     'Blanco',
     98000,
     155000,
-    'Transferencia',
+    'TRANSFERENCIA',
   ],
-  ['Don Jose', 'Adidas Superstar', '41', 'Negro', 88000, 140000, 'Efectivo'],
-  ['Marcela', 'Puma Suede', '38', 'Azul', 72000, 120000, 'Efectivo'],
-  ['Marcela', 'Puma Suede', '39', 'Azul', 72000, 120000, 'Transferencia'],
-  ['Marcela', 'Sandalia Ipanema', '37', 'Rosado', 28000, 55000, 'Efectivo'],
-  ['El Primo', 'Nike Dunk Low', '43', 'Verde', 130000, 195000, 'Efectivo'],
-  ['El Primo', 'Nike Dunk Low', '41', 'Verde', 130000, 190000, 'Efectivo'],
-  ['El Primo', 'Crocs Clasico', '40', 'Negro', 60000, 98000, 'Efectivo'],
+  ['Don Jose', 'Adidas Superstar', '41', 'Negro', 88000, 140000, 'EFECTIVO'],
+  ['Marcela', 'Puma Suede', '38', 'Azul', 72000, 120000, 'EFECTIVO'],
+  ['Marcela', 'Puma Suede', '39', 'Azul', 72000, 120000, 'TRANSFERENCIA'],
+  ['Marcela', 'Sandalia Ipanema', '37', 'Rosado', 28000, 55000, 'EFECTIVO'],
+  ['El Primo', 'Nike Dunk Low', '43', 'Verde', 130000, 195000, 'EFECTIVO'],
+  ['El Primo', 'Nike Dunk Low', '41', 'Verde', 130000, 190000, 'EFECTIVO'],
+  ['El Primo', 'Crocs Clasico', '40', 'Negro', 60000, 98000, 'EFECTIVO'],
 ] as const;
 
 /** Cuantos dias atras cae cada venta, para que el historial no sea de un dia. */
