@@ -9,6 +9,7 @@ import {
   IsUUID,
   Min,
   ValidateNested,
+  ValidateIf,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -184,9 +185,16 @@ export class CreateProductDto {
       'Maneja el producto por unidades etiquetadas (cajas). Requiere que la tienda lo tenga habilitado.',
     default: false,
   })
+  /**
+   * Tres estados, y el producto manda sobre la tienda (ver `llevaUnidades`):
+   * `true` sí, `false` no, **`null` lo que diga la tienda**. Sin aceptar el
+   * nulo no hay forma de decir «no opino», y la pantalla tenía que elegir
+   * entre dos mentiras.
+   */
   @IsOptional()
+  @ValidateIf((_, value) => value !== null)
   @IsBoolean()
-  unitTracking?: boolean;
+  unitTracking?: boolean | null;
 
   @ApiPropertyOptional({
     example: 1,

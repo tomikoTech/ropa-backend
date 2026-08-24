@@ -190,9 +190,16 @@ export class UpdateProductDto {
     description:
       'Maneja el producto por unidades etiquetadas (cajas). Requiere que la tienda lo tenga habilitado.',
   })
+  /**
+   * Tres estados, y el producto manda sobre la tienda (ver `llevaUnidades`):
+   * `true` sí, `false` no, **`null` lo que diga la tienda**. Sin aceptar el
+   * nulo no hay forma de decir «no opino», y la pantalla tenía que elegir
+   * entre dos mentiras.
+   */
   @IsOptional()
+  @ValidateIf((_, value) => value !== null)
   @IsBoolean()
-  unitTracking?: boolean;
+  unitTracking?: boolean | null;
 
   @ApiPropertyOptional({
     example: 1,
