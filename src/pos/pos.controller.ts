@@ -25,10 +25,16 @@ import { MarkSalePaidDto } from './dto/mark-sale-paid.dto.js';
 import {
   CollectAccountsDto,
   RecordArPaymentDto,
-  ReverseArPaymentDto
+  ReverseArPaymentDto,
 } from './dto/record-ar-payment.dto.js';
 import { SendInvoiceDto } from './dto/send-invoice.dto.js';
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
+import { AccessService } from '../access/access.service.js';
+import { Role } from '../common/enums/role.enum.js';
+import {
+  MODULO_PANTALLA_SIMPLE,
+  soloSusVentas,
+} from '../access/pantalla-de-ventas.js';
 import { TenantId } from '../common/decorators/tenant-id.decorator.js';
 import { UserId } from '../common/decorators/user-id.decorator.js';
 import { SaleStatus } from '../common/enums/sale-status.enum.js';
@@ -40,6 +46,7 @@ export class PosController {
   constructor(
     private readonly posService: PosService,
     private readonly scanService: ScanService,
+    private readonly access: AccessService,
   ) {}
 
   @Get('scan/:barcode')
@@ -92,7 +99,16 @@ export class PosController {
   }
 
   @Get('sales')
-  findAll(
+  @ApiOperation({
+    summary: 'Historial de ventas',
+    description:
+      'Quien usa la pantalla simplificada ve **solo las suyas**: antes ' +
+      'cualquiera con «Ver» en Ventas veía la plata de toda la tienda, con ' +
+      'los clientes y los montos de los demás.',
+  })
+  async findAll(
+    @CurrentUser()
+    user: { id: string; role: Role; accessRoleId: string | null },
     @TenantId() tenantId: string,
     @Query('status') status?: SaleStatus,
     @Query('warehouseId') warehouseId?: string,
@@ -106,11 +122,23 @@ export class PosController {
     @Query('paid') paid?: string,
     @Query('clientPhone') clientPhone?: string,
   ) {
+    // El filtro no se negocia con el cliente: mandar otro `userId` a mano no
+    // abre la puerta. La regla vive en `pantalla-de-ventas.ts`, así que acá
+    // solo se resuelve el permiso que esa regla mira.
+    const usaSimple = await this.access.userCan(
+      user,
+      MODULO_PANTALLA_SIMPLE,
+      'list',
+    );
+    const propio = soloSusVentas(() => usaSimple, user.id, {
+      // `userCan` le dice que sí a todo a quien no tiene matriz.
+      sinMatriz: !user.accessRoleId || user.role === Role.SUPER_ADMIN,
+    });
     return this.posService.findAll(
       {
         status,
         warehouseId,
-        userId,
+        userId: propio ?? userId,
         from,
         to,
         limit: limit ? parseInt(limit, 10) : undefined,

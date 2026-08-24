@@ -29,6 +29,9 @@ import { escogerBodegas, type Bodega } from './escoger-bodegas.js';
 import { rolAUsar } from './reusar-rol.js';
 
 const CORREO = process.env.CORREO || 'vendedor.externo@ejemplo.co';
+// Los dos perfiles de ventas ven lo mismo; el de «directo» además cobra.
+const PLANTILLA =
+  process.env.PERFIL === 'directo' ? 'vendedor-directo' : 'vendedor-externo';
 
 async function main() {
   const aplicar = process.env.MODE === 'apply';
@@ -55,8 +58,8 @@ async function main() {
     );
     const escogidas = escogerBodegas(bodegas, process.env.BODEGA);
 
-    const plantilla = findRoleTemplate('vendedor-externo');
-    if (!plantilla) throw new Error('Falta la plantilla vendedor-externo.');
+    const plantilla = findRoleTemplate(PLANTILLA);
+    if (!plantilla) throw new Error(`Falta la plantilla ${PLANTILLA}.`);
 
     console.log(`Tienda:  ${tenant.name} (${tenant.slug})`);
     console.log(

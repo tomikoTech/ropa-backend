@@ -10,6 +10,11 @@ import {
   ALWAYS_ALLOWED_ROUTES,
 } from './module-registry.js';
 import {
+  MODULO_PANTALLA_SIMPLE,
+  soloSusVentas,
+  usaPantallaSimple,
+} from './pantalla-de-ventas.js';
+import {
   ROLE_TEMPLATES,
   emptyMatrix,
   isEmptyMatrix,
@@ -67,8 +72,38 @@ describe('catálogo de módulos', () => {
     const alcanzados = new Set(
       rutas.map((r) => moduleForPath(r)).filter(Boolean) as string[],
     );
-    const huerfanos = MODULE_KEYS.filter((k) => !alcanzados.has(k));
+    // La única excepción, y con nombre: `vender` no guarda una ruta, gobierna
+    // **qué pantalla** ve el usuario y **de quién** es la plata que le
+    // muestran. Que sí hace algo lo comprueban las dos pruebas de abajo, para
+    // que esta excepción no se vuelva el hueco por donde entra un permiso
+    // muerto.
+    const sinRutaPropia = [MODULO_PANTALLA_SIMPLE];
+    const huerfanos = MODULE_KEYS.filter(
+      (k) => !alcanzados.has(k) && !sinRutaPropia.includes(k),
+    );
     expect(huerfanos).toEqual([]);
+  });
+
+  it('la excepción `vender` gobierna la pantalla', () => {
+    const con =
+      (m: Record<string, string[]>) =>
+      (modulo: string, accion = 'list') =>
+        (m[modulo] ?? []).includes(accion);
+    expect(usaPantallaSimple(con({ [MODULO_PANTALLA_SIMPLE]: ['list'] }))).toBe(
+      true,
+    );
+    expect(usaPantallaSimple(con({ sales: ['list'] }))).toBe(false);
+  });
+
+  it('y gobierna de quién es la plata que se ve', () => {
+    const con =
+      (m: Record<string, string[]>) =>
+      (modulo: string, accion = 'list') =>
+        (m[modulo] ?? []).includes(accion);
+    expect(
+      soloSusVentas(con({ [MODULO_PANTALLA_SIMPLE]: ['list'] }), 'u1'),
+    ).toBe('u1');
+    expect(soloSusVentas(con({ sales: ['list'] }), 'u1')).toBeNull();
   });
 });
 
@@ -263,20 +298,39 @@ describe('resolvePermission', () => {
 });
 
 describe('plantillas de rol', () => {
-  it('están las seis del sistema anterior, más el vendedor externo', () => {
+  it('están las seis del sistema anterior, más los dos de ventas', () => {
     // Las seis primeras son las que existían en demachine y no se tocan: si
     // una desaparece o cambia de nombre, alguien se queda sin su rol.
-    // «Vendedor externo» se agregó en agosto de 2026 para quien vende
-    // mercancía de un local sin tener inventario propio.
+    // Los dos de ventas se agregaron en agosto de 2026: ven la misma pantalla
+    // simplificada y se diferencian **solo** en si cierran la venta.
     expect(ROLE_TEMPLATES.map((t) => t.name)).toEqual([
       'Administrador',
       'Gerente',
       'Cajero',
       'Vendedor externo',
+      'Vendedor (cobra directo)',
       'Jefe de Bodega',
       'Inventario',
       'Consulta',
     ]);
+  });
+
+  it('los dos perfiles de ventas ven la misma pantalla', () => {
+    const pantalla = (key: string) =>
+      ROLE_TEMPLATES.find((t) => t.key === key)?.permissions.find(
+        (p) => p.module === MODULO_PANTALLA_SIMPLE,
+      )?.list;
+    expect(pantalla('vendedor-externo')).toBe(true);
+    expect(pantalla('vendedor-directo')).toBe(true);
+  });
+
+  it('y se diferencian solo en cerrar la venta', () => {
+    const cierra = (key: string) =>
+      ROLE_TEMPLATES.find((t) => t.key === key)?.permissions.find(
+        (p) => p.module === 'sales',
+      )?.create;
+    expect(cierra('vendedor-externo')).toBe(false);
+    expect(cierra('vendedor-directo')).toBe(true);
   });
 
   it('el vendedor externo puede proponer una venta pero no autorizarla', () => {

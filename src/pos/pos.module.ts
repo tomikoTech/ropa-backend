@@ -18,6 +18,7 @@ import { TaxService } from './services/tax.service.js';
 import { InvoiceService } from './services/invoice.service.js';
 import { ReceiptService } from './services/receipt.service.js';
 import { ClientsModule } from '../clients/clients.module.js';
+import { AccessModule } from '../access/access.module.js';
 import { Promoter } from '../promoters/promoter.entity.js';
 import { PurchaseBoxLine } from '../purchases/entities/purchase-box-line.entity.js';
 import { StockUnitContent } from '../inventory/entities/stock-unit-content.entity.js';
@@ -46,6 +47,7 @@ import { CajaModule } from '../caja/caja.module.js';
       StockUnitContent,
     ]),
     ClientsModule,
+    AccessModule,
     StockLedgerModule,
     ReposicionAutomaticaModule,
     // El POS le pregunta dos cosas antes de cobrar: si el turno sigue abierto

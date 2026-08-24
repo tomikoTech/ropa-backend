@@ -140,6 +140,9 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       'la tienda. Pensado para quien vende mercancía de un local sin tener ' +
       'inventario propio.',
     permissions: build(NONE, {
+      // La pantalla simplificada: dos accesos, armar el pedido y ver en qué
+      // quedó. La misma que ve el vendedor que cobra directo.
+      vender: R,
       // Crear la venta pendiente, y ver las suyas. **Sin `edit`**, que es lo
       // que exige autorizarla: quien vende no se aprueba a sí mismo, y esa
       // separación es todo el sentido de este perfil.
@@ -155,6 +158,28 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       // que las limita el alcance por bodega del usuario.
       warehouses: R,
       // Para poder decir a quién le vendió.
+      clients: RC,
+    }),
+  },
+  {
+    // El mismo perfil, con la única diferencia que pidió el dueño: este cobra.
+    // Ve exactamente lo mismo —el permiso de la pantalla es el mismo—, y lo
+    // que cambia es que al final la venta se cierra en vez de quedar
+    // esperando.
+    key: 'vendedor-directo',
+    name: 'Vendedor (cobra directo)',
+    description:
+      'Ve la misma pantalla simplificada del vendedor externo —catálogo con ' +
+      'precio de venta y sus propias ventas— pero **cierra la venta ahí ' +
+      'mismo**, sin esperar autorización. Sigue sin ver costos, compras, ni ' +
+      'la plata de los demás.',
+    permissions: build(NONE, {
+      vender: R,
+      // `create` es la única diferencia con el vendedor externo: es lo que
+      // significa «cerrar una venta».
+      sales: RC,
+      inventory: R,
+      warehouses: R,
       clients: RC,
     }),
   },

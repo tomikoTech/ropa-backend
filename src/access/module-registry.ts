@@ -60,6 +60,19 @@ export const MODULES: ModuleDef[] = [
   { key: 'consignments', label: 'Ventas de terceros', group: 'Ventas' },
   { key: 'quotations', label: 'Cotizaciones', group: 'Ventas' },
   {
+    // No se deduce de otros permisos a propósito. La primera versión la
+    // deducía de «no puede cerrar ventas», y entonces darle a alguien el
+    // permiso de cobrar le devolvía el sistema entero — justo al revés de lo
+    // que se pedía, que los dos perfiles vean lo mismo.
+    key: 'vender',
+    label: 'Pantalla de ventas simplificada',
+    group: 'Ventas',
+    hint:
+      '"Ver" reemplaza todo el menú por dos accesos: armar el pedido y ver en ' +
+      'qué quedó · Quien además tenga "Crear" en Ventas cobra ahí mismo; quien ' +
+      'no, lo deja esperando autorización · Solo ve sus propias ventas',
+  },
+  {
     key: 'accounts-receivable',
     label: 'Cuentas por cobrar',
     group: 'Ventas',
