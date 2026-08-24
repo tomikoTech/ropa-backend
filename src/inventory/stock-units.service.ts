@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ConflictException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import {
@@ -44,6 +45,15 @@ import {
   type MotivoMovimiento,
 } from './ledger/stock-ledger.service.js';
 import { IntakeBoxesDto, TransferUnitsDto } from './dto/stock-unit.dto.js';
+import {
+  codigosDeLaApertura,
+  paresDeLaCaja,
+  type TramoDelDia as TramoDeEtiquetas,
+} from './reparto-de-pares.js';
+import {
+  ConsecutivoAgotadoError,
+  explicarConsecutivoAgotado,
+} from './consecutivo-del-dia.js';
 
 /** Identificadores que llegan por query string: se validan antes de consultar. */
 /**
@@ -809,19 +819,56 @@ export class StockUnitsService {
         // La secuencia de las unidades continúa DESPUÉS de la de todas las
         // cajas y unidades ya emitidas del renglón. Si empezara en 1, la
         // primera unidad tendría el mismo código que la primera caja.
-        let sequence = await this.nextUnitSequence(
-          box.purchaseBoxLineId,
-          base.slice(0, 13),
-          tenantId,
-          m,
-        );
+        const ultimaDelRenglon =
+          (await this.nextUnitSequence(
+            box.purchaseBoxLineId,
+            base.slice(0, 13),
+            tenantId,
+            m,
+          )) - 1;
+        // De dónde salen los códigos: el renglón de la caja solo se continúa
+        // si es de una orden de compra. El espacio del día lo administra el
+        // ledger y numerar a mano ahí produce etiquetas repetidas. El renglón
+        // tiene además 999 puestos, y lo que pasaba de ahí armaba códigos de
+        // 18 dígitos sin avisar. Ver `reparto-de-pares.ts`.
+        const { enElRenglon, faltan } = paresDeLaCaja({
+          codigoDeLaCaja: box.barcode,
+          ultimaUnidadUsada: ultimaDelRenglon,
+          cantidad: curveQuantity,
+        });
+        // Lo que no cabe no bloquea la apertura: se le pide un tramo nuevo al
+        // reparto del día, el mismo del ledger.
+        let tramosDelDia: TramoDeEtiquetas[] = [];
+        const hoy = new Date();
+        if (faltan > 0) {
+          try {
+            tramosDelDia = await this.ledger.reservarEtiquetas(
+              m,
+              hoy,
+              tenantId,
+              faltan,
+            );
+          } catch (error) {
+            if (error instanceof ConsecutivoAgotadoError) {
+              throw new ConflictException(
+                explicarConsecutivoAgotado('STOCK_UNIT_INTAKE'),
+              );
+            }
+            throw error;
+          }
+        }
+        const codigos = codigosDeLaApertura({
+          cuerpoDelRenglon: base.slice(0, 13),
+          enElRenglon,
+          tramosDelDia,
+          fecha: hoy,
+        });
         let pairSequence = 1;
 
         for (const item of distribution) {
           const variant = variantBySize.get(item.sizeId)!;
           for (let i = 0; i < item.quantity; i++) {
-            const body = base.slice(0, 13) + String(sequence).padStart(3, '0');
-            sequence++;
+            const body = codigos[pairSequence - 1];
             units.push(
               unitRepo.create({
                 barcode: withCheckDigit(body),
@@ -1328,6 +1375,8 @@ export class StockUnitsService {
     productId?: string;
     status?: string;
     warehouseId?: string;
+    /** Los pares que salieron de una caja concreta. */
+    parentId?: string;
     from?: string;
     to?: string;
     page?: number;
@@ -1415,6 +1464,19 @@ export class StockUnitsService {
       });
       contentsByBox.set(row.boxUnitId, actual);
     }
+    // La caja de la que salió cada par. Sin el código a la vista, un par
+    // abierto no se puede relacionar con su caja sin entrar a su detalle uno
+    // por uno.
+    const parentIds = [
+      ...new Set(units.map((unit) => unit.parentUnitId).filter(Boolean)),
+    ] as string[];
+    const parents = parentIds.length
+      ? await this.unitRepo.find({
+          where: { id: In(parentIds), tenantId: params.tenantId },
+          select: { id: true, barcode: true },
+        })
+      : [];
+    const parentById = new Map(parents.map((parent) => [parent.id, parent]));
     const lineById = new Map(lines.map((line) => [line.id, line]));
     const saleByUnit = new Map<string, SaleItem>();
     for (const item of saleItems) {
@@ -1440,6 +1502,9 @@ export class StockUnitsService {
           boxSequence: unit.boxSequence,
           pairSequence: unit.pairSequence,
           parentUnitId: unit.parentUnitId,
+          parentBarcode: unit.parentUnitId
+            ? (parentById.get(unit.parentUnitId)?.barcode ?? null)
+            : null,
           childCount: childrenByBox.get(unit.id) ?? 0,
           contents: sortSizes(contentsByBox.get(unit.id) ?? []),
           product: {
@@ -1472,6 +1537,7 @@ export class StockUnitsService {
     productId?: string;
     status?: string;
     warehouseId?: string;
+    parentId?: string;
     from?: string;
     to?: string;
     tenantId: string;
@@ -1508,6 +1574,7 @@ export class StockUnitsService {
     status?: string;
     warehouseId?: string;
     productId?: string;
+    parentId?: string;
   }) {
     for (const [label, value] of [
       ['desde', params.from],
@@ -1539,6 +1606,7 @@ export class StockUnitsService {
     for (const [label, value] of [
       ['Bodega', params.warehouseId],
       ['Producto', params.productId],
+      ['Caja', params.parentId],
     ] as const) {
       if (value && !UUID_PATTERN.test(value)) {
         throw new BadRequestException(`${label} inválida.`);
@@ -1558,6 +1626,7 @@ export class StockUnitsService {
     productId?: string;
     status?: string;
     warehouseId?: string;
+    parentId?: string;
     from?: string;
     to?: string;
     tenantId: string;
@@ -1604,6 +1673,13 @@ export class StockUnitsService {
     if (params.productId) {
       qb.andWhere('unit.productId = :productId', {
         productId: params.productId,
+      });
+    }
+    // «Los pares de esta caja». Era la pregunta que quedaba sin respuesta al
+    // abrirla: la caja decía «se abrió en 12 pares» y no había forma de verlos.
+    if (params.parentId) {
+      qb.andWhere('unit.parentUnitId = :parentId', {
+        parentId: params.parentId,
       });
     }
     if (params.from) {
