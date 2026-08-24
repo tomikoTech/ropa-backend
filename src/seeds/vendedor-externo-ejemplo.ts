@@ -8,17 +8,22 @@
  *
  * Por defecto **no escribe nada**: enseña lo que haría. Para crearla:
  *
- *     MODE=apply BODEGA="Amawad Principal" node dist/seeds/vendedor-externo-ejemplo.js
+ *     MODE=apply TENANT=amawad BODEGA="Principal" node dist/seeds/vendedor-externo-ejemplo.js
+ *
+ * `TENANT` es el slug de la tienda. Si la base tiene más de una, **es
+ * obligatorio**: sin él el script se niega en vez de adivinar, porque adivinar
+ * mal significa meter un usuario ajeno en la tienda de otro cliente.
  *
  * `BODEGA` es el nombre de la bodega a la que tendrá acceso; si no se pasa,
- * usa la primera activa. La clave se imprime **una sola vez**, al crearla: no
- * queda escrita en ningún lado, que es como debe ser.
+ * usa la primera activa. La clave se imprime **una sola vez**, al crearla; se
+ * puede fijar con `CLAVE`, y si no, sale al azar.
  */
 import 'dotenv/config';
 import { randomBytes } from 'crypto';
 import * as bcrypt from 'bcrypt';
 import { AppDataSource } from '../config/data-source.js';
 import { findRoleTemplate } from '../access/role-templates.js';
+import { escogerTienda, type Tienda } from './escoger-tienda.js';
 
 const CORREO = process.env.CORREO || 'vendedor.externo@ejemplo.co';
 
@@ -33,10 +38,11 @@ async function main() {
       params?: unknown[],
     ): Promise<T[]> => AppDataSource.query(sql, params);
 
-    const [tenant] = await consultar<{ id: string; name: string }>(
-      `SELECT id, name FROM tenants WHERE slug <> 'mipinta-platform' ORDER BY created_at LIMIT 1`,
+    const tiendas = await consultar<Tienda>(
+      `SELECT id, name, slug FROM tenants
+        WHERE slug <> 'mipinta-platform' ORDER BY created_at`,
     );
-    if (!tenant) throw new Error('No hay ninguna tienda en esta base.');
+    const tenant = escogerTienda(tiendas, process.env.TENANT);
 
     const bodegas = await consultar<{ id: string; name: string }>(
       `SELECT id, name FROM warehouses
@@ -57,8 +63,14 @@ async function main() {
     const plantilla = findRoleTemplate('vendedor-externo');
     if (!plantilla) throw new Error('Falta la plantilla vendedor-externo.');
 
-    console.log(`Tienda:  ${tenant.name}`);
+    console.log(`Tienda:  ${tenant.name} (${tenant.slug})`);
     console.log(`Bodega:  ${bodega.name} (la única que verá)`);
+    if (bodegas.length > 1) {
+      console.log(`         otras: ${bodegas
+        .filter((b) => b.id !== bodega.id)
+        .map((b) => b.name)
+        .join(', ')} — se escogen con BODEGA="<nombre>"`);
+    }
     console.log(`Correo:  ${CORREO}`);
     console.log(`Rol:     ${plantilla.name} — ${plantilla.description}`);
 
@@ -73,13 +85,17 @@ async function main() {
 
     if (!aplicar) {
       console.log('\nENSAYO: no se escribió nada. Para crearla:');
-      console.log('  MODE=apply node dist/seeds/vendedor-externo-ejemplo.js');
+      console.log(
+        `  MODE=apply TENANT=${tenant.slug} node dist/seeds/vendedor-externo-ejemplo.js`,
+      );
       return;
     }
 
-    // Clave al azar, no una escrita en el código: esta cuenta puede terminar
-    // en una tienda de verdad.
-    const clave = `Ve-${randomBytes(6).toString('base64url')}`;
+    // Al azar por defecto: esta cuenta puede terminar en una tienda de verdad
+    // y una clave escrita en el código es la misma para todos. `CLAVE` existe
+    // para las cuentas de prueba, donde poder dictarla por teléfono importa
+    // más que su fortaleza.
+    const clave = process.env.CLAVE || `Ve-${randomBytes(6).toString('base64url')}`;
     await AppDataSource.transaction(async (m) => {
       const [rol]: { id: string }[] = await m.query(
         `INSERT INTO access_roles (tenant_id, name, description)
