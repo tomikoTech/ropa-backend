@@ -22,6 +22,28 @@ import { StockLedgerService } from '../inventory/ledger/stock-ledger.service.js'
 import { StockUnitStatus } from '../inventory/entities/stock-unit.entity.js';
 import { diaDeCalendario } from '../common/utils/dia-de-calendario.util.js';
 
+/**
+ * Cuándo vence una compra a la que nadie le puso plazo.
+ *
+ * La deuda con el proveedor nace siempre (ver el arreglo de agosto), pero
+ * `due_date` no admite nulos y hay que poner **algo**. Se probó con «hoy» y el
+ * resultado fue peor que el problema: al día siguiente todas las compras sin
+ * plazo salían «Vencida hace 1 día», en rojo, y la que de verdad estaba
+ * atrasada dejaba de distinguirse. Una alarma que suena siempre no es una
+ * alarma.
+ *
+ * Treinta días es el plazo corriente de un proveedor. No es un dato: es un
+ * supuesto, y por eso queda escrito en la nota de la cuenta.
+ */
+const DIAS_DE_PLAZO_ASUMIDO = 30;
+const PLAZO_ASUMIDO = `Vencimiento asumido a ${DIAS_DE_PLAZO_ASUMIDO} días: la compra se creó sin plazo pactado.`;
+
+function plazoPorDefecto(): Date {
+  const dia = new Date();
+  dia.setDate(dia.getDate() + DIAS_DE_PLAZO_ASUMIDO);
+  return dia;
+}
+
 @Injectable()
 export class PurchasesService {
   constructor(
@@ -274,7 +296,8 @@ export class PurchasesService {
         amount: total,
         dueDate: dto.paymentDueDate
           ? diaDeCalendario(dto.paymentDueDate)
-          : diaDeCalendario(new Date()),
+          : diaDeCalendario(plazoPorDefecto()),
+        notes: dto.paymentDueDate ? undefined : PLAZO_ASUMIDO,
         tenantId,
       }),
     );
@@ -565,7 +588,8 @@ export class PurchasesService {
             amount: po.total,
             dueDate: dto.paymentDueDate
               ? diaDeCalendario(dto.paymentDueDate)
-              : diaDeCalendario(new Date()),
+              : diaDeCalendario(plazoPorDefecto()),
+            notes: dto.paymentDueDate ? undefined : PLAZO_ASUMIDO,
             tenantId,
           }),
         );
