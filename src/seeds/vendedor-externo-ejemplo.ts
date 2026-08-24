@@ -27,6 +27,7 @@ import { findRoleTemplate } from '../access/role-templates.js';
 import { escogerTienda, type Tienda } from './escoger-tienda.js';
 import { escogerBodegas, type Bodega } from './escoger-bodegas.js';
 import { rolAUsar } from './reusar-rol.js';
+import { usaBodegas } from './usa-bodegas.js';
 
 const CORREO = process.env.CORREO || 'vendedor.externo@ejemplo.co';
 // Los dos perfiles de ventas ven lo mismo; el de «directo» además cobra.
@@ -54,24 +55,30 @@ async function main() {
     );
     const tenant = escogerTienda(tiendas, process.env.TENANT);
 
+    const plantilla = findRoleTemplate(PLANTILLA);
+    if (!plantilla) throw new Error(`Falta la plantilla ${PLANTILLA}.`);
+
     const bodegas = await consultar<Bodega>(
       `SELECT id, name FROM warehouses
         WHERE tenant_id = $1 AND is_active = true
         ORDER BY name`,
       [tenant.id],
     );
-    const escogidas = escogerBodegas(bodegas, process.env.BODEGA);
-
-    const plantilla = findRoleTemplate(PLANTILLA);
-    if (!plantilla) throw new Error(`Falta la plantilla ${PLANTILLA}.`);
+    // Al revendedor no se le asignan: no tiene bodega ni inventario.
+    const conBodegas = usaBodegas(plantilla.permissions);
+    const escogidas = conBodegas
+      ? escogerBodegas(bodegas, process.env.BODEGA)
+      : [];
 
     console.log(`Tienda:  ${tenant.name} (${tenant.slug})`);
     console.log(
-      escogidas === null
-        ? `Bodegas: todas (${bodegas.length}), incluidas las que creen después`
-        : `Bodegas: ${escogidas.map((b) => b.name).join(', ')} — y ninguna más`,
+      !conBodegas
+        ? 'Bodegas: ninguna — este perfil no las usa'
+        : escogidas === null
+          ? `Bodegas: todas (${bodegas.length}), incluidas las que creen después`
+          : `Bodegas: ${escogidas.map((b) => b.name).join(', ')} — y ninguna más`,
     );
-    if (escogidas !== null && bodegas.length > escogidas.length) {
+    if (conBodegas && escogidas !== null && bodegas.length > escogidas.length) {
       console.log(
         `         no verá: ${bodegas
           .filter((b) => !escogidas.some((e) => e.id === b.id))
