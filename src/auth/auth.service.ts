@@ -122,6 +122,15 @@ export class AuthService {
         lastName: user.lastName,
         role: user.role,
         tenantId: user.tenantId,
+        /**
+         * Si tiene matriz de permisos.
+         *
+         * Sin esto, justo despues de entrar el frontend no sabia si el usuario
+         * estaba restringido y pintaba la pantalla completa —el menu, el panel
+         * de inicio— uno o dos segundos, hasta que llegaba la matriz. Se ve, y
+         * se alcanza a fotografiar.
+         */
+        accessRoleId: user.accessRoleId ?? null,
       },
     };
   }
