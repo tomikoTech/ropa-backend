@@ -1,0 +1,38 @@
+# La Bodega AG — inventario inicial
+#
+# Lo que mandó el cliente por WhatsApp el 25 de agosto de 2026, con la misma
+# redacción. Lo único añadido son las secciones: la lista llegó plana y las
+# categorías las decidimos acá, a la vista.
+#
+# Las cantidades NO se tocan. Si algo está mal, se corrige acá y se vuelve a
+# comparar contra el mensaje, no de memoria.
+
+# Camisetas
+418 camisetas
+218 camiseta texturizada
+132 polos de hombre
+38 camiseta dama
+33 camisetas deportiva drifit
+4 esqueletos deportivo
+
+# Pantalones
+94 pantalones
+52 pantaloneta algodón
+44 bermudas
+32 sudadera
+23 pantaloneta deportiva
+
+# Conjuntos
+33 conjuntos cortos
+9 conjunto deportivo
+7 conjuntos largos
+
+# Accesorios
+172 gorras
+30 Carrieles
+
+# Ropa interior
+4 boxer
+
+# Perfumería
+12 lociones
