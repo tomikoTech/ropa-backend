@@ -525,6 +525,15 @@ export class ProductsService {
       maxPrice?: number;
       /** Solo lo que tiene existencias en alguna bodega. */
       inStock?: boolean;
+      /**
+       * Mirar el inventario de **una sola bodega**.
+       *
+       * Cruza con los demás filtros —«lociones que hay en la bodega del
+       * centro»— y cambia lo que significa la columna de stock: pasa de «todo
+       * lo que hay» a «lo que hay ahí». Sin esto, filtrar por bodega enseñaba
+       * la lista correcta con los totales de toda la tienda al lado.
+       */
+      warehouseId?: string;
       sort?: string;
     },
   ): Promise<{
@@ -564,6 +573,11 @@ export class ProductsService {
       );
     }
 
+    // Con bodega elegida, el inventario del producto es el de esa bodega: es
+    // lo que se ordena, lo que se filtra y lo que la pantalla enseña.
+    const soloEsaBodega = opts.warehouseId
+      ? 'AND stock_sort.warehouse_id = :warehouseId'
+      : '';
     const stockQuantitySql = `(
       SELECT COALESCE(SUM(stock_sort.quantity), 0)
       FROM stock stock_sort
@@ -571,7 +585,11 @@ export class ProductsService {
         ON variant_sort.id = stock_sort.variant_id
       WHERE variant_sort.product_id = p.id
         AND stock_sort.tenant_id = :tenantId
+        ${soloEsaBodega}
     )`;
+    if (opts.warehouseId) {
+      qb.setParameter('warehouseId', opts.warehouseId);
+    }
     qb.addSelect(stockQuantitySql, 'inventory_quantity');
 
     // Marca, precio y existencias: filtran **acá**, no en la pantalla.

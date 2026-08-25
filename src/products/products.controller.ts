@@ -77,6 +77,13 @@ export class ProductsController {
     required: false,
     description: 'true = solo lo que tiene existencias',
   })
+  @ApiQuery({
+    name: 'warehouseId',
+    required: false,
+    description:
+      'Mira el inventario de una sola bodega: cambia el conteo, el orden y, ' +
+      'junto con inStock, deja solo lo que hay ahí.',
+  })
   findAll(
     @TenantId() tenantId: string,
     @Query('page') page?: string,
@@ -90,6 +97,7 @@ export class ProductsController {
     @Query('minPrice') minPrice?: string,
     @Query('maxPrice') maxPrice?: string,
     @Query('inStock') inStock?: string,
+    @Query('warehouseId') warehouseId?: string,
   ) {
     // Backward-compatible: sin ningún param devuelve el array completo
     // (POS, gestión de storefront, etc. lo siguen consumiendo igual).
@@ -104,7 +112,8 @@ export class ProductsController {
       brands === undefined &&
       minPrice === undefined &&
       maxPrice === undefined &&
-      inStock === undefined
+      inStock === undefined &&
+      warehouseId === undefined
     ) {
       return this.productsService.findAll(tenantId);
     }
@@ -131,6 +140,7 @@ export class ProductsController {
       minPrice: precio(minPrice),
       maxPrice: precio(maxPrice),
       inStock: inStock === 'true',
+      warehouseId: warehouseId || undefined,
     });
   }
 

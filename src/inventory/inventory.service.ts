@@ -728,13 +728,20 @@ export class InventoryService {
   // el stock en la lista de Productos sin traer todo el detalle.
   async getStockSummaryByProduct(
     tenantId: string,
+    warehouseId?: string,
   ): Promise<Record<string, number>> {
-    const rows = await this.stockRepository
+    const qb = this.stockRepository
       .createQueryBuilder('s')
       .innerJoin('product_variants', 'pv', 'pv.id = s.variant_id')
       .select('pv.product_id', 'productId')
       .addSelect('SUM(s.quantity)', 'qty')
-      .where('s.tenant_id = :t', { t: tenantId })
+      .where('s.tenant_id = :t', { t: tenantId });
+    // Con bodega elegida, el número que enseña la lista es el de esa bodega:
+    // si no, se filtra por una bodega y al lado sigue el total de la tienda.
+    if (warehouseId) {
+      qb.andWhere('s.warehouse_id = :w', { w: warehouseId });
+    }
+    const rows = await qb
       .groupBy('pv.product_id')
       .getRawMany<{ productId: string; qty: string }>();
     const map: Record<string, number> = {};
