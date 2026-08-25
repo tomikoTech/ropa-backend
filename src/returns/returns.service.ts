@@ -587,9 +587,16 @@ export class ReturnsService {
       .andWhere('sale.status = :status', { status: SaleStatus.COMPLETED })
       .andWhere(
         '(sale.sale_number = :query OR sale.invoice_number = :query' +
-          (/^[0-9a-f-]{36}$/i.test(normalized) ? ' OR sale.id = :query' : '') +
+          // El id va con su propio parámetro y su conversión escrita. Con el
+          // mismo `:query` de los dos de arriba, Postgres lo deduce texto por
+          // los primeros y luego se niega a compararlo contra un uuid
+          // («operator does not exist: uuid = text»): buscar una venta por su
+          // id respondía 500, que es justo la rama que el regex habilita.
+          (/^[0-9a-f-]{36}$/i.test(normalized)
+            ? ' OR sale.id = CAST(:saleId AS uuid)'
+            : '') +
           ')',
-        { query: normalized },
+        { query: normalized, saleId: normalized },
       );
     const sale = await qb.getOne();
     if (!sale) throw new NotFoundException('Venta completada no encontrada');
