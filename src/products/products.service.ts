@@ -589,6 +589,14 @@ export class ProductsService {
     )`;
     if (opts.warehouseId) {
       qb.setParameter('warehouseId', opts.warehouseId);
+      // Elegir una bodega es preguntar **qué hay ahí**, no «el catálogo entero
+      // con otros números al lado». Al principio solo cambiaba el conteo y la
+      // lista seguía completa: se leía como si el filtro no hiciera nada.
+      //
+      // Se deja pasar el saldo negativo a propósito: un frasco en -17 está en
+      // esa bodega —debiendo— y esconderlo es esconder el problema. Para ver
+      // solo lo que se puede vender está «solo con stock».
+      qb.andWhere(`${stockQuantitySql} <> 0`);
     }
     qb.addSelect(stockQuantitySql, 'inventory_quantity');
 
