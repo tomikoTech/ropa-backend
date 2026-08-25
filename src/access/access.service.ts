@@ -3,6 +3,7 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, Repository } from 'typeorm';
@@ -11,6 +12,10 @@ import { RolePermission } from './entities/role-permission.entity.js';
 import { UserWarehouse } from './entities/user-warehouse.entity.js';
 import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
 import { necesitaCotizaciones } from './lo-que-el-perfil-necesita.js';
+import {
+  esPlanDeLaPlataforma,
+  puedeLaTiendaTocarlo,
+} from './planes-de-la-plataforma.js';
 import { User } from '../users/entities/user.entity.js';
 import { Warehouse } from '../inventory/entities/warehouse.entity.js';
 import { Role } from '../common/enums/role.enum.js';
@@ -73,12 +78,17 @@ export class AccessService {
     return {
       modules: MODULES,
       actions: ACTIONS.map((key) => ({ key, label: ACTION_LABELS[key] })),
-      templates: ROLE_TEMPLATES.map((t) => ({
-        key: t.key,
-        name: t.name,
-        description: t.description,
-        granted: countGranted(t.permissions),
-      })),
+      // Los planes no se ofrecen: no son oficios que una tienda le asigne a
+      // su gente, sino lo que una persona contrató con nosotros. Que
+      // aparecieran en «Aplicar una plantilla» invitaba a usarlos mal.
+      templates: ROLE_TEMPLATES.filter((t) => !esPlanDeLaPlataforma(t.key)).map(
+        (t) => ({
+          key: t.key,
+          name: t.name,
+          description: t.description,
+          granted: countGranted(t.permissions),
+        }),
+      ),
     };
   }
 
@@ -274,6 +284,11 @@ export class AccessService {
     const role = await this.roleRepo.findOne({ where: { id, tenantId } });
     if (!role) throw new NotFoundException('El rol no existe');
 
+    // Un plan no se edita desde la tienda: sus permisos son lo que la persona
+    // contrató. Editarlo sería editar la factura.
+    const puede = puedeLaTiendaTocarlo(role);
+    if (!puede.permitido) throw new ForbiddenException(puede.porque);
+
     if (data.name !== undefined) {
       const name = data.name.trim();
       if (!name) throw new BadRequestException('El rol necesita un nombre');
@@ -339,6 +354,11 @@ export class AccessService {
   async deleteRole(id: string, tenantId: string): Promise<{ deleted: true }> {
     const role = await this.roleRepo.findOne({ where: { id, tenantId } });
     if (!role) throw new NotFoundException('El rol no existe');
+
+    // Un plan no se edita desde la tienda: sus permisos son lo que la persona
+    // contrató. Editarlo sería editar la factura.
+    const veredicto = puedeLaTiendaTocarlo(role);
+    if (!veredicto.permitido) throw new ForbiddenException(veredicto.porque);
 
     const users = await this.userRepo.count({
       where: { tenantId, accessRoleId: id },
