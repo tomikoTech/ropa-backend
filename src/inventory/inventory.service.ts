@@ -396,6 +396,8 @@ export class InventoryService {
     {
       productId: string;
       productName: string;
+      /** La referencia impresa en la caja: sin ella la punta no se identifica. */
+      skuPrefix: string | null;
       brand: string | null;
       inStockSizes: number;
       definedSizes: number;
@@ -411,6 +413,7 @@ export class InventoryService {
     type Agg = {
       productId: string;
       productName: string;
+      skuPrefix: string | null;
       brand: string | null;
       isLeftover: boolean | null;
       definedSizes: Set<string>;
@@ -426,6 +429,7 @@ export class InventoryService {
         agg = {
           productId: p.id,
           productName: p.name,
+          skuPrefix: p.skuPrefix ?? null,
           brand: p.brand ?? null,
           isLeftover: p.isLeftover ?? null,
           definedSizes: new Set(),
@@ -442,6 +446,8 @@ export class InventoryService {
     const result: {
       productId: string;
       productName: string;
+      /** La referencia impresa en la caja: sin ella la punta no se identifica. */
+      skuPrefix: string | null;
       brand: string | null;
       inStockSizes: number;
       definedSizes: number;
@@ -459,6 +465,7 @@ export class InventoryService {
       result.push({
         productId: agg.productId,
         productName: agg.productName,
+        skuPrefix: agg.skuPrefix,
         brand: agg.brand,
         inStockSizes,
         definedSizes: agg.definedSizes.size,
