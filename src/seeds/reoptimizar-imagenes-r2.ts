@@ -30,13 +30,32 @@ import {
   PutObjectCommand,
   CopyObjectCommand,
 } from '@aws-sdk/client-s3';
+import sharp from 'sharp';
 import { optimizarImagen } from '../uploads/optimizar-imagen.js';
+import { ANCHO_MAXIMO } from '../uploads/plan-de-imagen.js';
 
 const CACHE = 'public, max-age=31536000, immutable';
 const RESPALDO = 'originales/';
 
-/** Lo que se puede recomprimir sin estropearlo. El gif suele ser animado. */
-const RECONVERTIBLES = new Set(['image/jpeg', 'image/jpg', 'image/png']);
+/**
+ * Lo que se puede recomprimir sin estropearlo. El gif queda fuera: suele ser
+ * animado y convertirlo se come la animacion.
+ *
+ * El **webp tambien entra**, aunque suene raro. Al principio se saltaba —«ya
+ * esta en webp»— y eso dejaba fuera 103 archivos que suman 230 MB, con los
+ * mayores en 3,4 MB cada uno: son webp que entraron **sin redimensionar**,
+ * de antes de que existiera el limite de 1400 px. Estar en webp no quiere
+ * decir estar optimizado.
+ *
+ * Lo que protege a las que ya estan bien no es saltarlas por su tipo, sino la
+ * regla de mas abajo: si no baja de peso, no se toca.
+ */
+const RECONVERTIBLES = new Set([
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/webp',
+]);
 
 function cliente(): { s3: S3Client; bucket: string } {
   const endpoint = process.env.R2_ENDPOINT;
@@ -100,6 +119,23 @@ async function main() {
           new GetObjectCommand({ Bucket: bucket, Key }),
         );
         const bytes = Buffer.from(await original.Body!.transformToByteArray());
+        /**
+         * Lo que ya salio de nuestro optimizador se deja en paz.
+         *
+         * Volver a comprimir un webp lo degrada un poco cada vez, y correr
+         * esto dos veces no puede ir estropeando las fotos. La marca es estar
+         * en webp **de verdad** y dentro del limite de ancho.
+         *
+         * «De verdad» porque el tipo declarado miente: hay archivos que se
+         * llaman `.webp`, se sirven como `image/webp` y por dentro son PNG de
+         * 3,4 MB. Mirando el tipo se saltaban justo los que mas pesaban.
+         */
+        const meta = await sharp(bytes).metadata();
+        if (meta.format === 'webp' && (meta.width ?? 0) <= ANCHO_MAXIMO) {
+          anotar('ya optimizada');
+          continue;
+        }
+
         const listo = await optimizarImagen(bytes, tipo, 'jpg');
         if (
           listo.mime !== 'image/webp' ||
@@ -117,14 +153,28 @@ async function main() {
         if (!aplicar) continue;
 
         // El original, a salvo. Copia del lado del servidor: no se descarga.
-        await s3.send(
-          new CopyObjectCommand({
-            Bucket: bucket,
-            Key: `${RESPALDO}${Key}`,
-            CopySource: `${bucket}/${encodeURIComponent(Key)}`,
-            MetadataDirective: 'COPY',
-          }),
-        );
+        //
+        // Si ya hay respaldo se deja: es el original de verdad, y pisarlo con
+        // lo que hay hoy —ya convertido en una corrida anterior— seria perder
+        // justo lo que se queria guardar.
+        let hayRespaldo = true;
+        try {
+          await s3.send(
+            new HeadObjectCommand({ Bucket: bucket, Key: `${RESPALDO}${Key}` }),
+          );
+        } catch {
+          hayRespaldo = false;
+        }
+        if (!hayRespaldo) {
+          await s3.send(
+            new CopyObjectCommand({
+              Bucket: bucket,
+              Key: `${RESPALDO}${Key}`,
+              CopySource: `${bucket}/${encodeURIComponent(Key)}`,
+              MetadataDirective: 'COPY',
+            }),
+          );
+        }
         // Y la nueva bajo la **misma clave**: ninguna URL guardada cambia.
         await s3.send(
           new PutObjectCommand({
