@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   ConflictException,
 } from '@nestjs/common';
@@ -28,9 +29,15 @@ import {
   bodegasDelMostrador,
   repartirVitrinaYBodega,
 } from '../inventory/exhibicion.js';
+import {
+  bodegaDelFrasco,
+  categoriaDelFrasco,
+} from './donde-va-el-frasco.js';
 
 @Injectable()
 export class ProductsService {
+  private readonly log = new Logger(ProductsService.name);
+
   constructor(
     @InjectRepository(Product)
     private readonly productRepository: Repository<Product>,
@@ -62,12 +69,20 @@ export class ProductsService {
     locion: Product,
     tenantId: string,
   ): Promise<string | null> {
-    const frascosCat = await this.categoryRepository
-      .createQueryBuilder('c')
-      .where('c.tenant_id = :tenantId', { tenantId })
-      .andWhere('LOWER(c.name) = :n', { n: 'frascos' })
-      .getOne();
-    if (!frascosCat) return null;
+    // Cuál es «la categoría de frascos» lo decide `donde-va-el-frasco.ts`:
+    // primero por tipo, y por nombre solo como último recurso. Antes era
+    // `LOWER(name) = 'frascos'` y la tienda que la llamara «Envases» se
+    // quedaba sin frascos automáticos **sin que nadie se enterara**.
+    const categorias = await this.categoryRepository.find({
+      where: { tenantId },
+    });
+    const frascosCat = categoriaDelFrasco(categorias);
+    if (!frascosCat) {
+      this.log.warn(
+        `No hay categoría de frascos en el tenant ${tenantId}: «${locion.name}» se creó sin su frasco.`,
+      );
+      return null;
+    }
 
     const name = `Frasco ${locion.name}`;
     const skuPrefix = await this.ensureUniqueSkuPrefix(
@@ -100,12 +115,10 @@ export class ProductsService {
       tenantId,
     );
 
-    // Stock 0 en bodega FRASCOS (si existe)
-    const frascosWh = await this.warehouseRepository
-      .createQueryBuilder('w')
-      .where('w.tenant_id = :tenantId', { tenantId })
-      .andWhere('LOWER(w.name) = :n', { n: 'frascos' })
-      .getOne();
+    // Stock 0 en la bodega de frascos, si la hay. Acá el nombre es todo lo
+    // que existe: una bodega es un sitio y no tiene tipo.
+    const bodegas = await this.warehouseRepository.find({ where: { tenantId } });
+    const frascosWh = bodegaDelFrasco(bodegas);
     if (frascosWh) {
       const filaEnCero = this.stockRepository.create({
         variantId: savedVariant.id,
