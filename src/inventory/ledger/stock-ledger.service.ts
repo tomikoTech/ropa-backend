@@ -31,6 +31,7 @@ import {
   repartirEtiquetasDelDia,
   type TramoDeEtiquetas,
 } from '../reparto-de-etiquetas.js';
+import { alcanzaElInventario } from './alcanza-el-inventario.js';
 
 /**
  * El único sitio por donde se mueve el inventario.
@@ -272,10 +273,16 @@ export class StockLedgerService {
       orden.dejarEn !== undefined ? orden.dejarEn : antes + orden.cantidad;
     const delta = despues - antes;
 
-    if (despues < 0 && !orden.permitirNegativo) {
-      throw new BadRequestException(
-        `No hay suficiente inventario: hay ${antes} y se intentan sacar ${-delta}.`,
-      );
+    // La regla vive en `alcanza-el-inventario.ts`, probada aparte. Acá solo se
+    // aplica: un movimiento que devuelve no se frena, ni aunque el saldo siga
+    // en rojo —era lo que dejaba a una tienda sin poder anular una venta.
+    const veredicto = alcanzaElInventario({
+      antes,
+      despues,
+      permitirNegativo: orden.permitirNegativo,
+    });
+    if (!veredicto.permitido) {
+      throw new BadRequestException(veredicto.porque);
     }
     if (delta === 0 && !orden.unidades?.length) {
       return { saldo: antes, unidades: [], sinEtiqueta: 0 };
