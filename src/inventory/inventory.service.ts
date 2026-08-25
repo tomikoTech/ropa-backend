@@ -362,9 +362,11 @@ export class InventoryService {
     return this.withBoxBreakdown(rows, tenantId);
   }
 
-  async getAllStock(tenantId: string): Promise<Stock[]> {
+  async getAllStock(tenantId: string, productId?: string): Promise<Stock[]> {
     const rows = await this.stockRepository.find({
-      where: { tenantId },
+      where: productId
+        ? { tenantId, variant: { productId } }
+        : { tenantId },
       relations: ['variant', 'variant.product', 'warehouse'],
       order: { warehouse: { name: 'ASC' } },
     });

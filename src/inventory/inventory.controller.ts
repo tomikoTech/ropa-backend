@@ -100,8 +100,19 @@ export class InventoryController {
 
   @Get('stock')
   @ApiOperation({ summary: 'Obtener todo el stock' })
-  getAllStock(@TenantId() tenantId: string) {
-    return this.inventoryService.getAllStock(tenantId);
+  @ApiQuery({
+    name: 'productId',
+    required: false,
+    description:
+      'Solo las existencias de esa referencia. La ficha del producto pide ' +
+      'esto: sin el filtro tendria que traerse el inventario entero de la ' +
+      'tienda para leer tres filas.',
+  })
+  getAllStock(
+    @TenantId() tenantId: string,
+    @Query('productId') productId?: string,
+  ) {
+    return this.inventoryService.getAllStock(tenantId, productId);
   }
 
   @Get('stock/low')
