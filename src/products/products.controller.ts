@@ -27,6 +27,13 @@ import { TenantId } from '../common/decorators/tenant-id.decorator.js';
 /** Tope de filas por página: ninguna consulta de catálogo puede pedir más. */
 const MAX_PAGE_SIZE = 200;
 
+/** Un precio del filtro: número o nada. `?minPrice=abc` no se cuela como NaN. */
+function precio(valor?: string): number | undefined {
+  if (valor === undefined || valor.trim() === '') return undefined;
+  const n = Number(valor);
+  return Number.isFinite(n) && n >= 0 ? n : undefined;
+}
+
 @ApiTags('Productos')
 @ApiBearerAuth()
 @Controller('products')
@@ -58,6 +65,18 @@ export class ProductsController {
     required: false,
     description: 'STANDARD | ESSENCE | FRASCO',
   })
+  @ApiQuery({
+    name: 'brands',
+    required: false,
+    description: 'Marcas separadas por coma',
+  })
+  @ApiQuery({ name: 'minPrice', required: false })
+  @ApiQuery({ name: 'maxPrice', required: false })
+  @ApiQuery({
+    name: 'inStock',
+    required: false,
+    description: 'true = solo lo que tiene existencias',
+  })
   findAll(
     @TenantId() tenantId: string,
     @Query('page') page?: string,
@@ -67,6 +86,10 @@ export class ProductsController {
     @Query('gender') gender?: string,
     @Query('type') type?: string,
     @Query('sort') sort?: string,
+    @Query('brands') brands?: string,
+    @Query('minPrice') minPrice?: string,
+    @Query('maxPrice') maxPrice?: string,
+    @Query('inStock') inStock?: string,
   ) {
     // Backward-compatible: sin ningún param devuelve el array completo
     // (POS, gestión de storefront, etc. lo siguen consumiendo igual).
@@ -77,7 +100,11 @@ export class ProductsController {
       categoryIds === undefined &&
       gender === undefined &&
       type === undefined &&
-      sort === undefined
+      sort === undefined &&
+      brands === undefined &&
+      minPrice === undefined &&
+      maxPrice === undefined &&
+      inStock === undefined
     ) {
       return this.productsService.findAll(tenantId);
     }
@@ -95,6 +122,15 @@ export class ProductsController {
       gender,
       type,
       sort,
+      brands: brands
+        ? brands
+            .split(',')
+            .map((b) => b.trim())
+            .filter(Boolean)
+        : undefined,
+      minPrice: precio(minPrice),
+      maxPrice: precio(maxPrice),
+      inStock: inStock === 'true',
     });
   }
 

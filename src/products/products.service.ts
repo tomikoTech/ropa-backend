@@ -519,6 +519,12 @@ export class ProductsService {
       categoryIds?: string[];
       gender?: string;
       type?: string;
+      /** Marcas exactas; vacío es «todas». */
+      brands?: string[];
+      minPrice?: number;
+      maxPrice?: number;
+      /** Solo lo que tiene existencias en alguna bodega. */
+      inStock?: boolean;
       sort?: string;
     },
   ): Promise<{
@@ -567,6 +573,25 @@ export class ProductsService {
         AND stock_sort.tenant_id = :tenantId
     )`;
     qb.addSelect(stockQuantitySql, 'inventory_quantity');
+
+    // Marca, precio y existencias: filtran **acá**, no en la pantalla.
+    //
+    // Antes se refinaba la página ya cargada, así que filtrar por una marca
+    // enseñaba sus productos **de esos treinta** y el pie seguía diciendo
+    // «500 productos». Con un catálogo de verdad eso se lee como que el filtro
+    // no funciona —y en la práctica no funcionaba.
+    if (opts.brands && opts.brands.length) {
+      qb.andWhere('p.brand IN (:...brands)', { brands: opts.brands });
+    }
+    if (opts.minPrice != null) {
+      qb.andWhere('p.basePrice >= :minPrice', { minPrice: opts.minPrice });
+    }
+    if (opts.maxPrice != null) {
+      qb.andWhere('p.basePrice <= :maxPrice', { maxPrice: opts.maxPrice });
+    }
+    if (opts.inStock) {
+      qb.andWhere(`${stockQuantitySql} > 0`);
+    }
     switch (opts.sort) {
       case 'stock-asc':
         qb.orderBy('inventory_quantity', 'ASC');
