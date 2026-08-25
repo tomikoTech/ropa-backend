@@ -1653,6 +1653,12 @@ export class InventoryService {
     const limit = Math.min(Math.max(filters?.limit ?? 100, 1), 500);
     const page = Math.max(filters?.page ?? 1, 1);
 
+    // El `tenantId` de acá no es el que protege: `variantIds` sale de una
+    // consulta que ya filtró por tienda, y el producto se buscó con tienda
+    // más arriba, así que un id ajeno muere en un 404 antes de llegar. Se
+    // deja por si alguien cambia de dónde salen las variantes, pero quitarlo
+    // no abre nada —lo comprobé con una mutación—: si esta línea es lo único
+    // que separa dos tiendas, el error está más arriba.
     const where: Record<string, unknown> = {
       tenantId,
       variantId: In(variantIds),
