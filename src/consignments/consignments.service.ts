@@ -122,10 +122,7 @@ export class ConsignmentsService {
       .getMany();
   }
 
-  async findAll(
-    tenantId: string,
-    filters: ConsignmentFilters = {},
-  ): Promise<Consignment[]> {
+  private baseQuery(tenantId: string, filters: ConsignmentFilters) {
     const qb = this.repo
       .createQueryBuilder('c')
       .where('c.tenantId = :tenantId', { tenantId });
@@ -145,7 +142,14 @@ export class ConsignmentsService {
     if (filters.userId) {
       qb.andWhere('c.userId = :uid', { uid: filters.userId });
     }
-    return qb
+    return qb;
+  }
+
+  async findAll(
+    tenantId: string,
+    filters: ConsignmentFilters = {},
+  ): Promise<Consignment[]> {
+    return this.baseQuery(tenantId, filters)
       .orderBy('c.saleDate', 'DESC')
       .addOrderBy('c.createdAt', 'DESC')
       .getMany();

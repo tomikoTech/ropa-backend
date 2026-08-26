@@ -5,6 +5,7 @@ import {
   Body,
   Param,
   ParseUUIDPipe,
+  Query,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { ReservationsService } from './reservations.service.js';
@@ -28,8 +29,15 @@ export class ReservationsController {
   }
 
   @Get()
-  findActive(@TenantId() tenantId: string) {
-    return this.reservationsService.findActive(tenantId);
+  findActive(
+    @TenantId() tenantId: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.reservationsService.findActivePaginado(tenantId, {
+      page,
+      limit,
+    });
   }
 
   @Get('summary')

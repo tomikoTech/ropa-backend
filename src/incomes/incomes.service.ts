@@ -103,6 +103,7 @@ export class IncomesService {
     });
   }
 
+
   async remove(id: string, tenantId: string): Promise<{ success: boolean }> {
     await this.entryRepository.delete({ id, tenantId });
     return { success: true };

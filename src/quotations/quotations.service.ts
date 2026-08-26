@@ -7,6 +7,8 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
 import { Quotation } from './entities/quotation.entity.js';
+import { Paginated } from '../common/types/paginated.js';
+import { armarPaginado, resolverPagina } from '../common/utils/paginacion.js';
 import { QuotationItem } from './entities/quotation-item.entity.js';
 import { CreateQuotationDto } from './dto/create-quotation.dto.js';
 import { UpdateQuotationDto } from './dto/update-quotation.dto.js';
@@ -163,6 +165,7 @@ export class QuotationsService {
       order: { createdAt: 'DESC' },
     });
   }
+
 
   /**
    * Cuántas ventas están esperando algo, para el contador del menú.

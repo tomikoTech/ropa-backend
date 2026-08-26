@@ -7,6 +7,8 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
 import { Reservation } from './entities/reservation.entity.js';
+import { Paginated } from '../common/types/paginated.js';
+import { armarPaginado, resolverPagina } from '../common/utils/paginacion.js';
 import { CreateReservationDto } from './dto/create-reservation.dto.js';
 import { Stock } from '../inventory/entities/stock.entity.js';
 import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
@@ -96,6 +98,22 @@ export class ReservationsService {
       relations: ['variant', 'variant.product', 'client'],
       order: { createdAt: 'DESC' },
     });
+  }
+
+  /** Apartados activos por página. */
+  async findActivePaginado(
+    tenantId: string,
+    opts: { page?: string | number; limit?: string | number },
+  ): Promise<Paginated<Reservation>> {
+    const pagina = resolverPagina(opts, { limitDefault: 50, limitMax: 200 });
+    const [data, total] = await this.reservationRepo.findAndCount({
+      where: { tenantId, status: 'ACTIVE' },
+      relations: ['variant', 'variant.product', 'client'],
+      order: { createdAt: 'DESC', id: 'DESC' },
+      skip: pagina.offset,
+      take: pagina.limit,
+    });
+    return armarPaginado(data, total, pagina);
   }
 
   // Resumen: cantidad apartada activa por variante (para badges).
