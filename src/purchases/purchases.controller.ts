@@ -161,14 +161,39 @@ export class PurchasesController {
 
   @Get('accounts-payable')
   @Roles(Role.ADMIN)
-  @ApiOperation({ summary: 'Listar cuentas por pagar' })
+  @ApiOperation({
+    summary:
+      'Listar cuentas por pagar (paginado, con deuda por proveedor de todo el filtro)',
+  })
+  @ApiQuery({ name: 'isPaid', required: false })
+  @ApiQuery({ name: 'supplierId', required: false })
+  @ApiQuery({ name: 'search', required: false })
+  @ApiQuery({ name: 'from', required: false })
+  @ApiQuery({ name: 'to', required: false })
+  @ApiQuery({ name: 'page', required: false })
+  @ApiQuery({ name: 'limit', required: false })
   findAllAccountsPayable(
     @TenantId() tenantId: string,
     @Query('isPaid') isPaid?: string,
+    @Query('supplierId') supplierId?: string,
+    @Query('search') search?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
   ) {
-    const filters =
-      isPaid !== undefined ? { isPaid: isPaid === 'true' } : undefined;
-    return this.purchasesService.findAllAccountsPayable(filters, tenantId);
+    return this.purchasesService.findAllAccountsPayablePaginado(
+      {
+        isPaid: isPaid !== undefined ? isPaid === 'true' : undefined,
+        supplierId,
+        search,
+        from,
+        to,
+        page,
+        limit,
+      },
+      tenantId,
+    );
   }
 
   @Get(':id')

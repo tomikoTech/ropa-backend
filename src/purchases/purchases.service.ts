@@ -880,6 +880,135 @@ export class PurchasesService {
     });
   }
 
+  /**
+   * Cartera por pagar, por página, con el agregado «cuánto le debemos a cada
+   * proveedor» de TODO el filtro.
+   *
+   * El `resumen` (deuda por proveedor y total adeudado) es **siempre** sobre lo
+   * no pagado —no lo cambia el chip de estado, igual que la pantalla—, pero sí
+   * respeta la fecha y la búsqueda. La página, en cambio, sí obedece el estado
+   * (Todas/Pendientes/Pagadas) y el `supplierId` de la carga perezosa. Las
+   * facturas de cada proveedor se piden al desplegarlo.
+   */
+  async findAllAccountsPayablePaginado(
+    filters: {
+      isPaid?: boolean;
+      supplierId?: string;
+      search?: string;
+      from?: string;
+      to?: string;
+      page?: string | number | null;
+      limit?: string | number | null;
+    },
+    tenantId: string,
+  ): Promise<
+    Paginated<AccountsPayable> & {
+      resumen: {
+        totalPending: number;
+        suppliers: {
+          supplierId: string | null;
+          name: string;
+          accountsCount: number;
+          total: number;
+        }[];
+      };
+    }
+  > {
+    const pagina = resolverPagina(filters, { limitDefault: 20, limitMax: 500 });
+    const search = filters.search?.trim();
+
+    // Fecha (vencimiento) y búsqueda (proveedor): valen para la página y para el
+    // agregado. El estado y el proveedor de la carga perezosa, solo la página.
+    const filtrosComunes = <T extends SelectQueryBuilder<AccountsPayable>>(qb: T): T => {
+      qb.andWhere('ap.tenant_id = :tenantId', { tenantId });
+      if (search) qb.andWhere('sup.name ILIKE :s', { s: `%${search}%` });
+      if (filters.from && filters.to) {
+        qb.andWhere('ap.due_date BETWEEN :from AND :to', {
+          from: filters.from,
+          to: filters.to,
+        });
+      }
+      return qb;
+    };
+
+    // Página en dos pasos (ids → hidratar): igual que en compras, paginar contra
+    // el join a la relación *to-many* de abonos rompe el skip/take de TypeORM.
+    const idsQb = this.apRepository
+      .createQueryBuilder('ap')
+      .leftJoin('ap.purchaseOrder', 'po')
+      .leftJoin('po.supplier', 'sup')
+      .select('ap.id', 'id')
+      .where('1 = 1');
+    filtrosComunes(idsQb);
+    if (filters.isPaid !== undefined) idsQb.andWhere('ap.is_paid = :isPaid', { isPaid: filters.isPaid });
+    if (filters.supplierId === 'none') idsQb.andWhere('po.supplier_id IS NULL');
+    else if (filters.supplierId) idsQb.andWhere('po.supplier_id = :sid', { sid: filters.supplierId });
+    const idRows = await idsQb
+      .orderBy('ap.due_date', 'ASC')
+      .addOrderBy('ap.id', 'ASC')
+      .offset(pagina.offset)
+      .limit(pagina.limit)
+      .getRawMany<{ id: string }>();
+    const ids = idRows.map((r) => r.id);
+
+    const contarQb = this.apRepository
+      .createQueryBuilder('ap')
+      .leftJoin('ap.purchaseOrder', 'po')
+      .leftJoin('po.supplier', 'sup')
+      .where('1 = 1');
+    filtrosComunes(contarQb);
+    if (filters.isPaid !== undefined) contarQb.andWhere('ap.is_paid = :isPaid', { isPaid: filters.isPaid });
+    if (filters.supplierId === 'none') contarQb.andWhere('po.supplier_id IS NULL');
+    else if (filters.supplierId) contarQb.andWhere('po.supplier_id = :sid', { sid: filters.supplierId });
+    const total = await contarQb.getCount();
+
+    const filas = ids.length
+      ? await this.apRepository.find({
+          where: { id: In(ids) },
+          relations: ['purchaseOrder', 'purchaseOrder.supplier', 'payments'],
+        })
+      : [];
+    const porId = new Map(filas.map((f) => [f.id, f]));
+    const data = ids.map((id) => porId.get(id)!).filter(Boolean);
+
+    // Agregado: deuda por proveedor, SIEMPRE sobre lo no pagado (no lo toca el
+    // estado ni el supplierId de la carga perezosa).
+    const deudaQb = this.apRepository
+      .createQueryBuilder('ap')
+      .leftJoin('ap.purchaseOrder', 'po')
+      .leftJoin('po.supplier', 'sup')
+      .select('po.supplier_id', 'supplierId')
+      .addSelect("COALESCE(sup.name, 'Sin proveedor')", 'name')
+      .addSelect('COUNT(ap.id)', 'accountsCount')
+      .addSelect('COALESCE(SUM(ap.amount - ap.paid_amount), 0)', 'total')
+      .where('1 = 1')
+      .andWhere('ap.is_paid = false');
+    filtrosComunes(deudaQb);
+    const deudaRows = await deudaQb
+      .groupBy('po.supplier_id')
+      .addGroupBy('sup.name')
+      .getRawMany<{
+        supplierId: string | null;
+        name: string;
+        accountsCount: string;
+        total: string;
+      }>();
+    const suppliers = deudaRows
+      .map((r) => ({
+        supplierId: r.supplierId,
+        name: r.name,
+        accountsCount: Number(r.accountsCount),
+        total: Number(r.total),
+      }))
+      .sort((a, b) => b.total - a.total);
+    const totalPending = suppliers.reduce((s, g) => s + g.total, 0);
+
+    return {
+      ...armarPaginado(data, total, pagina),
+      resumen: { totalPending, suppliers },
+    };
+  }
+
   async markAsPaid(
     apId: string,
     receiptImageUrl: string | undefined,
