@@ -9,6 +9,8 @@ import { Repository } from 'typeorm';
 import { Client } from './entities/client.entity.js';
 import { CreateClientDto } from './dto/create-client.dto.js';
 import { UpdateClientDto } from './dto/update-client.dto.js';
+import { Paginated } from '../common/types/paginated.js';
+import { armarPaginado, resolverPagina } from '../common/utils/paginacion.js';
 
 @Injectable()
 export class ClientsService {
@@ -55,6 +57,45 @@ export class ClientsService {
       where: { tenantId },
       order: { createdAt: 'DESC' },
     });
+  }
+
+  /**
+   * Clientes por página, con la búsqueda hecha en el servidor.
+   *
+   * La lista traía todos los clientes del tenant y el navegador filtraba y
+   * paginaba encima. En una tienda con miles de clientes eso es una descarga
+   * grande por cada visita —y el «sácalo todo en un fetch»—. La búsqueda es la
+   * misma que ofrecía la pantalla: nombre, apellido, documento, teléfono o
+   * correo.
+   */
+  async findAllPaginado(
+    tenantId: string,
+    opts: { page?: string | number; limit?: string | number; search?: string },
+  ): Promise<Paginated<Client>> {
+    const pagina = resolverPagina(opts, { limitDefault: 50, limitMax: 200 });
+
+    const qb = this.clientRepository
+      .createQueryBuilder('c')
+      .where('c.tenantId = :tenantId', { tenantId });
+
+    const q = (opts.search ?? '').trim();
+    if (q) {
+      qb.andWhere(
+        `(c.first_name ILIKE :q OR c.last_name ILIKE :q OR
+          c.document_number ILIKE :q OR c.phone ILIKE :q OR c.email ILIKE :q OR
+          (c.first_name || ' ' || c.last_name) ILIKE :q)`,
+        { q: `%${q}%` },
+      );
+    }
+
+    const [data, total] = await qb
+      .orderBy('c.created_at', 'DESC')
+      .addOrderBy('c.id', 'ASC')
+      .offset(pagina.offset)
+      .limit(pagina.limit)
+      .getManyAndCount();
+
+    return armarPaginado(data, total, pagina);
   }
 
   async findOne(id: string, tenantId: string): Promise<Client> {

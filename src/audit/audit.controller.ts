@@ -21,18 +21,17 @@ export class AuditController {
     @Query('action') action?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
+    @Query('page') page?: string,
     @Query('limit') limit?: string,
   ) {
-    return this.auditService.findAll(
-      {
-        entityType,
-        userId,
-        action,
-        from,
-        to,
-        limit: limit ? parseInt(limit, 10) : undefined,
-      },
-      tenantId,
-    );
+    return this.auditService.findAllPaginado(tenantId, {
+      entityType,
+      userId,
+      action,
+      from,
+      to,
+      page,
+      limit,
+    });
   }
 }

@@ -27,8 +27,17 @@ export class ClientsController {
   }
 
   @Get()
-  findAll(@TenantId() tenantId: string) {
-    return this.clientsService.findAll(tenantId);
+  findAll(
+    @TenantId() tenantId: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
+  ) {
+    return this.clientsService.findAllPaginado(tenantId, {
+      page,
+      limit,
+      search,
+    });
   }
 
   @Get('generic')
