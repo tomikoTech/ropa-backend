@@ -115,6 +115,54 @@ export class InventoryController {
     return this.inventoryService.getAllStock(tenantId, productId);
   }
 
+  @Get('stock/paged')
+  @ApiOperation({
+    summary: 'Existencias por página, con filtros y resumen del filtro completo',
+  })
+  @ApiQuery({ name: 'page', required: false })
+  @ApiQuery({ name: 'limit', required: false })
+  @ApiQuery({
+    name: 'search',
+    required: false,
+    description: 'Referencia, código de la variante, producto o color.',
+  })
+  @ApiQuery({
+    name: 'warehouseId',
+    required: false,
+    description: 'Solo las existencias de esa bodega.',
+  })
+  @ApiQuery({ name: 'sizes', required: false, description: 'Tallas (coma).' })
+  @ApiQuery({ name: 'genders', required: false, description: 'Géneros (coma).' })
+  @ApiQuery({ name: 'sort', required: false })
+  getStockPaged(
+    @TenantId() tenantId: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
+    @Query('warehouseId') warehouseId?: string,
+    @Query('productId') productId?: string,
+    @Query('sizes') sizes?: string,
+    @Query('genders') genders?: string,
+    @Query('sort') sort?: string,
+  ) {
+    // Listas separadas por coma en la URL → arreglos; vacío es «todos».
+    const aLista = (v?: string) =>
+      (v ?? '')
+        .split(',')
+        .map((x) => x.trim())
+        .filter(Boolean);
+    return this.inventoryService.getAllStockPaginado(tenantId, {
+      page,
+      limit,
+      search,
+      warehouseId: warehouseId || undefined,
+      productId: productId || undefined,
+      sizes: aLista(sizes),
+      genders: aLista(genders),
+      sort,
+    });
+  }
+
   @Get('stock/low')
   @ApiOperation({ summary: 'Stock por debajo del mínimo (reposición)' })
   getLowStock(@TenantId() tenantId: string) {

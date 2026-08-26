@@ -38,6 +38,10 @@ import {
 } from './movement-delta.js';
 import { RecipeService } from '../products/services/recipe.service.js';
 import { StockLedgerService } from './ledger/stock-ledger.service.js';
+import {
+  armarPaginado,
+  resolverPagina,
+} from '../common/utils/paginacion.js';
 import { CajaService } from '../caja/caja.service.js';
 import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
 
@@ -371,6 +375,143 @@ export class InventoryService {
       order: { warehouse: { name: 'ASC' } },
     });
     return this.withBoxBreakdown(rows, tenantId);
+  }
+
+  /**
+   * Existencias, pero por página y con los filtros hechos en el servidor.
+   *
+   * El listado traía **toda** la tabla de stock del tenant (~7 MB en una tienda
+   * cargada) y el navegador filtraba, paginaba y sumaba encima. Eso tumbaba la
+   * pantalla y, de paso, dejaba que cualquiera con una cuenta se llevara el
+   * inventario entero en un solo fetch. Ahora la página trae sus filas y nada
+   * más.
+   *
+   * El **resumen** —unidades, referencias, cuánto hay bajo mínimo— se calcula
+   * sobre TODO el filtro con su propia consulta agregada, no sobre la página:
+   * si no, «18 referencias» sería en realidad «18 de las que caben en pantalla».
+   * El desglose de cajas (`withBoxBreakdown`) corre solo sobre la página.
+   */
+  async getAllStockPaginado(
+    tenantId: string,
+    opts: {
+      page?: string | number | null;
+      limit?: string | number | null;
+      search?: string;
+      warehouseId?: string;
+      /** Solo las existencias de esa referencia (enlace desde Productos). */
+      productId?: string;
+      /** Nombres de talla exactos; vacío es «todas». */
+      sizes?: string[];
+      /** Géneros del producto; vacío es «todos». */
+      genders?: string[];
+      /** Uno de: stock-desc, stock-asc, name-asc, name-desc. */
+      sort?: string;
+    },
+  ) {
+    const pagina = resolverPagina(opts, { limitDefault: 50, limitMax: 200 });
+
+    // Whitelist del orden: nunca se concatena lo que llega de la URL. Cualquier
+    // valor desconocido cae al de siempre (más inventario primero).
+    const ordenes: Record<string, [string, 'ASC' | 'DESC']> = {
+      'stock-desc': ['s.quantity', 'DESC'],
+      'stock-asc': ['s.quantity', 'ASC'],
+      'name-asc': ['p.name', 'ASC'],
+      'name-desc': ['p.name', 'DESC'],
+    };
+    const [ordCol, ordDir] = ordenes[opts.sort ?? ''] ?? ordenes['stock-desc'];
+
+    // Un solo armado de filtros (tenant + bodega + búsqueda) que reusan las tres
+    // consultas —página, conteo y resumen— para que cuenten exactamente lo
+    // mismo. Cualquier divergencia entre ellas se vería como un total que no
+    // cuadra con las filas.
+    const base = () => {
+      const qb = this.stockRepository
+        .createQueryBuilder('s')
+        .innerJoin('s.variant', 'v')
+        .innerJoin('v.product', 'p')
+        .innerJoin('s.warehouse', 'w')
+        // El color y la talla no son columnas de la variante: viven en los
+        // catálogos `colors`/`sizes` (relaciones nullable). Se unen para poder
+        // buscar y filtrar por ellos.
+        .leftJoin('v.colorRef', 'col')
+        .leftJoin('v.sizeRef', 'sz')
+        .where('s.tenantId = :tenantId', { tenantId });
+      if (opts.warehouseId) {
+        qb.andWhere('s.warehouseId = :warehouseId', {
+          warehouseId: opts.warehouseId,
+        });
+      }
+      if (opts.productId) {
+        qb.andWhere('v.product_id = :productId', { productId: opts.productId });
+      }
+      const q = (opts.search ?? '').trim();
+      if (q) {
+        // Mismo criterio que buscaba el navegador: referencia, código de la
+        // variante, nombre del producto y color.
+        qb.andWhere(
+          '(v.sku ILIKE :q OR v.barcode ILIKE :q OR p.name ILIKE :q OR col.name ILIKE :q)',
+          { q: `%${q}%` },
+        );
+      }
+      if (opts.sizes && opts.sizes.length) {
+        qb.andWhere('sz.name IN (:...sizes)', { sizes: opts.sizes });
+      }
+      if (opts.genders && opts.genders.length) {
+        // Un producto sin género se cuenta como UNISEX, igual que en la lista.
+        qb.andWhere("COALESCE(p.gender, 'UNISEX') IN (:...genders)", {
+          genders: opts.genders,
+        });
+      }
+      return qb;
+    };
+
+    const [ids, total, resumen] = await Promise.all([
+      // Página: solo los ids ordenados, para no arrastrar relaciones en el
+      // take/skip. Las filas completas se hidratan aparte.
+      base()
+        .select('s.id', 'id')
+        // El orden que el usuario eligió va primero; el resto son desempates
+        // estables para que dos páginas nunca repitan ni salten una fila.
+        .orderBy(ordCol, ordDir)
+        .addOrderBy('p.name', 'ASC')
+        .addOrderBy('v.sku', 'ASC')
+        .addOrderBy('s.id', 'ASC')
+        .offset(pagina.offset)
+        .limit(pagina.limit)
+        .getRawMany<{ id: string }>(),
+      base().getCount(),
+      base()
+        .select('COALESCE(SUM(s.quantity), 0)', 'unidades')
+        .addSelect('COUNT(DISTINCT v.product_id)', 'referencias')
+        .addSelect(
+          'COUNT(*) FILTER (WHERE s.min_stock > 0 AND s.quantity <= s.min_stock)',
+          'bajoMinimo',
+        )
+        .getRawOne<{
+          unidades: string;
+          referencias: string;
+          bajoMinimo: string;
+        }>(),
+    ]);
+
+    const rows = ids.length
+      ? await this.stockRepository.find({
+          where: { id: In(ids.map((r) => r.id)) },
+          relations: ['variant', 'variant.product', 'warehouse'],
+        })
+      : [];
+    // `find` con `In` no conserva el orden de los ids; se reordena según la
+    // página ya ordenada en SQL.
+    const posicion = new Map(ids.map((r, i) => [r.id, i]));
+    rows.sort((a, b) => (posicion.get(a.id)! - posicion.get(b.id)!));
+
+    const data = await this.withBoxBreakdown(rows, tenantId);
+
+    return armarPaginado(data, total, pagina, {
+      unidades: Number(resumen?.unidades ?? 0),
+      referencias: Number(resumen?.referencias ?? 0),
+      bajoMinimo: Number(resumen?.bajoMinimo ?? 0),
+    });
   }
 
   async getLowStock(tenantId: string): Promise<Stock[]> {
