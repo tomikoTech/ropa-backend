@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ClassSerializerInterceptor } from '@nestjs/common';
 import configuration from './config/configuration.js';
@@ -51,6 +52,14 @@ import { WarehouseScopeGuard } from './access/warehouse-scope.guard.js';
       isGlobal: true,
       load: [configuration],
     }),
+    // Freno por IP. El límite global es holgado (uso normal ni lo roza); su
+    // razón de ser es cortar el scraping y, sobre todo, la fuerza bruta contra
+    // `/auth/login`, que además lleva su propio límite estricto. `skipIf` deja
+    // apagarlo en los E2E, que disparan cientos de peticiones desde una sola IP.
+    ThrottlerModule.forRoot({
+      throttlers: [{ ttl: 60_000, limit: 200 }],
+      skipIf: () => process.env.THROTTLE_DISABLED === 'true',
+    }),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
@@ -92,6 +101,12 @@ import { WarehouseScopeGuard } from './access/warehouse-scope.guard.js';
     InternalRequestsModule,
   ],
   providers: [
+    // Va PRIMERO: frenar por IP antes de resolver el JWT o tocar la base. Un
+    // ataque de fuerza bruta no debe llegar siquiera a consultar el usuario.
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,

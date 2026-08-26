@@ -7,9 +7,32 @@ import { join } from 'path';
 import { AppModule } from './app.module.js';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter.js';
 import { TransformResponseInterceptor } from './common/interceptors/transform-response.interceptor.js';
+import { revisarSecretos } from './config/revisar-secretos.js';
+import { esHostLocal } from './common/utils/host-local.js';
 
 async function bootstrap() {
+  // Antes de levantar nada: si esto es producción y los secretos de firma son
+  // débiles o son el default del repositorio, no se arranca. Un backend que
+  // firma con un secreto público deja entrar a cualquiera con el `sub` del
+  // admin; es preferible caerse ruidosamente a servir así.
+  const esProduccion = !esHostLocal(
+    process.env.DB_HOST,
+    process.env.DATABASE_URL || process.env.DATABASE_PUBLIC_URL,
+  );
+  const revision = revisarSecretos(process.env, esProduccion);
+  for (const aviso of revision.advertencias) console.warn(`⚠️  ${aviso}`);
+  if (!revision.ok) {
+    console.error('No se puede arrancar: los secretos de firma no son válidos.');
+    for (const err of revision.errores) console.error(`  • ${err}`);
+    process.exit(1);
+  }
+
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
+
+  // Detrás del proxy de Railway, `req.ip` sería siempre la del proxy y el
+  // límite por IP contaría a todo el mundo como uno solo. Con esto Express lee
+  // la IP real del `X-Forwarded-For`. Un solo salto de proxy: el de Railway.
+  app.set('trust proxy', 1);
 
   // Serve uploaded files test
   app.useStaticAssets(join(process.cwd(), 'uploads'), { prefix: '/uploads/' });

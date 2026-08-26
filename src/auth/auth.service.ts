@@ -1,8 +1,4 @@
-import {
-  Injectable,
-  UnauthorizedException,
-  ConflictException,
-} from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -11,9 +7,11 @@ import * as bcrypt from 'bcrypt';
 import { UsersService } from '../users/users.service.js';
 import { RefreshToken } from './entities/refresh-token.entity.js';
 import { LoginDto } from './dto/login.dto.js';
-import { RegisterDto } from './dto/register.dto.js';
 import { User } from '../users/entities/user.entity.js';
-import { Role } from '../common/enums/role.enum.js';
+import {
+  SCOPE_DESCARGA,
+  TICKET_VIDA_SEGUNDOS,
+} from './ticket-de-descarga.js';
 import { v4 as uuidv4 } from 'uuid';
 
 @Injectable()
@@ -48,20 +46,6 @@ export class AuthService {
     return this.generateTokens(user);
   }
 
-  async register(registerDto: RegisterDto) {
-    const existing = await this.usersService.findByEmail(registerDto.email);
-    if (existing) {
-      throw new ConflictException('El email ya está registrado');
-    }
-
-    const user = await this.usersService.create({
-      ...registerDto,
-      role: Role.COLABORADOR,
-    });
-
-    return this.generateTokens(user);
-  }
-
   async refreshTokens(refreshToken: string) {
     const tokenEntity = await this.refreshTokenRepository.findOne({
       where: { token: refreshToken, isRevoked: false },
@@ -89,6 +73,21 @@ export class AuthService {
 
   async getProfile(userId: string, tenantId?: string) {
     return this.usersService.findOne(userId, tenantId);
+  }
+
+  /**
+   * Un ticket para abrir una descarga sin poner el token de sesión en la URL.
+   *
+   * Vive 60 segundos y lleva `scope: download`, lo único que la estrategia JWT
+   * acepta por `?token=`. Se pide justo antes de `window.open`, así que aunque
+   * quede en un log de acceso, para cuando alguien lo vea ya no sirve.
+   */
+  emitirTicketDescarga(user: User) {
+    const ticket = this.jwtService.sign(
+      { sub: user.id, scope: SCOPE_DESCARGA },
+      { expiresIn: `${TICKET_VIDA_SEGUNDOS}s` },
+    );
+    return { ticket, expiraEnSegundos: TICKET_VIDA_SEGUNDOS };
   }
 
   private async generateTokens(user: User) {
