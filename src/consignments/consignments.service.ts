@@ -6,6 +6,8 @@ import { ThirdPartyProduct } from './entities/third-party-product.entity.js';
 import { claveDeProducto } from './producto-de-tercero.js';
 import { CreateConsignmentDto } from './dto/create-consignment.dto.js';
 import { UpdateConsignmentDto } from './dto/update-consignment.dto.js';
+import { Paginated } from '../common/types/paginated.js';
+import { resolverPagina, armarPaginado } from '../common/utils/paginacion.js';
 
 export interface ConsignmentFilters {
   thirdParty?: string;
@@ -153,6 +155,49 @@ export class ConsignmentsService {
       .orderBy('c.saleDate', 'DESC')
       .addOrderBy('c.createdAt', 'DESC')
       .getMany();
+  }
+
+  /**
+   * El listado por página. Antes se traía todo y el navegador filtraba por
+   * texto y por fecha; ahora esos dos filtros —búsqueda por cliente/tercero y
+   * rango de `saleDate`— viajan al servidor junto con los de estado.
+   */
+  async findAllPaginado(
+    tenantId: string,
+    filters: ConsignmentFilters & {
+      page?: string | number | null;
+      limit?: string | number | null;
+      search?: string;
+      from?: string;
+      to?: string;
+    } = {},
+  ): Promise<Paginated<Consignment>> {
+    const pagina = resolverPagina(filters, { limitDefault: 50, limitMax: 200 });
+    const qb = this.baseQuery(tenantId, filters);
+
+    const search = filters.search?.trim();
+    if (search) {
+      // El navegador buscaba sobre `cliente + tercero`; se replica igual.
+      qb.andWhere(
+        '(c.clientName ILIKE :s OR c.thirdPartyName ILIKE :s)',
+        { s: `%${search}%` },
+      );
+    }
+    if (filters.from && filters.to) {
+      qb.andWhere('c.saleDate BETWEEN :from AND :to', {
+        from: filters.from,
+        to: filters.to,
+      });
+    }
+
+    const [data, total] = await qb
+      .orderBy('c.saleDate', 'DESC')
+      .addOrderBy('c.createdAt', 'DESC')
+      .skip(pagina.offset)
+      .take(pagina.limit)
+      .getManyAndCount();
+
+    return armarPaginado(data, total, pagina);
   }
 
   async findOne(id: string, tenantId: string): Promise<Consignment> {

@@ -77,10 +77,15 @@ export class ConsignmentsController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'Listar ventas de terceros' })
+  @ApiOperation({ summary: 'Listar ventas de terceros (paginado)' })
   @ApiQuery({ name: 'thirdParty', required: false })
   @ApiQuery({ name: 'clientPaid', required: false })
   @ApiQuery({ name: 'supplierPaid', required: false })
+  @ApiQuery({ name: 'page', required: false })
+  @ApiQuery({ name: 'limit', required: false })
+  @ApiQuery({ name: 'search', required: false })
+  @ApiQuery({ name: 'from', required: false })
+  @ApiQuery({ name: 'to', required: false })
   async findAll(
     @CurrentUser()
     user: { id: string; role: Role; accessRoleId: string | null },
@@ -88,13 +93,23 @@ export class ConsignmentsController {
     @Query('thirdParty') thirdParty?: string,
     @Query('clientPaid') clientPaid?: string,
     @Query('supplierPaid') supplierPaid?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
   ) {
-    return this.service.findAll(tenantId, {
+    return this.service.findAllPaginado(tenantId, {
       userId: await this.deQuien(user),
       thirdParty: thirdParty || undefined,
       clientPaid: clientPaid === undefined ? undefined : clientPaid === 'true',
       supplierPaid:
         supplierPaid === undefined ? undefined : supplierPaid === 'true',
+      page,
+      limit,
+      search,
+      from,
+      to,
     });
   }
 
