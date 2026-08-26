@@ -10,6 +10,8 @@ import {
 import { CreateIncomeDto } from './dto/create-income.dto.js';
 import { AdjustmentDto } from './dto/adjustment.dto.js';
 import { TransferDto } from './dto/transfer.dto.js';
+import { Paginated } from '../common/types/paginated.js';
+import { resolverPagina, armarPaginado } from '../common/utils/paginacion.js';
 
 const NONE = '__none__';
 
@@ -101,6 +103,49 @@ export class IncomesService {
       order: { createdAt: 'DESC' },
       take: 300,
     });
+  }
+
+  /**
+   * Los movimientos manuales, por página. Antes se traían 300 y el navegador
+   * filtraba por fecha y por texto; ahora el filtro viaja al servidor.
+   */
+  async listEntriesPaginado(
+    tenantId: string,
+    opts: {
+      page?: string | number | null;
+      limit?: string | number | null;
+      search?: string;
+      from?: string;
+      to?: string;
+    },
+  ): Promise<Paginated<IncomeEntry>> {
+    const pagina = resolverPagina(opts, { limitDefault: 50, limitMax: 200 });
+
+    const qb = this.entryRepository
+      .createQueryBuilder('e')
+      .where('e.tenant_id = :tenantId', { tenantId });
+
+    const search = opts.search?.trim();
+    if (search) {
+      // El navegador buscaba sobre `categoria + nota`; se replica igual.
+      qb.andWhere('(e.category ILIKE :q OR e.note ILIKE :q)', {
+        q: `%${search}%`,
+      });
+    }
+    if (opts.from && opts.to) {
+      qb.andWhere('e.created_at BETWEEN :from AND :to', {
+        from: opts.from,
+        to: opts.to,
+      });
+    }
+
+    const [data, total] = await qb
+      .orderBy('e.created_at', 'DESC')
+      .skip(pagina.offset)
+      .take(pagina.limit)
+      .getManyAndCount();
+
+    return armarPaginado(data, total, pagina);
   }
 
 

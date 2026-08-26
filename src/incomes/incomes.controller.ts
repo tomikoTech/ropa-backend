@@ -38,8 +38,21 @@ export class IncomesController {
   @Get()
   @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Listar movimientos manuales de tesorería' })
-  list(@TenantId() tenantId: string) {
-    return this.incomesService.listEntries(tenantId);
+  list(
+    @TenantId() tenantId: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return this.incomesService.listEntriesPaginado(tenantId, {
+      page,
+      limit,
+      search,
+      from,
+      to,
+    });
   }
 
   @Post()
