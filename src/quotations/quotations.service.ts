@@ -166,6 +166,29 @@ export class QuotationsService {
     });
   }
 
+  /**
+   * El listado por página. Mismo alcance que `findAll` (quien no autoriza solo
+   * ve las suyas), pero sin traer la tabla entera al navegador.
+   */
+  async findAllPaginado(
+    tenantId: string,
+    quien: { usuarioId: string; puedeAutorizar: boolean } | undefined,
+    opts: { page?: string | number | null; limit?: string | number | null },
+  ): Promise<Paginated<Quotation>> {
+    const pagina = resolverPagina(opts, { limitDefault: 50, limitMax: 200 });
+    const soloDe = quien
+      ? soloLasSuyas({ puedeAutorizar: quien.puedeAutorizar }, quien.usuarioId)
+      : null;
+    const [data, total] = await this.quotationRepo.findAndCount({
+      where: soloDe ? { tenantId, createdById: soloDe } : { tenantId },
+      relations: ['client', 'items'],
+      order: { createdAt: 'DESC' },
+      skip: pagina.offset,
+      take: pagina.limit,
+    });
+    return armarPaginado(data, total, pagina);
+  }
+
 
   /**
    * Cuántas ventas están esperando algo, para el contador del menú.

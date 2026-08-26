@@ -39,12 +39,19 @@ export class QuotationsController {
   }
 
   @Get()
+  @ApiOperation({ summary: 'Listar cotizaciones / ventas por autorizar (paginado)' })
   async findAll(
     @CurrentUser()
     user: { id: string; role: Role; accessRoleId: string | null },
     @TenantId() tenantId: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
   ) {
-    return this.quotationsService.findAll(tenantId, await this.quienMira(user));
+    return this.quotationsService.findAllPaginado(
+      tenantId,
+      await this.quienMira(user),
+      { page, limit },
+    );
   }
 
   /**
