@@ -36,6 +36,21 @@ export class SuppliersController {
     return this.suppliersService.findAll(tenantId);
   }
 
+  @Get('paged')
+  @ApiOperation({ summary: 'Proveedores por página, con búsqueda' })
+  findAllPaged(
+    @TenantId() tenantId: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
+  ) {
+    return this.suppliersService.findAllPaginado(tenantId, {
+      page,
+      limit,
+      search,
+    });
+  }
+
   @Get('search')
   @ApiOperation({ summary: 'Buscar proveedores' })
   search(@Query('q') query: string, @TenantId() tenantId: string) {

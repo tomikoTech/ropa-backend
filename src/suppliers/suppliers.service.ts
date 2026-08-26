@@ -6,6 +6,8 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Supplier } from './entities/supplier.entity.js';
+import { Paginated } from '../common/types/paginated.js';
+import { armarPaginado, resolverPagina } from '../common/utils/paginacion.js';
 import { CreateSupplierDto } from './dto/create-supplier.dto.js';
 import { UpdateSupplierDto } from './dto/update-supplier.dto.js';
 
@@ -33,6 +35,32 @@ export class SuppliersService {
       where: { tenantId },
       order: { createdAt: 'DESC' },
     });
+  }
+
+  /** Proveedores por página, con la búsqueda hecha en el servidor. */
+  async findAllPaginado(
+    tenantId: string,
+    opts: { page?: string | number; limit?: string | number; search?: string },
+  ): Promise<Paginated<Supplier>> {
+    const pagina = resolverPagina(opts, { limitDefault: 50, limitMax: 200 });
+    const qb = this.supplierRepository
+      .createQueryBuilder('s')
+      .where('s.tenantId = :tenantId', { tenantId });
+    const q = (opts.search ?? '').trim();
+    if (q) {
+      qb.andWhere(
+        `(s.name ILIKE :q OR s.nit ILIKE :q OR s.contact_name ILIKE :q OR
+          s.phone ILIKE :q OR s.email ILIKE :q)`,
+        { q: `%${q}%` },
+      );
+    }
+    const [data, total] = await qb
+      .orderBy('s.created_at', 'DESC')
+      .addOrderBy('s.id', 'ASC')
+      .offset(pagina.offset)
+      .limit(pagina.limit)
+      .getManyAndCount();
+    return armarPaginado(data, total, pagina);
   }
 
   async findOne(id: string, tenantId: string): Promise<Supplier> {

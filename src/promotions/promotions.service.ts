@@ -2,6 +2,8 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, LessThanOrEqual, MoreThanOrEqual } from 'typeorm';
 import { Promotion } from './entities/promotion.entity.js';
+import { Paginated } from '../common/types/paginated.js';
+import { armarPaginado, resolverPagina } from '../common/utils/paginacion.js';
 import { CreatePromotionDto } from './dto/create-promotion.dto.js';
 import { UpdatePromotionDto } from './dto/update-promotion.dto.js';
 
@@ -23,11 +25,27 @@ export class PromotionsService {
     return this.promotionRepository.save(promotion);
   }
 
-  async findAll(tenantId: string): Promise<Promotion[]> {
-    return this.promotionRepository.find({
-      where: { tenantId },
-      order: { createdAt: 'DESC' },
-    });
+  async findAllPaginado(
+    tenantId: string,
+    opts: { page?: string | number; limit?: string | number; search?: string },
+  ): Promise<Paginated<Promotion>> {
+    const pagina = resolverPagina(opts, { limitDefault: 50, limitMax: 200 });
+    const qb = this.promotionRepository
+      .createQueryBuilder('p')
+      .where('p.tenantId = :tenantId', { tenantId });
+    const q = (opts.search ?? '').trim();
+    if (q) {
+      qb.andWhere('(p.name ILIKE :q OR p.description ILIKE :q)', {
+        q: `%${q}%`,
+      });
+    }
+    const [data, total] = await qb
+      .orderBy('p.created_at', 'DESC')
+      .addOrderBy('p.id', 'ASC')
+      .offset(pagina.offset)
+      .limit(pagina.limit)
+      .getManyAndCount();
+    return armarPaginado(data, total, pagina);
   }
 
   async findOne(id: string, tenantId: string): Promise<Promotion> {

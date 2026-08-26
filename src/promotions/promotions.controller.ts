@@ -7,6 +7,7 @@ import {
   Body,
   Param,
   ParseUUIDPipe,
+  Query,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { PromotionsService } from './promotions.service.js';
@@ -31,8 +32,17 @@ export class PromotionsController {
 
   @Get()
   @ApiOperation({ summary: 'Listar todas las promociones' })
-  findAll(@TenantId() tenantId: string) {
-    return this.promotionsService.findAll(tenantId);
+  findAll(
+    @TenantId() tenantId: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
+  ) {
+    return this.promotionsService.findAllPaginado(tenantId, {
+      page,
+      limit,
+      search,
+    });
   }
 
   @Get('active')
