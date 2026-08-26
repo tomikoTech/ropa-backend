@@ -7,6 +7,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { Production } from './entities/production.entity.js';
 import { ProductionItem } from './entities/production-item.entity.js';
+import { Paginated } from '../common/types/paginated.js';
+import { resolverPagina, armarPaginado } from '../common/utils/paginacion.js';
 import { Stock } from '../inventory/entities/stock.entity.js';
 import { StockMovement } from '../inventory/entities/stock-movement.entity.js';
 import { ProductVariant } from '../products/entities/product-variant.entity.js';
@@ -192,6 +194,22 @@ export class ProductionService {
       order: { createdAt: 'DESC' },
       take: 200,
     });
+  }
+
+  /** El historial por página, sin traer las 200 de un golpe. */
+  async findAllPaginado(
+    tenantId: string,
+    opts: { page?: string | number | null; limit?: string | number | null },
+  ): Promise<Paginated<Production>> {
+    const pagina = resolverPagina(opts, { limitDefault: 50, limitMax: 200 });
+    const [data, total] = await this.productionRepo.findAndCount({
+      where: { tenantId },
+      relations: ['items'],
+      order: { createdAt: 'DESC' },
+      skip: pagina.offset,
+      take: pagina.limit,
+    });
+    return armarPaginado(data, total, pagina);
   }
 
   async findOne(id: string, tenantId: string): Promise<Production> {

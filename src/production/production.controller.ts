@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { ProductionService } from './production.service.js';
 import { CreateProductionDto } from './dto/create-production.dto.js';
@@ -25,9 +25,13 @@ export class ProductionController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'Listar producciones' })
-  findAll(@TenantId() tenantId: string) {
-    return this.productionService.findAll(tenantId);
+  @ApiOperation({ summary: 'Listar producciones (paginado)' })
+  findAll(
+    @TenantId() tenantId: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.productionService.findAllPaginado(tenantId, { page, limit });
   }
 
   @Get(':id')
