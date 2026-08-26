@@ -9,7 +9,7 @@ import {
   Res,
   ParseUUIDPipe,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { PurchasesService } from './purchases.service.js';
 import { buildStatementWorkbook } from '../common/utils/statement-excel.util.js';
@@ -55,13 +55,27 @@ export class PurchasesController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'Listar órdenes de compra' })
+  @ApiOperation({
+    summary:
+      'Listar órdenes de compra (paginado, con resumen por proveedor de todo el filtro)',
+  })
+  @ApiQuery({ name: 'status', required: false })
+  @ApiQuery({ name: 'supplierId', required: false })
+  @ApiQuery({ name: 'search', required: false })
+  @ApiQuery({ name: 'page', required: false })
+  @ApiQuery({ name: 'limit', required: false })
   findAll(
     @TenantId() tenantId: string,
     @Query('status') status?: PurchaseOrderStatus,
     @Query('supplierId') supplierId?: string,
+    @Query('search') search?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
   ) {
-    return this.purchasesService.findAll({ status, supplierId }, tenantId);
+    return this.purchasesService.findAllPaginado(
+      { status, supplierId, search, page, limit },
+      tenantId,
+    );
   }
 
   @Get('suppliers/:supplierId/statement')

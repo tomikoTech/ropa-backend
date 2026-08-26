@@ -4,8 +4,10 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, SelectQueryBuilder, In } from 'typeorm';
 import { PurchaseOrder } from './entities/purchase-order.entity.js';
+import { Paginated } from '../common/types/paginated.js';
+import { resolverPagina, armarPaginado } from '../common/utils/paginacion.js';
 import { PurchaseOrderItem } from './entities/purchase-order-item.entity.js';
 import { PurchaseBoxLine } from './entities/purchase-box-line.entity.js';
 import { AccountsPayable } from './entities/accounts-payable.entity.js';
@@ -331,6 +333,155 @@ export class PurchasesService {
       ],
       order: { createdAt: 'DESC' },
     });
+  }
+
+  /**
+   * El listado por página, con el agregado por proveedor de TODO el filtro.
+   *
+   * La fila solo muestra proveedor, estado de pago y total —no los renglones—,
+   * así que la página **no** trae `items` (el peso real): eso lo carga el
+   * detalle aparte. El `resumen` es el «Por proveedor»: cuánto se compró y
+   * cuánto se debe a cada uno, sobre el filtro completo, con una consulta
+   * agregada (no sobre la página). Las órdenes de cada proveedor se cargan
+   * perezosamente al desplegarlo (misma ruta con `supplierId`).
+   */
+  async findAllPaginado(
+    filters: {
+      status?: PurchaseOrderStatus;
+      supplierId?: string;
+      search?: string;
+      page?: string | number | null;
+      limit?: string | number | null;
+    },
+    tenantId: string,
+  ): Promise<
+    Paginated<PurchaseOrder> & {
+      resumen: {
+        suppliers: {
+          supplierId: string | null;
+          name: string;
+          orderCount: number;
+          total: number;
+          pending: number;
+        }[];
+        grandTotal: number;
+      };
+    }
+  > {
+    const pagina = resolverPagina(filters, { limitDefault: 20, limitMax: 200 });
+    const search = filters.search?.trim();
+
+    // El mismo WHERE para la página, el conteo y los agregados: si no cuentan
+    // lo mismo, el pie y el «Por proveedor» se contradicen.
+    const aplicarFiltros = <T extends SelectQueryBuilder<PurchaseOrder>>(
+      qb: T,
+    ): T => {
+      qb.andWhere('po.tenant_id = :tenantId', { tenantId });
+      if (filters.status) qb.andWhere('po.status = :status', { status: filters.status });
+      // `none` es el grupo «Sin proveedor» del agregado; su carga perezosa pide
+      // las órdenes sin proveedor, no todas.
+      if (filters.supplierId === 'none') {
+        qb.andWhere('po.supplier_id IS NULL');
+      } else if (filters.supplierId) {
+        qb.andWhere('po.supplier_id = :sid', { sid: filters.supplierId });
+      }
+      if (search) {
+        qb.andWhere(
+          '(po.order_number ILIKE :s OR sup.name ILIKE :s OR po.supplier_invoice_number ILIKE :s)',
+          { s: `%${search}%` },
+        );
+      }
+      return qb;
+    };
+
+    // Página en dos pasos: primero los ids (para no paginar contra el join a la
+    // relación *to-many* de cuentas por pagar, que rompe el `skip/take` de
+    // TypeORM), y luego se hidratan con sus relaciones y se reordenan.
+    const idsQb = this.poRepository
+      .createQueryBuilder('po')
+      .leftJoin('po.supplier', 'sup')
+      .select('po.id', 'id')
+      .where('1 = 1');
+    aplicarFiltros(idsQb);
+    const idRows = await idsQb
+      .orderBy('po.created_at', 'DESC')
+      .addOrderBy('po.id', 'ASC')
+      .offset(pagina.offset)
+      .limit(pagina.limit)
+      .getRawMany<{ id: string }>();
+    const ids = idRows.map((r) => r.id);
+
+    const contarQb = this.poRepository.createQueryBuilder('po').leftJoin('po.supplier', 'sup');
+    aplicarFiltros(contarQb);
+    const total = await contarQb.getCount();
+
+    // La fila muestra proveedor, estado de pago y total —no los renglones—, así
+    // que la página **no** trae `items` (el peso real): eso lo carga el detalle.
+    const filas = ids.length
+      ? await this.poRepository.find({
+          where: { id: In(ids) },
+          relations: ['supplier', 'warehouse', 'createdBy', 'accountsPayable'],
+        })
+      : [];
+    const porId = new Map(filas.map((f) => [f.id, f]));
+    const data = ids.map((id) => porId.get(id)!).filter(Boolean);
+
+    // Agregado: cuánto se compró por proveedor (órdenes no canceladas).
+    const compradoQb = this.poRepository
+      .createQueryBuilder('po')
+      .leftJoin('po.supplier', 'sup')
+      .select('po.supplier_id', 'supplierId')
+      .addSelect("COALESCE(sup.name, 'Sin proveedor')", 'name')
+      .addSelect('COUNT(po.id)', 'orderCount')
+      .addSelect(
+        "COALESCE(SUM(CASE WHEN po.status <> 'CANCELLED' THEN po.total ELSE 0 END), 0)",
+        'total',
+      )
+      .where('1 = 1');
+    aplicarFiltros(compradoQb);
+    const compradoRows = await compradoQb
+      .groupBy('po.supplier_id')
+      .addGroupBy('sup.name')
+      .getRawMany<{
+        supplierId: string | null;
+        name: string;
+        orderCount: string;
+        total: string;
+      }>();
+
+    // Agregado: cuánto se le debe a cada proveedor (saldo de cuentas por pagar
+    // sin saldar). Se une por la misma orden y respeta el mismo filtro.
+    const deudaQb = this.poRepository
+      .createQueryBuilder('po')
+      .leftJoin('po.supplier', 'sup')
+      .innerJoin('po.accountsPayable', 'ap')
+      .select('po.supplier_id', 'supplierId')
+      .addSelect('COALESCE(SUM(ap.amount - ap.paid_amount), 0)', 'pending')
+      .where('1 = 1')
+      .andWhere('ap.is_paid = false');
+    aplicarFiltros(deudaQb);
+    const deudaRows = await deudaQb
+      .groupBy('po.supplier_id')
+      .getRawMany<{ supplierId: string | null; pending: string }>();
+
+    const deudaPorProveedor = new Map<string, number>(
+      deudaRows.map((r) => [r.supplierId ?? 'sin-proveedor', Number(r.pending)]),
+    );
+    const suppliers = compradoRows
+      .map((r) => ({
+        supplierId: r.supplierId,
+        name: r.name,
+        orderCount: Number(r.orderCount),
+        total: Number(r.total),
+        pending: deudaPorProveedor.get(r.supplierId ?? 'sin-proveedor') ?? 0,
+      }))
+      .sort((a, b) => b.total - a.total);
+    const grandTotal = suppliers.reduce((s, g) => s + g.total, 0);
+
+    return {
+      ...armarPaginado(data, total, pagina),
+      resumen: { suppliers, grandTotal },
+    };
   }
 
   async findOne(id: string, tenantId: string): Promise<PurchaseOrder> {
