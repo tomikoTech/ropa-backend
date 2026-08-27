@@ -226,6 +226,27 @@ export class UpdateStoreSettingsDto {
   showBoxPairSequenceOnLabels?: boolean;
 
   @ApiPropertyOptional({
+    description: 'Logo/foto para la etiqueta impresa (cajas y pares)',
+  })
+  @IsOptional()
+  @IsString()
+  labelLogoUrl?: string;
+
+  @ApiPropertyOptional({
+    description: 'Muestra el precio en la etiqueta impresa',
+  })
+  @IsOptional()
+  @IsBoolean()
+  labelShowPrice?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Línea libre al pie de la etiqueta (teléfono, aviso…)',
+  })
+  @IsOptional()
+  @IsString()
+  labelExtraText?: string;
+
+  @ApiPropertyOptional({
     example: 8,
     description: 'Antigüedad (meses) para punta',
   })

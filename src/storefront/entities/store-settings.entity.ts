@@ -387,6 +387,20 @@ export class StoreSettings extends TenantAwareEntity {
   @Column({ name: 'show_box_pair_sequence_on_labels', default: false })
   showBoxPairSequenceOnLabels: boolean;
 
+  // Personalización de la etiqueta impresa (cajas y pares). El logo va arriba y
+  // el código de barras grande y centrado; si no hay logo de etiqueta se usa el
+  // logo general de la tienda. El precio en la etiqueta es opcional porque no
+  // todos lo quieren a la vista del cliente.
+  @Column({ name: 'label_logo_url', type: 'varchar', nullable: true })
+  labelLogoUrl: string | null;
+
+  @Column({ name: 'label_show_price', default: false })
+  labelShowPrice: boolean;
+
+  // Una línea libre al pie de la etiqueta (teléfono, "cambios con factura"...).
+  @Column({ name: 'label_extra_text', type: 'varchar', nullable: true })
+  labelExtraText: string | null;
+
   // Puntas (leftovers) + comisiones. Criterio automático: una referencia es
   // "punta" si su antigüedad ≥ leftover_age_months Y le quedan ≤ leftover_max_sizes
   // tallas. Se puede sobreescribir manualmente por producto (products.is_leftover).

@@ -146,6 +146,12 @@ export class StoreSettingsService {
       settings.autoReplenishProductIds = dto.autoReplenishProductIds;
     if (dto.showBoxPairSequenceOnLabels !== undefined)
       settings.showBoxPairSequenceOnLabels = dto.showBoxPairSequenceOnLabels;
+    if (dto.labelLogoUrl !== undefined)
+      settings.labelLogoUrl = dto.labelLogoUrl || null;
+    if (dto.labelShowPrice !== undefined)
+      settings.labelShowPrice = dto.labelShowPrice;
+    if (dto.labelExtraText !== undefined)
+      settings.labelExtraText = dto.labelExtraText?.trim() || null;
     if (dto.leftoverAgeMonths !== undefined)
       settings.leftoverAgeMonths = dto.leftoverAgeMonths;
     if (dto.leftoverMaxSizes !== undefined)
