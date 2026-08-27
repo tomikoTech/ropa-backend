@@ -116,6 +116,8 @@ export interface MovimientoConContexto {
    */
   productCode: string | null;
   barcode: string | null;
+  /** Para cruzar con `sale_items` y reconstruir el código real de una venta. */
+  variantId?: string | null;
   /**
    * Los códigos de los pares concretos que se movieron.
    *
@@ -1716,6 +1718,7 @@ export class InventoryService {
       variantSku: m.variant?.sku ?? '',
       productCode: m.variant?.product?.skuPrefix ?? null,
       barcode: m.variant?.barcode ?? null,
+      variantId: m.variant?.id ?? null,
       unitBarcodes: m.unitBarcodes?.length ? m.unitBarcodes : null,
       variantLabel:
         [m.variant?.size, m.variant?.color].filter(Boolean).join(' / ') || '',
@@ -1734,6 +1737,7 @@ export class InventoryService {
     // Con quién fue: el número de factura y el cliente o el proveedor. Dos
     // consultas por página, no una por fila.
     await this.agregarContraparte(data, tenantId);
+    await this.agregarCodigosDeVenta(data, tenantId);
 
     return {
       data,
@@ -1917,6 +1921,7 @@ export class InventoryService {
     // dice «Venta VTA-20260813-0001» y hay que ir a buscarla a otra pantalla
     // para saber de quién se trata.
     await this.agregarContraparte(movements, tenantId);
+    await this.agregarCodigosDeVenta(movements, tenantId);
 
     movements.reverse();
 
@@ -1938,6 +1943,69 @@ export class InventoryService {
    * necesita el número («VTA-20260813-0001») y, sobre todo, con quién fue: el
    * cliente que se llevó la mercancía o el proveedor que la trajo.
    */
+  /**
+   * Rellena el **código físico real** de los movimientos de venta.
+   *
+   * El movimiento de una venta no guarda `unit_barcodes` (el bulto queda en
+   * `sale_items.stock_unit_id`, no en el movimiento), así que sin esto el
+   * historial y «qué se movió» mostraban solo el código del modelo. Acá se
+   * reconstruye el código impreso —el de la fecha— desde la línea de venta,
+   * cruzando por venta + variante. Una consulta por página, no una por fila.
+   */
+  private async agregarCodigosDeVenta(
+    movements: {
+      referenceType: string | null;
+      referenceId: string | null;
+      variantId?: string | null;
+      quantity: number;
+      unitBarcodes: string[] | null;
+    }[],
+    tenantId: string,
+  ): Promise<void> {
+    const ventaIds = new Set<string>();
+    for (const m of movements) {
+      const esVenta =
+        m.referenceType === 'SALE' ||
+        m.referenceType === 'SALE_EDIT' ||
+        m.referenceType === 'SALE_CANCEL';
+      // Solo lo que no trae ya su código y sí sabe de qué venta y variante es.
+      if (esVenta && m.referenceId && m.variantId && !m.unitBarcodes?.length) {
+        ventaIds.add(m.referenceId);
+      }
+    }
+    if (ventaIds.size === 0) return;
+
+    const filas = await this.dataSource.query<
+      { sale_id: string; variant_id: string; barcode: string }[]
+    >(
+      `SELECT si.sale_id, si.variant_id, su.barcode
+         FROM sale_items si
+         JOIN stock_units su ON su.id = si.stock_unit_id
+        WHERE si.tenant_id = $1
+          AND si.sale_id = ANY($2::uuid[])
+          AND si.stock_unit_id IS NOT NULL`,
+      [tenantId, [...ventaIds]],
+    );
+    if (!filas.length) return;
+
+    const porVentaVariante = new Map<string, string[]>();
+    for (const fila of filas) {
+      const clave = `${fila.sale_id}|${fila.variant_id}`;
+      const lista = porVentaVariante.get(clave) ?? [];
+      lista.push(fila.barcode);
+      porVentaVariante.set(clave, lista);
+    }
+
+    for (const m of movements) {
+      if (m.unitBarcodes?.length || !m.referenceId || !m.variantId) continue;
+      const codigos = porVentaVariante.get(`${m.referenceId}|${m.variantId}`);
+      if (!codigos?.length) continue;
+      // Tantos como movió esa línea: una salida de un par muestra un código.
+      const cuantos = Math.max(1, Math.abs(m.quantity));
+      m.unitBarcodes = codigos.slice(0, cuantos);
+    }
+  }
+
   private async agregarContraparte(
     movements: {
       referenceType: string | null;
