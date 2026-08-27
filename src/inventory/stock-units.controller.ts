@@ -19,6 +19,7 @@ import {
   UpdateBoxContentsDto,
 } from './dto/stock-unit.dto.js';
 import { DarDeBajaDto } from './dto/dar-de-baja.dto.js';
+import { RecostearDto } from './dto/recostear.dto.js';
 
 /**
  * Inventario por unidades etiquetadas: recibir cajas, abrirlas y buscarlas
@@ -147,6 +148,16 @@ export class StockUnitsController {
     @TenantId() tenantId: string,
   ) {
     return this.units.darDeBaja(id, dto.motivo, userId, tenantId);
+  }
+
+  @Post(':id/recostear')
+  @ApiOperation({ summary: 'Cambiar el costo con alcance (este / vendidos / existencias / costo cero)' })
+  recostear(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RecostearDto,
+    @TenantId() tenantId: string,
+  ) {
+    return this.units.recostear(id, dto.nuevoCosto, dto.alcance, tenantId);
   }
 
   @Get(':id/contents')

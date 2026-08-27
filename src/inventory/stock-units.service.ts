@@ -29,6 +29,7 @@ import { PurchaseOrderStatus } from '../common/enums/purchase-order-status.enum.
 import { buildStockBarcode, withCheckDigit } from './barcode.util.js';
 import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
 import { StockUnitContent } from './entities/stock-unit-content.entity.js';
+import { AlcanceRecosteo } from './dto/recostear.dto.js';
 import {
   StockUnitEvent,
   StockUnitEventType,
@@ -1438,6 +1439,86 @@ export class StockUnitsService {
         barcode: unit.barcode,
         status: StockUnitStatus.WRITTEN_OFF,
       };
+    });
+  }
+
+  /**
+   * Cambiar el costo con **alcance**, como en «detallar individual».
+   *
+   * El mismo modelo puede haber entrado con costos distintos, y a veces se
+   * ingresa en cero para corregir después. Por eso el cambio no es siempre a
+   * todo: el dueño elige si toca solo este bulto, lo ya vendido, todo lo que
+   * está en inventario, o solo lo que quedó en cero. El costo no es inventario
+   * (no mueve cantidades), así que no pasa por el ledger.
+   */
+  async recostear(
+    id: string,
+    nuevoCosto: number,
+    alcance: AlcanceRecosteo,
+    tenantId: string,
+  ): Promise<{ alcance: AlcanceRecosteo; afectados: number }> {
+    if (!(nuevoCosto >= 0)) {
+      throw new BadRequestException('El costo no puede ser negativo.');
+    }
+    return this.dataSource.transaction(async (manager) => {
+      const unit = await manager
+        .getRepository(StockUnit)
+        .findOne({ where: { id, tenantId } });
+      if (!unit) throw new NotFoundException('Código no encontrado');
+      const productId = unit.productId;
+      if (!productId) {
+        throw new BadRequestException(
+          'Este código no está asociado a un producto.',
+        );
+      }
+
+      // `query()` con RETURNING devuelve `[filas, count]` en pg; contamos las
+      // filas devueltas para no depender de la forma exacta del resultado.
+      const cuenta = (r: unknown): number => {
+        if (Array.isArray(r) && Array.isArray(r[0])) return r[0].length;
+        if (Array.isArray(r)) return r.length;
+        return 0;
+      };
+
+      let afectados = 0;
+      if (alcance === AlcanceRecosteo.UNIDAD) {
+        const r = await manager.query(
+          `UPDATE stock_units SET cost = $1 WHERE id = $2 AND tenant_id = $3 RETURNING id`,
+          [nuevoCosto, id, tenantId],
+        );
+        afectados = cuenta(r);
+      } else if (alcance === AlcanceRecosteo.EXISTENCIAS) {
+        const r = await manager.query(
+          `UPDATE stock_units SET cost = $1
+            WHERE product_id = $2 AND tenant_id = $3 AND status = 'IN_STOCK'
+          RETURNING id`,
+          [nuevoCosto, productId, tenantId],
+        );
+        afectados = cuenta(r);
+      } else if (alcance === AlcanceRecosteo.COSTO_CERO) {
+        const r = await manager.query(
+          `UPDATE stock_units SET cost = $1
+            WHERE product_id = $2 AND tenant_id = $3 AND status = 'IN_STOCK'
+              AND (cost IS NULL OR cost = 0)
+          RETURNING id`,
+          [nuevoCosto, productId, tenantId],
+        );
+        afectados = cuenta(r);
+      } else {
+        // vendidos: el costo histórico de las líneas de venta de este producto.
+        const r = await manager.query(
+          `UPDATE sale_items si SET unit_cost = $1
+             FROM product_variants v
+            WHERE si.variant_id = v.id
+              AND v.product_id = $2
+              AND si.tenant_id = $3
+          RETURNING si.id`,
+          [nuevoCosto, productId, tenantId],
+        );
+        afectados = cuenta(r);
+      }
+
+      return { alcance, afectados };
     });
   }
 
