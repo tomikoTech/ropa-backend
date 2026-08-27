@@ -20,6 +20,7 @@ import {
 } from './dto/stock-unit.dto.js';
 import { DarDeBajaDto } from './dto/dar-de-baja.dto.js';
 import { RecostearDto } from './dto/recostear.dto.js';
+import { ReasignarDto } from './dto/reasignar.dto.js';
 
 /**
  * Inventario por unidades etiquetadas: recibir cajas, abrirlas y buscarlas
@@ -158,6 +159,17 @@ export class StockUnitsController {
     @TenantId() tenantId: string,
   ) {
     return this.units.recostear(id, dto.nuevoCosto, dto.alcance, tenantId);
+  }
+
+  @Post(':id/reasignar')
+  @ApiOperation({ summary: 'Reasignar un bulto a otra referencia (talla/color) existente' })
+  reasignar(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReasignarDto,
+    @UserId() userId: string,
+    @TenantId() tenantId: string,
+  ) {
+    return this.units.reasignar(id, dto.nuevaVariantId, userId, tenantId);
   }
 
   @Get(':id/contents')

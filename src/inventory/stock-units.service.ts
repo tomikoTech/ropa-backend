@@ -1522,6 +1522,95 @@ export class StockUnitsService {
     });
   }
 
+  /**
+   * Reasignar un bulto a **otra variante que ya existe**.
+   *
+   * «Le puedes cambiar el nombre, pero por algo que ya exista.» Es la corrección
+   * de cuando un par se etiquetó como la referencia equivocada: conserva su
+   * código impreso, pero pasa a contar como la otra talla/color. El agregado se
+   * mueve de una a otra por el ledger; el código no se reinventa.
+   */
+  async reasignar(
+    id: string,
+    nuevaVariantId: string,
+    userId: string,
+    tenantId: string,
+  ): Promise<{ id: string; barcode: string; variantId: string }> {
+    return this.dataSource.transaction(async (manager) => {
+      const unitRepo = manager.getRepository(StockUnit);
+      const unit = await unitRepo.findOne({ where: { id, tenantId } });
+      if (!unit) throw new NotFoundException('Código no encontrado');
+      if (unit.status !== StockUnitStatus.IN_STOCK) {
+        throw new BadRequestException(
+          `Este código ${DESCRIPCION_DE_ESTADO[unit.status]}: solo se reasigna lo que está en inventario.`,
+        );
+      }
+      if (unit.variantId === nuevaVariantId) {
+        throw new BadRequestException('El bulto ya está en esa referencia.');
+      }
+      const nueva = await manager
+        .getRepository(ProductVariant)
+        .findOne({ where: { id: nuevaVariantId, tenantId } });
+      if (!nueva) {
+        throw new NotFoundException('La referencia destino no existe.');
+      }
+      const variantAnterior = unit.variantId;
+
+      // Sale del agregado de la variante vieja y entra al de la nueva; el bulto
+      // ya lo movemos aquí, así que al ledger solo le toca el agregado.
+      if (variantAnterior) {
+        await this.ledger.mover(manager, {
+          variantId: variantAnterior,
+          warehouseId: unit.warehouseId,
+          cantidad: -unit.quantity,
+          motivo: 'STOCK_UNIT',
+          notas: `Reasignado ${unit.barcode} a otra referencia`,
+          usuarioId: userId,
+          bultosYaMovidos: true,
+          tenantId,
+        });
+      }
+
+      unit.variantId = nuevaVariantId;
+      unit.productId = nueva.productId;
+      unit.sizeId = nueva.sizeId;
+      unit.colorId = nueva.colorId;
+      await unitRepo.save(unit);
+
+      await this.ledger.mover(manager, {
+        variantId: nuevaVariantId,
+        warehouseId: unit.warehouseId,
+        cantidad: unit.quantity,
+        motivo: 'STOCK_UNIT',
+        notas: `Reasignado ${unit.barcode} desde otra referencia`,
+        usuarioId: userId,
+        bultosYaMovidos: true,
+        tenantId,
+      });
+
+      await manager.getRepository(StockUnitEvent).save(
+        manager.getRepository(StockUnitEvent).create({
+          stockUnitId: unit.id,
+          eventType: StockUnitEventType.CONTENT_UPDATED,
+          fromStatus: StockUnitStatus.IN_STOCK,
+          toStatus: StockUnitStatus.IN_STOCK,
+          referenceType: 'REASSIGNMENT',
+          referenceId: null,
+          userId,
+          metadata: {
+            tipo: 'REASIGNACION',
+            barcode: unit.barcode,
+            deVariante: variantAnterior,
+            aVariante: nuevaVariantId,
+          },
+          tenantId,
+        }),
+      );
+
+      return { id, barcode: unit.barcode, variantId: nuevaVariantId };
+    });
+  }
+
   async search(params: {
     q?: string;
     kind?: string;
