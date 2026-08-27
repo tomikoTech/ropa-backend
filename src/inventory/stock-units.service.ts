@@ -36,6 +36,7 @@ import {
 } from './entities/stock-unit-event.entity.js';
 import { SaleItem } from '../pos/entities/sale-item.entity.js';
 import { Product } from '../products/entities/product.entity.js';
+import { Color } from '../catalogs/entities/color.entity.js';
 import { Warehouse } from './entities/warehouse.entity.js';
 import { Stand } from './entities/stand.entity.js';
 import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
@@ -663,7 +664,8 @@ export class StockUnitsService {
     colorId: string | null,
     tenantId: string,
   ): Promise<ProductVariant> {
-    const variant = await m.getRepository(ProductVariant).findOne({
+    const variantRepo = m.getRepository(ProductVariant);
+    const existente = await variantRepo.findOne({
       where: {
         productId,
         ...(colorId ? { colorId } : {}),
@@ -672,12 +674,83 @@ export class StockUnitsService {
       },
       order: { createdAt: 'ASC' },
     });
-    if (!variant) {
-      throw new BadRequestException(
-        'El producto no tiene una variante activa compatible con el color de la caja.',
-      );
+    if (existente) return existente;
+
+    // Antes esto lanzaba un error y dejaba la caja imposible de recibir: pasaba
+    // cuando el producto se creaba al vuelo dentro de la compra y el color de la
+    // caja todavía no tenía variante (el dueño elige el color de la caja, no una
+    // variante). En vez de bloquear, se crea la variante "sombrilla" —sin talla—
+    // que es justamente donde el modelo guarda el agregado de una caja cerrada
+    // hasta que se abre y se reparte a las tallas reales. Con esto el color de la
+    // caja siempre tiene dónde vivir, y la referencia queda con esa variante de
+    // color, como espera quien luego la ve en el producto.
+    const product = await m
+      .getRepository(Product)
+      .findOne({ where: { id: productId, tenantId } });
+    if (!product) throw new NotFoundException('Producto no encontrado');
+    const color = colorId
+      ? await m.getRepository(Color).findOne({ where: { id: colorId, tenantId } })
+      : null;
+
+    const nueva = variantRepo.create({
+      productId,
+      sku: await this.uniqueVariantSku(
+        variantRepo,
+        product.skuPrefix,
+        color?.name ?? null,
+        tenantId,
+      ),
+      sizeId: null,
+      colorId: colorId ?? null,
+      barcode: await this.uniqueVariantBarcode(variantRepo, tenantId),
+      priceOverride: null,
+      isActive: true,
+      tenantId,
+    });
+    return variantRepo.save(nueva);
+  }
+
+  /** Un código de variante ("modelo", prefijo 78) único dentro del tenant. */
+  private async uniqueVariantBarcode(
+    variantRepo: Repository<ProductVariant>,
+    tenantId: string,
+  ): Promise<string> {
+    for (let intento = 0; intento < 20; intento++) {
+      const candidate = `78${Date.now().toString().slice(-8)}${Math.floor(
+        Math.random() * 10000,
+      )
+        .toString()
+        .padStart(4, '0')}`;
+      const choca = await variantRepo.findOne({
+        where: { barcode: candidate, tenantId },
+      });
+      if (!choca) return candidate;
     }
-    return variant;
+    throw new BadRequestException(
+      'No se pudo generar un código de variante único.',
+    );
+  }
+
+  /** Un SKU legible (referencia + color) único dentro del tenant. */
+  private async uniqueVariantSku(
+    variantRepo: Repository<ProductVariant>,
+    skuPrefix: string,
+    colorName: string | null,
+    tenantId: string,
+  ): Promise<string> {
+    const base = [skuPrefix, colorName]
+      .filter(Boolean)
+      .join('-')
+      .toUpperCase()
+      .replace(/\s+/g, '');
+    for (let intento = 0; intento < 50; intento++) {
+      const candidate = intento === 0 ? base : `${base}-${intento}`;
+      const choca = await variantRepo.findOne({
+        where: { sku: candidate, tenantId },
+      });
+      if (!choca) return candidate;
+    }
+    throw new BadRequestException('No se pudo generar un SKU de variante único.');
   }
 
   /** Variantes del producto por talla, para poder detallar lo que trae la caja. */
