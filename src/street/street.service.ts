@@ -40,6 +40,14 @@ import {
   validateSettlement,
   type SettlementLine,
 } from './street-settlement.js';
+import {
+  resolveRange,
+  timestampRangeSql,
+} from '../reports/engine/report-filters.js';
+import {
+  resumenPorPatinador,
+  type DespachoDeReporte,
+} from './street-reporte.js';
 import type {
   CreateDispatchDto,
   CreateStreetSellerDto,
@@ -398,6 +406,56 @@ export class StreetService {
 
     const dispatches = await qb.getMany();
     return dispatches.map((d) => this.withSummary(d));
+  }
+
+  /**
+   * Reporte por patinador: cuánto sacó, vendió, devolvió, tiene en la calle y
+   * recaudó cada uno en el periodo. El corte del día es en la zona del negocio
+   * (ver `timestampRangeSql`) y la aritmética la hace una función pura y
+   * probada aparte (`resumenPorPatinador`), en centavos enteros.
+   */
+  async reportePorPatinador(
+    filters: { from?: string; to?: string; warehouseId?: string },
+    tenantId: string,
+  ) {
+    const range = resolveRange(filters.from, filters.to);
+    const qb = this.dispatchRepo
+      .createQueryBuilder('d')
+      .leftJoinAndSelect('d.seller', 'seller')
+      .leftJoinAndSelect('d.items', 'items')
+      .where('d.tenant_id = :tenantId', { tenantId })
+      .andWhere(timestampRangeSql('d.created_at'), {
+        from: range.from,
+        to: range.to,
+      });
+    if (filters.warehouseId) {
+      qb.andWhere('d.warehouse_id = :wid', { wid: filters.warehouseId });
+    }
+    const dispatches = await qb.getMany();
+
+    const toCents = (v: number | string | null | undefined) =>
+      Math.round(Number(v ?? 0) * 100);
+    const entrada: DespachoDeReporte[] = dispatches.map((d) => ({
+      sellerId: d.streetSellerId,
+      sellerName: d.seller?.name ?? 'Patinador',
+      status: d.status,
+      collectedAmountCents:
+        d.collectedAmount != null ? toCents(d.collectedAmount) : null,
+      items: (d.items ?? []).map((it) => ({
+        quantity: it.quantity,
+        quantitySold: it.quantitySold,
+        quantityReturned: it.quantityReturned,
+        unitPriceCents: toCents(it.unitPrice),
+        unitCostCents: toCents(it.unitCost),
+      })),
+    }));
+
+    return {
+      from: range.from,
+      to: range.to,
+      warnings: range.warnings,
+      ...resumenPorPatinador(entrada),
+    };
   }
 
   async findDispatch(id: string, tenantId: string) {

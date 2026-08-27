@@ -95,6 +95,20 @@ export class StreetController {
     );
   }
 
+  @Get('report')
+  @ApiOperation({ summary: 'Reporte por patinador (sacó/vendió/recaudó)' })
+  @ApiQuery({ name: 'from', required: false, description: 'yyyy-mm-dd' })
+  @ApiQuery({ name: 'to', required: false, description: 'yyyy-mm-dd' })
+  @ApiQuery({ name: 'warehouseId', required: false })
+  reportePorPatinador(
+    @TenantId() tenantId: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('warehouseId') warehouseId?: string,
+  ) {
+    return this.street.reportePorPatinador({ from, to, warehouseId }, tenantId);
+  }
+
   @Get('dispatches/:id')
   @ApiOperation({ summary: 'Una remisión con su cuadratura' })
   findDispatch(
