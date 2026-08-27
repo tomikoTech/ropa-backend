@@ -1373,6 +1373,8 @@ export class StockUnitsService {
     q?: string;
     kind?: string;
     productId?: string;
+    /** Una talla+color concreta: los bultos que respaldan esa existencia. */
+    variantId?: string;
     status?: string;
     warehouseId?: string;
     /** Los pares que salieron de una caja concreta. */
@@ -1535,6 +1537,7 @@ export class StockUnitsService {
   private async summarizeSearch(params: {
     q?: string;
     productId?: string;
+    variantId?: string;
     status?: string;
     warehouseId?: string;
     parentId?: string;
@@ -1574,6 +1577,7 @@ export class StockUnitsService {
     status?: string;
     warehouseId?: string;
     productId?: string;
+    variantId?: string;
     parentId?: string;
   }) {
     for (const [label, value] of [
@@ -1606,6 +1610,7 @@ export class StockUnitsService {
     for (const [label, value] of [
       ['Bodega', params.warehouseId],
       ['Producto', params.productId],
+      ['Talla', params.variantId],
       ['Caja', params.parentId],
     ] as const) {
       if (value && !UUID_PATTERN.test(value)) {
@@ -1624,6 +1629,7 @@ export class StockUnitsService {
   private buildSearchQuery(params: {
     q?: string;
     productId?: string;
+    variantId?: string;
     status?: string;
     warehouseId?: string;
     parentId?: string;
@@ -1673,6 +1679,12 @@ export class StockUnitsService {
     if (params.productId) {
       qb.andWhere('unit.productId = :productId', {
         productId: params.productId,
+      });
+    }
+    // Una talla+color concreta: los bultos que respaldan esa fila de existencia.
+    if (params.variantId) {
+      qb.andWhere('unit.variantId = :variantId', {
+        variantId: params.variantId,
       });
     }
     // «Los pares de esta caja». Era la pregunta que quedaba sin respuesta al
