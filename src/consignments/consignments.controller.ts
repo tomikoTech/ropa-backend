@@ -115,14 +115,20 @@ export class ConsignmentsController {
 
   @Get('summary')
   @ApiOperation({ summary: 'Resumen: utilidad, por cobrar y por pagar' })
+  @ApiQuery({ name: 'from', required: false })
+  @ApiQuery({ name: 'to', required: false })
   async summary(
     @CurrentUser()
     user: { id: string; role: Role; accessRoleId: string | null },
     @TenantId() tenantId: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
   ) {
     // Su contabilidad, no la de la tienda: cuánto vendió, cuánto le costó y
-    // cuánto ganó **él**.
-    return this.service.summary(tenantId, await this.deQuien(user));
+    // cuánto ganó **él**. Con el mismo rango de fechas del listado, para que la
+    // utilidad de arriba responda a "hoy"/"ayer" en vez de quedarse en el total
+    // histórico.
+    return this.service.summary(tenantId, await this.deQuien(user), from, to);
   }
 
   @Get('third-parties')

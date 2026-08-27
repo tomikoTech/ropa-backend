@@ -244,6 +244,8 @@ export class ConsignmentsService {
   async summary(
     tenantId: string,
     usuarioId?: string | null,
+    from?: string,
+    to?: string,
   ): Promise<{
     count: number;
     totalSale: number;
@@ -258,9 +260,17 @@ export class ConsignmentsService {
       owedToThem: number;
     }[];
   }> {
-    const rows = await this.repo.find({
-      where: usuarioId ? { tenantId, userId: usuarioId } : { tenantId },
-    });
+    // Mismo rango de fechas que el listado (`saleDate BETWEEN`), para que la
+    // utilidad y los totales de las tarjetas cuadren con lo que se ve abajo al
+    // filtrar por "hoy" o "ayer". Sin rango, es el total histórico como antes.
+    const qb = this.repo
+      .createQueryBuilder('c')
+      .where('c.tenantId = :tenantId', { tenantId });
+    if (usuarioId) qb.andWhere('c.userId = :usuarioId', { usuarioId });
+    if (from && to) {
+      qb.andWhere('c.saleDate BETWEEN :from AND :to', { from, to });
+    }
+    const rows = await qb.getMany();
     let totalSale = 0;
     let totalCost = 0;
     let owedByClients = 0;
