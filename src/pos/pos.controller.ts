@@ -123,6 +123,7 @@ export class PosController {
     @Query('clientPhone') clientPhone?: string,
     @Query('marca') marca?: string,
     @Query('categoryId') categoryId?: string,
+    @Query('gender') gender?: string,
   ) {
     // El filtro no se negocia con el cliente: mandar otro `userId` a mano no
     // abre la puerta. La regla vive en `pantalla-de-ventas.ts`, así que acá
@@ -151,6 +152,7 @@ export class PosController {
         clientPhone,
         marca,
         categoryId,
+        gender,
       },
       tenantId,
     );

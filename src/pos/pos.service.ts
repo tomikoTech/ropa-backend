@@ -1098,6 +1098,7 @@ export class PosService {
           clientPhone?: string;
           marca?: string;
           categoryId?: string;
+          gender?: string;
         }
       | undefined,
     tenantId: string,
@@ -1179,6 +1180,22 @@ export class PosService {
               AND prod_c.category_id = :categoryId
           )`,
           { categoryId },
+        );
+      }
+
+      // Género: la venta cuenta si cualquiera de sus líneas es de un producto
+      // de ese género (HOMBRE/MUJER/UNISEX).
+      const gender = filters?.gender?.trim();
+      if (gender) {
+        qb.andWhere(
+          `EXISTS (
+            SELECT 1 FROM sale_items linea_g
+            JOIN product_variants pv_g ON pv_g.id = linea_g.variant_id
+            JOIN products prod_g ON prod_g.id = pv_g.product_id
+            WHERE linea_g.sale_id = sale.id
+              AND prod_g.gender = :gender
+          )`,
+          { gender },
         );
       }
 
