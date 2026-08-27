@@ -121,6 +121,7 @@ export class PosController {
     @Query('saleChannel') saleChannel?: string,
     @Query('paid') paid?: string,
     @Query('clientPhone') clientPhone?: string,
+    @Query('marca') marca?: string,
   ) {
     // El filtro no se negocia con el cliente: mandar otro `userId` a mano no
     // abre la puerta. La regla vive en `pantalla-de-ventas.ts`, así que acá
@@ -147,6 +148,7 @@ export class PosController {
         saleChannel,
         paid: paid === undefined ? undefined : paid === 'true',
         clientPhone,
+        marca,
       },
       tenantId,
     );

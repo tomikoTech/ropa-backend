@@ -1096,6 +1096,7 @@ export class PosService {
           saleChannel?: string;
           paid?: boolean;
           clientPhone?: string;
+          marca?: string;
         }
       | undefined,
     tenantId: string,
@@ -1145,6 +1146,24 @@ export class PosService {
       const hasta = parseInstant(filters?.to);
       if (desde) qb.andWhere('sale.created_at >= :desde', { desde });
       if (hasta) qb.andWhere('sale.created_at <= :hasta', { hasta });
+
+      // Marca: la venta cuenta si **cualquiera** de sus líneas es de esa marca.
+      // La marca vive en `products` (no en el snapshot de la línea), así que se
+      // llega por variante → producto. Igual que el texto, va con EXISTS para no
+      // recortar las demás líneas de la misma factura.
+      const marca = filters?.marca?.trim();
+      if (marca) {
+        qb.andWhere(
+          `EXISTS (
+            SELECT 1 FROM sale_items linea_m
+            JOIN product_variants pv_m ON pv_m.id = linea_m.variant_id
+            JOIN products prod_m ON prod_m.id = pv_m.product_id
+            WHERE linea_m.sale_id = sale.id
+              AND prod_m.brand ILIKE :marca
+          )`,
+          { marca },
+        );
+      }
 
       const texto = filters?.q?.trim();
       if (texto) {
