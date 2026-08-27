@@ -1097,6 +1097,7 @@ export class PosService {
           paid?: boolean;
           clientPhone?: string;
           marca?: string;
+          categoryId?: string;
         }
       | undefined,
     tenantId: string,
@@ -1162,6 +1163,22 @@ export class PosService {
               AND prod_m.brand ILIKE :marca
           )`,
           { marca },
+        );
+      }
+
+      // Categoría: igual que la marca, la venta cuenta si cualquiera de sus
+      // líneas es de un producto de esa categoría.
+      const categoryId = filters?.categoryId?.trim();
+      if (categoryId) {
+        qb.andWhere(
+          `EXISTS (
+            SELECT 1 FROM sale_items linea_c
+            JOIN product_variants pv_c ON pv_c.id = linea_c.variant_id
+            JOIN products prod_c ON prod_c.id = pv_c.product_id
+            WHERE linea_c.sale_id = sale.id
+              AND prod_c.category_id = :categoryId
+          )`,
+          { categoryId },
         );
       }
 
