@@ -1032,6 +1032,7 @@ export class ProductsService {
       imageUrl: string | null;
       categoryId: string | null;
       gender: string;
+      brand: string | null;
       totalStock: number;
       variants: {
         id: string;
@@ -1271,6 +1272,7 @@ export class ProductsService {
           imageUrl: product.imageUrl ?? null,
           categoryId: product.categoryId ?? null,
           gender: product.gender,
+          brand: product.brand ?? null,
           totalStock: productVariants.reduce(
             (sum, variant) => sum + variant.availableStock,
             0,
