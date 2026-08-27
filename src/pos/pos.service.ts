@@ -1301,7 +1301,6 @@ export class PosService {
         ORDER BY m.created_at ASC, m.id ASC`,
       [conLineas.map((venta) => venta.id), tenantId],
     );
-    if (!filas.length) return;
 
     // Agrupadas por venta y variante, para netear cada grupo por separado: dos
     // referencias distintas de la misma factura no se mezclan.
@@ -1357,6 +1356,38 @@ export class PosService {
         item.stockUnitIds = suyos
           .map((codigo) => idPorCodigo.get(codigo))
           .filter((id): id is string => !!id);
+      }
+    }
+
+    // Fallback por `sale_items.stock_unit_id`. El movimiento de una venta no
+    // siempre guarda `unit_barcodes` (hoy, de hecho, no lo hace), así que la
+    // reconstrucción por movimientos deja sin código las líneas que se
+    // vendieron escaneando un bulto concreto. Pero ese bulto quedó anotado en
+    // la línea: de ahí sale su código REAL —el de la fecha— para el detalle de
+    // la venta y la factura. Solo cubre lo que la reconstrucción no llenó.
+    const sinCodigo = conLineas
+      .flatMap((venta) => venta.items)
+      .filter(
+        (item) =>
+          (!item.unitBarcodes || !item.unitBarcodes.length) && item.stockUnitId,
+      );
+    if (sinCodigo.length) {
+      const ids = [
+        ...new Set(sinCodigo.map((item) => item.stockUnitId as string)),
+      ];
+      const unidades: { id: string; barcode: string }[] =
+        await this.dataSource.query(
+          `SELECT id, barcode FROM stock_units
+            WHERE tenant_id = $1 AND id = ANY($2::uuid[])`,
+          [tenantId, ids],
+        );
+      const codigoPorId = new Map(unidades.map((u) => [u.id, u.barcode]));
+      for (const item of sinCodigo) {
+        const codigo = codigoPorId.get(item.stockUnitId as string);
+        if (codigo) {
+          item.unitBarcodes = [codigo];
+          item.stockUnitIds = [item.stockUnitId as string];
+        }
       }
     }
   }
