@@ -72,6 +72,17 @@ export const MODULES: ModuleDef[] = [
   },
   { key: 'quotations', label: 'Cotizaciones', group: 'Ventas' },
   {
+    // No es un módulo del menú: es un permiso suelto. Vender en $0 es la puerta
+    // por donde se va la mercancía sin dejar rastro de valor, así que se da a
+    // dedo. "Ver" = puede poner precio cero; sin él, el servidor lo rechaza.
+    key: 'vender-en-cero',
+    label: 'Vender en $0',
+    group: 'Ventas',
+    hint:
+      'Con "Ver", esta persona puede cobrar una línea en $0 (regalo, garantía, ' +
+      'ajuste) · Sin el permiso, el sistema no deja poner precio cero',
+  },
+  {
     // No se deduce de otros permisos a propósito. La primera versión la
     // deducía de «no puede cerrar ventas», y entonces darle a alguien el
     // permiso de cobrar le devolvía el sistema entero — justo al revés de lo

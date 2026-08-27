@@ -8,6 +8,7 @@ import {
   Query,
   Res,
   ParseUUIDPipe,
+  ForbiddenException,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -87,11 +88,24 @@ export class PosController {
   }
 
   @Post('sales')
-  createSale(
+  async createSale(
     @Body() dto: CreateSaleDto,
-    @CurrentUser() user: { id: string },
+    @CurrentUser()
+    user: { id: string; role: Role; accessRoleId: string | null },
     @TenantId() tenantId: string,
   ) {
+    // Vender en $0 es un permiso: se puede quitar desde roles. Solo se exige si
+    // de verdad hay una línea en cero puesta a mano (un precio 0 explícito);
+    // dejar el precio de la BD no cuenta.
+    const hayLineaEnCero = dto.items?.some((it) => it.unitPrice === 0);
+    if (hayLineaEnCero) {
+      const puede = await this.access.userCan(user, 'vender-en-cero', 'list');
+      if (!puede) {
+        throw new ForbiddenException(
+          'No tienes permiso para vender en $0. Pídelo en Roles y permisos.',
+        );
+      }
+    }
     // La bodega la valida `WarehouseScopeGuard`, que la detecta en el cuerpo de
     // cualquier petición: un usuario restringido a un punto no puede vender
     // contra el inventario de otro ni mandando el id a mano.
