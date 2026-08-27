@@ -21,6 +21,7 @@ const GROUPS = [
   'categoria',
   'marca',
   'ubicacion',
+  'lote',
 ] as const;
 type Group = (typeof GROUPS)[number];
 
@@ -49,7 +50,12 @@ export class InventoryReportService {
   async run(query: ReportQuery, tenantId: string): Promise<ReportResult> {
     const groupBy = query.pick('groupBy', GROUPS, 'variante');
     if (groupBy === 'ubicacion') return this.byLocation(query, tenantId);
-    return this.fromStock(groupBy, query, tenantId);
+    if (groupBy === 'lote') return this.byLote(query, tenantId);
+    return this.fromStock(
+      groupBy as Exclude<Group, 'ubicacion' | 'lote'>,
+      query,
+      tenantId,
+    );
   }
 
   /** Filtros comunes sobre el inventario agregado. */
@@ -99,7 +105,7 @@ export class InventoryReportService {
   private readonly priceSql = 'COALESCE(v.price_override, p.base_price)';
 
   private async fromStock(
-    groupBy: Exclude<Group, 'ubicacion'>,
+    groupBy: Exclude<Group, 'ubicacion' | 'lote'>,
     query: ReportQuery,
     tenantId: string,
   ): Promise<ReportResult> {
@@ -172,7 +178,7 @@ export class InventoryReportService {
         .addOrderBy('co.name', 'ASC');
     } else {
       const dim: Record<
-        Exclude<Group, 'ubicacion' | 'variante'>,
+        Exclude<Group, 'ubicacion' | 'variante' | 'lote'>,
         { sql: string; label: string; fallback?: string }
       > = {
         producto: { sql: 'p.name', label: 'Producto' },
@@ -341,6 +347,141 @@ export class InventoryReportService {
    * que aquí no aparece — y el aviso lo dice, en vez de mostrar una tabla
    * vacía sin explicación.
    */
+  /**
+   * Inventario **separado por lote/costo**: la misma referencia sale en varias
+   * filas si tiene distinto costo, proveedor, pedido o lote.
+   *
+   * Es lo que pidió el dueño: un mismo modelo (una Force One) puede tener cinco
+   * costos distintos —50, 53, 60, 70, 76— porque llegó en pedidos distintos, de
+   * proveedores distintos. El reporte agregado lo aplasta en una fila con un
+   * costo; este no. Trabaja sobre `stock_units` (el bulto físico, que sí guarda
+   * su costo puesto en bodega), no sobre el agregado.
+   */
+  private async byLote(
+    query: ReportQuery,
+    tenantId: string,
+  ): Promise<ReportResult> {
+    const where: string[] = ['u.tenant_id = $1', "u.status = 'IN_STOCK'"];
+    const params: unknown[] = [tenantId];
+    const add = (clause: (i: number) => string, value?: string) => {
+      if (!value) return;
+      params.push(value);
+      where.push(clause(params.length));
+    };
+    add((i) => `u.warehouse_id = $${i}`, query.uuid('warehouseId'));
+    add((i) => `p.category_id = $${i}`, query.uuid('categoryId'));
+    add((i) => `u.size_id = $${i}`, query.uuid('sizeId'));
+    add((i) => `u.color_id = $${i}`, query.uuid('colorId'));
+    add((i) => `p.brand = $${i}`, query.text('brand'));
+    const search = query.text('search');
+    if (search) {
+      params.push(`%${search}%`);
+      where.push(
+        `(p.name ILIKE $${params.length} OR u.barcode ILIKE $${params.length})`,
+      );
+    }
+
+    const sql = `
+      SELECT p.name AS producto,
+             p.sku_prefix AS referencia,
+             COALESCE(sz.name, '—') AS talla,
+             COALESCE(co.name, '—') AS color,
+             u.cost AS "costoUnit",
+             COALESCE(NULLIF(sup.name, ''), '—') AS proveedor,
+             COALESCE(NULLIF(po.order_number, ''), NULLIF(p.lote, ''), '—') AS pedido,
+             MIN(u.created_at) AS fecha,
+             SUM(u.quantity) AS unidades
+        FROM stock_units u
+        JOIN products p ON p.id = u.product_id
+        LEFT JOIN sizes sz ON sz.id = u.size_id
+        LEFT JOIN colors co ON co.id = u.color_id
+        LEFT JOIN purchase_box_lines pbl ON pbl.id = u.purchase_box_line_id
+        LEFT JOIN purchase_orders po ON po.id = pbl.purchase_order_id
+        LEFT JOIN suppliers sup ON sup.id = po.supplier_id
+       WHERE ${where.join(' AND ')}
+       GROUP BY p.name, p.sku_prefix, sz.name, co.name, u.cost,
+                sup.name, po.order_number, p.lote
+       ORDER BY p.name ASC, u.cost ASC
+       LIMIT ${MAX_ROWS}`;
+
+    const raw: {
+      producto: string;
+      referencia: string;
+      talla: string;
+      color: string;
+      costoUnit: string;
+      proveedor: string;
+      pedido: string;
+      fecha: Date;
+      unidades: string;
+    }[] = await this.unitRepo.manager.query(sql, params);
+
+    const fmtFecha = (d: Date | string | null) => {
+      if (!d) return '—';
+      const f = new Date(d);
+      return `${str2(f.getUTCDate())}/${str2(f.getUTCMonth() + 1)}/${f.getUTCFullYear()}`;
+    };
+    function str2(n: number) {
+      return String(n).padStart(2, '0');
+    }
+
+    const rows = raw.map((r) => {
+      const unidades = int(r.unidades);
+      const costoUnit = money(r.costoUnit);
+      return {
+        referencia: str(r.referencia),
+        producto: str(r.producto),
+        talla: str(r.talla),
+        color: str(r.color),
+        proveedor: str(r.proveedor),
+        pedido: str(r.pedido),
+        fecha: fmtFecha(r.fecha),
+        unidades,
+        costoUnit,
+        valorCosto: money(unidades * costoUnit),
+      };
+    });
+
+    return {
+      columns: [
+        { key: 'referencia', label: 'Referencia', type: 'text' },
+        { key: 'producto', label: 'Producto', type: 'text' },
+        { key: 'talla', label: 'Talla', type: 'text' },
+        { key: 'color', label: 'Color', type: 'text' },
+        { key: 'proveedor', label: 'Proveedor', type: 'text' },
+        { key: 'pedido', label: 'Pedido / lote', type: 'text' },
+        { key: 'fecha', label: 'Ingreso', type: 'text' },
+        { key: 'unidades', label: 'Unidades', type: 'number' },
+        { key: 'costoUnit', label: 'Costo unit.', type: 'money' },
+        { key: 'valorCosto', label: 'Valor costo', type: 'money' },
+      ],
+      rows,
+      totals: [
+        { key: 'lotes', label: 'Lotes (costo/pedido)', type: 'number', value: rows.length },
+        {
+          key: 'unidades',
+          label: 'Unidades',
+          type: 'number',
+          value: rows.reduce((s, r) => s + Number(r.unidades), 0),
+        },
+        {
+          key: 'valorCosto',
+          label: 'Valor al costo',
+          type: 'money',
+          value: money(rows.reduce((s, r) => s + Number(r.valorCosto), 0)),
+        },
+      ],
+      title: 'Inventario por lote / costo',
+      warnings: rows.length
+        ? []
+        : [
+            'Este desglose usa las cajas y pares etiquetados con código propio ' +
+              '(se activa por producto). El inventario sin códigos físicos no ' +
+              'aparece acá; míralo en los otros agrupadores.',
+          ],
+    };
+  }
+
   private async byLocation(
     query: ReportQuery,
     tenantId: string,

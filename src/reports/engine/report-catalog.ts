@@ -104,6 +104,9 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       'El valor de venta usa el precio de hoy, no el de cuando entró la mercancía.',
       'Agrupado por ubicación solo aparece lo que tiene código de barras propio ' +
         '(cajas y pares etiquetados); el inventario suelto no tiene stand.',
+      'Agrupado por lote/costo, una misma referencia sale en varias filas si ' +
+        'llegó con distinto costo, proveedor o pedido: es el costo real de cada ' +
+        'lote, no un promedio.',
     ],
     filters: [
       search('Producto, SKU o código de barras'),
@@ -119,6 +122,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
           { value: 'categoria', label: 'Categoría' },
           { value: 'marca', label: 'Marca' },
           { value: 'ubicacion', label: 'Ubicación física (cajas y pares)' },
+          { value: 'lote', label: 'Lote / costo (separa por costo y proveedor)' },
         ],
       },
       fBodega,
