@@ -933,7 +933,16 @@ export class PosService {
     warehouseId: string | null,
     cantidad: number,
     tenantId: string,
-  ): Promise<{ id: string; barcode: string }[]> {
+  ): Promise<
+    {
+      id: string;
+      barcode: string;
+      cost: number;
+      parentBarcode: string | null;
+      boxSequence: number | null;
+      orderNumber: string | null;
+    }[]
+  > {
     if (cantidad <= 0) return [];
     // Sin bodega —el POS abierto en «Todas las bodegas»— se miran todas, en el
     // mismo orden en que la venta las consumiría: la que más tenga primero y
@@ -944,9 +953,19 @@ export class PosService {
       barcode: string;
       quantity: number;
       warehouse_id: string;
+      cost: string;
+      box_sequence: number | null;
+      parent_barcode: string | null;
+      order_number: string | null;
     }[] = await this.dataSource.query(
-      `SELECT u.id, u.barcode, u.quantity, u.warehouse_id
+      `SELECT u.id, u.barcode, u.quantity, u.warehouse_id, u.cost,
+              u.box_sequence,
+              parent.barcode AS parent_barcode,
+              po.order_number AS order_number
          FROM stock_units u
+         LEFT JOIN stock_units parent ON parent.id = u.parent_unit_id
+         LEFT JOIN purchase_box_lines pbl ON pbl.id = u.purchase_box_line_id
+         LEFT JOIN purchase_orders po ON po.id = pbl.purchase_order_id
         WHERE u.tenant_id = $1
           AND u.variant_id = $2
           AND u.status = 'IN_STOCK'
@@ -987,14 +1006,28 @@ export class PosService {
       );
     }
 
-    const elegidos: { id: string; barcode: string }[] = [];
+    const elegidos: {
+      id: string;
+      barcode: string;
+      cost: number;
+      parentBarcode: string | null;
+      boxSequence: number | null;
+      orderNumber: string | null;
+    }[] = [];
     let faltan = cantidad;
     for (const fila of filas) {
       if (faltan <= 0) break;
       // Una caja no se parte para vender tres pares: si no cabe entera en lo
       // que falta, se salta. Es la misma regla del ledger.
       if (Number(fila.quantity) > faltan) continue;
-      elegidos.push({ id: fila.id, barcode: fila.barcode });
+      elegidos.push({
+        id: fila.id,
+        barcode: fila.barcode,
+        cost: Number(fila.cost) || 0,
+        parentBarcode: fila.parent_barcode,
+        boxSequence: fila.box_sequence,
+        orderNumber: fila.order_number,
+      });
       faltan -= Number(fila.quantity);
     }
     return elegidos;
