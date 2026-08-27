@@ -18,6 +18,7 @@ import {
   MarkPrintedDto,
   UpdateBoxContentsDto,
 } from './dto/stock-unit.dto.js';
+import { DarDeBajaDto } from './dto/dar-de-baja.dto.js';
 
 /**
  * Inventario por unidades etiquetadas: recibir cajas, abrirlas y buscarlas
@@ -135,6 +136,17 @@ export class StockUnitsController {
     @TenantId() tenantId: string,
   ) {
     return this.units.splitBox(id, userId, tenantId);
+  }
+
+  @Post(':id/baja')
+  @ApiOperation({ summary: 'Dar de baja un bulto por su código (sale del inventario)' })
+  darDeBaja(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: DarDeBajaDto,
+    @UserId() userId: string,
+    @TenantId() tenantId: string,
+  ) {
+    return this.units.darDeBaja(id, dto.motivo, userId, tenantId);
   }
 
   @Get(':id/contents')

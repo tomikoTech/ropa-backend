@@ -1369,6 +1369,78 @@ export class StockUnitsService {
    * *antes* de que alguien lo toque. El resto de filtros sí lo respeta,
    * porque la pregunta real de la bodega es «cuántas cajas tengo **aquí**».
    */
+  /**
+   * Dar de baja **un bulto concreto** por su código.
+   *
+   * «Detallar individual, dar de baja: que el sistema saque del inventario ese
+   * par, que ya no exista.» Antes solo se podía desactivar el producto entero o
+   * ajustar el agregado (que elige por antigüedad); esto saca **ese** par o esa
+   * caja —el golpeado, el perdido, el robado— y deja el rastro de quién y cuándo.
+   * Va por el ledger, que es el único que mueve inventario.
+   */
+  async darDeBaja(
+    id: string,
+    motivo: string | undefined,
+    userId: string,
+    tenantId: string,
+  ): Promise<{ id: string; barcode: string; status: StockUnitStatus }> {
+    return this.dataSource.transaction(async (manager) => {
+      const unit = await manager
+        .getRepository(StockUnit)
+        .findOne({ where: { id, tenantId } });
+      if (!unit) throw new NotFoundException('Código no encontrado');
+      if (unit.status !== StockUnitStatus.IN_STOCK) {
+        throw new BadRequestException(
+          `Este código ${DESCRIPCION_DE_ESTADO[unit.status]}: solo se da de baja lo que está en inventario.`,
+        );
+      }
+      if (!unit.variantId) {
+        throw new BadRequestException(
+          'Este código no está asociado a una talla; no se puede dar de baja por aquí.',
+        );
+      }
+      const nota = motivo?.trim() ? `Baja: ${motivo.trim()}` : 'Baja manual';
+
+      // Este bulto lo maneja este servicio, no el ledger: se marca de baja y se
+      // deja el rastro aquí, y al ledger se le mueve **solo el agregado**
+      // (`bultosYaMovidos: true`). Así las dos cuentas siguen dando lo mismo sin
+      // depender de si el producto tiene activado el seguimiento por unidad.
+      await this.ledger.mover(manager, {
+        variantId: unit.variantId,
+        warehouseId: unit.warehouseId,
+        cantidad: -unit.quantity,
+        motivo: 'ADJUSTMENT',
+        notas: nota,
+        usuarioId: userId,
+        bultosYaMovidos: true,
+        tenantId,
+      });
+
+      const unitRepo = manager.getRepository(StockUnit);
+      unit.status = StockUnitStatus.WRITTEN_OFF;
+      await unitRepo.save(unit);
+      await manager.getRepository(StockUnitEvent).save(
+        manager.getRepository(StockUnitEvent).create({
+          stockUnitId: unit.id,
+          eventType: StockUnitEventType.WRITTEN_OFF,
+          fromStatus: StockUnitStatus.IN_STOCK,
+          toStatus: StockUnitStatus.WRITTEN_OFF,
+          referenceType: 'MANUAL_WRITE_OFF',
+          referenceId: null,
+          userId,
+          metadata: { barcode: unit.barcode, motivo: motivo?.trim() || null },
+          tenantId,
+        }),
+      );
+
+      return {
+        id,
+        barcode: unit.barcode,
+        status: StockUnitStatus.WRITTEN_OFF,
+      };
+    });
+  }
+
   async search(params: {
     q?: string;
     kind?: string;
