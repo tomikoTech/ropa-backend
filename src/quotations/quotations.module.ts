@@ -9,6 +9,7 @@ import { QuotationsController } from './quotations.controller.js';
 import { AccessModule } from '../access/access.module.js';
 import { TaxService } from '../pos/services/tax.service.js';
 import { PosModule } from '../pos/pos.module.js';
+import { NotificationsModule } from '../notifications/notifications.module.js';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { PosModule } from '../pos/pos.module.js';
     // rótulos y qué ventas se le listan.
     AccessModule,
     PosModule, // provee PosService (convertir cotización → venta)
+    NotificationsModule,
   ],
   controllers: [QuotationsController],
   // TaxService es zero-dep; se re-provee aquí (patrón usado en POS y Storefront).

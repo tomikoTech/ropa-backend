@@ -22,6 +22,7 @@ import {
   type LineCalculation,
 } from '../pos/services/tax.service.js';
 import { PosService } from '../pos/pos.service.js';
+import { NotificationsService } from '../notifications/notifications.service.js';
 
 @Injectable()
 export class QuotationsService {
@@ -36,6 +37,7 @@ export class QuotationsService {
     private readonly settingsRepo: Repository<StoreSettings>,
     private readonly taxService: TaxService,
     private readonly posService: PosService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   private async ensureEnabled(tenantId: string): Promise<StoreSettings | null> {
@@ -142,6 +144,18 @@ export class QuotationsService {
       items: itemsData.map((d) => this.itemRepo.create(d)),
     });
     const saved = await this.quotationRepo.save(quotation);
+
+    // Aviso a los admins: hay una venta esperando autorización. Excluye a quien
+    // la creó (si un admin la hizo, no se avisa a sí mismo).
+    const admins = await this.notifications.idsDeAdmins(tenantId, userId);
+    await this.notifications.crearPara(admins, tenantId, {
+      type: 'sale_authorization',
+      title: `Venta por autorizar ${saved.quoteNumber}`,
+      body: `Un vendedor dejó una venta de $${Math.round(Number(saved.total)).toLocaleString('es-CO')} esperando tu autorización.`,
+      link: '/vender/solicitudes',
+      dedupeKey: `quote:${saved.id}`,
+    });
+
     return this.findOne(saved.id, tenantId);
   }
 

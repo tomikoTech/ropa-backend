@@ -22,6 +22,7 @@ import {
 } from '../inventory/entities/stock-unit.entity.js';
 import { AccessService } from '../access/access.service.js';
 import { StockLedgerService } from '../inventory/ledger/stock-ledger.service.js';
+import { NotificationsService } from '../notifications/notifications.service.js';
 
 interface CreateInput {
   destinationWarehouseId: string;
@@ -41,6 +42,7 @@ export class InternalRequestsService {
     private readonly dataSource: DataSource,
     private readonly access: AccessService,
     private readonly ledger: StockLedgerService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   private async lock(manager: EntityManager, id: string, tenantId: string) {
@@ -64,7 +66,7 @@ export class InternalRequestsService {
         (grouped.get(item.variantId) ?? 0) + item.quantity,
       );
     }
-    return this.dataSource.transaction(async (manager) => {
+    const creada = await this.dataSource.transaction(async (manager) => {
       await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
         `internal-request-number:${tenantId}`,
       ]);
@@ -116,6 +118,20 @@ export class InternalRequestsService {
       );
       return this.findOne(request.id, tenantId, manager);
     });
+
+    // Aviso a los admins: alguien pidió mercancía prestada. Fuera de la
+    // transacción, y "mejor esfuerzo": si falla, la solicitud igual quedó.
+    const admins = await this.notifications.idsDeAdmins(tenantId, userId);
+    const bodega = creada.destinationWarehouse?.name ?? 'un local';
+    await this.notifications.crearPara(admins, tenantId, {
+      type: 'internal_request',
+      title: `Nueva solicitud ${creada.requestNumber}`,
+      body: `Piden mercancía para ${bodega}. Prepárala cuando puedas.`,
+      link: '/internal-requests',
+      dedupeKey: `ir:${creada.id}`,
+    });
+
+    return creada;
   }
 
   async prepare(
