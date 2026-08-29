@@ -28,6 +28,28 @@ export class PurchaseOrderItemDto {
   unitCost: number;
 }
 
+/** Un pago de la compra al crearla: método + monto (efectivo, transferencia…). */
+export class PurchaseOrderPaymentDto {
+  @ApiProperty({ example: 'EFECTIVO' })
+  @IsString()
+  method: string;
+
+  @ApiProperty({ example: 50000 })
+  @IsNumber()
+  @Min(0)
+  amount: number;
+
+  @ApiPropertyOptional({ description: 'Referencia (N.º de transferencia, etc.)' })
+  @IsOptional()
+  @IsString()
+  reference?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  notes?: string;
+}
+
 export class CreatePurchaseOrderDto {
   @ApiProperty()
   @IsUUID()
@@ -70,4 +92,16 @@ export class CreatePurchaseOrderDto {
   @IsOptional()
   @IsBoolean()
   applyTax?: boolean;
+
+  /**
+   * Pagos hechos al crear la compra, repartidos en varias formas (efectivo +
+   * transferencia…). Cada uno abona la cuenta por pagar. Vacío = queda a
+   * crédito. La suma no puede pasar el total.
+   */
+  @ApiPropertyOptional({ type: [PurchaseOrderPaymentDto] })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => PurchaseOrderPaymentDto)
+  payments?: PurchaseOrderPaymentDto[];
 }

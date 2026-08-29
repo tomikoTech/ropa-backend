@@ -292,7 +292,7 @@ export class PurchasesService {
     // borrador. Un campo opcional no puede decidir si se debe plata.
     //
     // Sin fecha, se debe **hoy**: es lo que pasa cuando nadie pactó plazo.
-    await this.apRepository.save(
+    const ap = await this.apRepository.save(
       this.apRepository.create({
         purchaseOrderId: savedPo.id,
         amount: total,
@@ -303,6 +303,41 @@ export class PurchasesService {
         tenantId,
       }),
     );
+
+    // Pagos al crear, repartidos en varias formas (efectivo + transferencia…).
+    // Cada uno abona la cuenta por pagar; la suma no puede pasar el total.
+    const pagos = (dto.payments ?? []).filter((p) => Number(p.amount) > 0);
+    if (pagos.length > 0) {
+      const sumaPagos = pagos.reduce((acc, p) => acc + Number(p.amount), 0);
+      // Se redondea a centavos para que un 0.001 de coma flotante no lo bloquee.
+      if (Math.round(sumaPagos * 100) > Math.round(total * 100)) {
+        throw new BadRequestException(
+          `Los pagos (${sumaPagos}) superan el total de la compra (${total}).`,
+        );
+      }
+      await this.apPaymentRepository.save(
+        pagos.map((p) =>
+          this.apPaymentRepository.create({
+            accountsPayableId: ap.id,
+            amount: Number(p.amount),
+            method: p.method,
+            reference: p.reference,
+            notes: p.notes,
+            tenantId,
+          }),
+        ),
+      );
+      const pagado = Math.round(sumaPagos * 100) / 100;
+      await this.apRepository.update(
+        { id: ap.id, tenantId },
+        {
+          paidAmount: pagado,
+          ...(Math.round(pagado * 100) >= Math.round(total * 100)
+            ? { isPaid: true, paidAt: new Date() }
+            : {}),
+        },
+      );
+    }
 
     return this.findOne(savedPo.id, tenantId);
   }
