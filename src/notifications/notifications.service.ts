@@ -4,6 +4,7 @@ import { IsNull, Repository } from 'typeorm';
 import { Notification, NotificationType } from './entities/notification.entity.js';
 import { User } from '../users/entities/user.entity.js';
 import { Role } from '../common/enums/role.enum.js';
+import { PushService } from '../push/push.service.js';
 
 export interface NuevaNotificacion {
   type: NotificationType;
@@ -21,6 +22,7 @@ export class NotificationsService {
     private readonly repo: Repository<Notification>,
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
+    private readonly push: PushService,
   ) {}
 
   /** Los admins del tenant: los que autorizan y a quienes se les avisa. */
@@ -69,6 +71,22 @@ export class NotificationsService {
           readAt: null,
         });
         creadas.push(await this.repo.save(n));
+      }
+      // Además del aviso en la app, al celular. Fire-and-forget: no se espera a
+      // la red, para no demorar la venta ni la respuesta de la API.
+      if (creadas.length > 0) {
+        void this.push
+          .enviarAUsuarios(
+            creadas.map((c) => c.userId),
+            tenantId,
+            {
+              title: data.title,
+              body: data.body,
+              url: data.link ?? '/',
+              tag: data.type,
+            },
+          )
+          .catch(() => undefined);
       }
       return creadas;
     } catch {

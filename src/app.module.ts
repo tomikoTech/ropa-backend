@@ -41,6 +41,7 @@ import { PromotersModule } from './promoters/promoters.module.js';
 import { InternalRequestsModule } from './internal-requests/internal-requests.module.js';
 import { AssistantModule } from './assistant/assistant.module.js';
 import { NotificationsModule } from './notifications/notifications.module.js';
+import { PushModule } from './push/push.module.js';
 import { AuditInterceptor } from './audit/audit.interceptor.js';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard.js';
 import { AccessModule } from './access/access.module.js';
@@ -103,6 +104,7 @@ import { WarehouseScopeGuard } from './access/warehouse-scope.guard.js';
     InternalRequestsModule,
     AssistantModule,
     NotificationsModule,
+    PushModule,
   ],
   providers: [
     // Va PRIMERO: frenar por IP antes de resolver el JWT o tocar la base. Un

@@ -4,6 +4,7 @@ import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
 import { InternalRequest } from '../internal-requests/entities/internal-request.entity.js';
 import { InternalRequestItem } from '../internal-requests/entities/internal-request-item.entity.js';
 import { ReposicionAutomaticaService } from './reposicion-automatica.service.js';
+import { NotificationsModule } from '../notifications/notifications.module.js';
 
 /**
  * La reposición que se pide sola, en su propio módulo.
@@ -20,6 +21,7 @@ import { ReposicionAutomaticaService } from './reposicion-automatica.service.js'
       InternalRequest,
       InternalRequestItem,
     ]),
+    NotificationsModule,
   ],
   providers: [ReposicionAutomaticaService],
   exports: [ReposicionAutomaticaService],

@@ -4,6 +4,7 @@ import { Notification } from './entities/notification.entity.js';
 import { User } from '../users/entities/user.entity.js';
 import { NotificationsController } from './notifications.controller.js';
 import { NotificationsService } from './notifications.service.js';
+import { PushModule } from '../push/push.module.js';
 
 /**
  * Centro de notificaciones. Exporta el servicio para que otros módulos
@@ -11,7 +12,7 @@ import { NotificationsService } from './notifications.service.js';
  * la campanita del front.
  */
 @Module({
-  imports: [TypeOrmModule.forFeature([Notification, User])],
+  imports: [TypeOrmModule.forFeature([Notification, User]), PushModule],
   controllers: [NotificationsController],
   providers: [NotificationsService],
   exports: [NotificationsService],

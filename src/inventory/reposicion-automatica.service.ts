@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { EntityManager } from 'typeorm';
+import { NotificationsService } from '../notifications/notifications.service.js';
 import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
 import {
   InternalRequest,
@@ -32,6 +33,8 @@ import {
 @Injectable()
 export class ReposicionAutomaticaService {
   private readonly log = new Logger(ReposicionAutomaticaService.name);
+
+  constructor(private readonly notifications: NotificationsService) {}
 
   /**
    * Revisa un punto (variante y bodega) y pide si toca.
@@ -198,6 +201,24 @@ export class ReposicionAutomaticaService {
           tenantId: punto.tenantId,
         }),
       );
+
+      // Faltantes: se creó una nueva solicitud automática. Aviso a los admins,
+      // una sola vez por solicitud (las siguientes tallas se acumulan en esta).
+      // Fire-and-forget: no demora la venta y no la tumba si algo falla.
+      const nueva = solicitud;
+      void (async () => {
+        const admins = await this.notifications.idsDeAdmins(
+          punto.tenantId,
+          punto.usuarioId,
+        );
+        await this.notifications.crearPara(admins, punto.tenantId, {
+          type: 'low_stock',
+          title: `Faltantes — ${nueva.requestNumber}`,
+          body: 'Un local se quedó corto y el sistema ya armó qué reponer. Revisa y prepáralo.',
+          link: '/internal-requests',
+          dedupeKey: `low:${nueva.id}`,
+        });
+      })().catch(() => undefined);
     }
 
     const existente = await itemRepo.findOne({
