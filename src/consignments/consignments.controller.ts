@@ -18,6 +18,7 @@ import {
 import { ConsignmentsService } from './consignments.service.js';
 import { CreateConsignmentDto } from './dto/create-consignment.dto.js';
 import { UpdateConsignmentDto } from './dto/update-consignment.dto.js';
+import { CreateConsignmentPaymentDto } from './dto/create-consignment-payment.dto.js';
 import { TenantId } from '../common/decorators/tenant-id.decorator.js';
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
 import { AccessService } from '../access/access.service.js';
@@ -81,6 +82,7 @@ export class ConsignmentsController {
   @ApiQuery({ name: 'thirdParty', required: false })
   @ApiQuery({ name: 'clientPaid', required: false })
   @ApiQuery({ name: 'supplierPaid', required: false })
+  @ApiQuery({ name: 'paymentMethod', required: false })
   @ApiQuery({ name: 'page', required: false })
   @ApiQuery({ name: 'limit', required: false })
   @ApiQuery({ name: 'search', required: false })
@@ -93,6 +95,7 @@ export class ConsignmentsController {
     @Query('thirdParty') thirdParty?: string,
     @Query('clientPaid') clientPaid?: string,
     @Query('supplierPaid') supplierPaid?: string,
+    @Query('paymentMethod') paymentMethod?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('search') search?: string,
@@ -105,6 +108,7 @@ export class ConsignmentsController {
       clientPaid: clientPaid === undefined ? undefined : clientPaid === 'true',
       supplierPaid:
         supplierPaid === undefined ? undefined : supplierPaid === 'true',
+      paymentMethod: paymentMethod || undefined,
       page,
       limit,
       search,
@@ -181,5 +185,27 @@ export class ConsignmentsController {
   @ApiOperation({ summary: 'Eliminar venta de tercero' })
   remove(@Param('id', ParseUUIDPipe) id: string, @TenantId() tenantId: string) {
     return this.service.remove(id, tenantId);
+  }
+
+  @Get(':id/payments')
+  @ApiOperation({ summary: 'Abonos de una venta de tercero (historial)' })
+  abonos(
+    @Param('id', ParseUUIDPipe) id: string,
+    @TenantId() tenantId: string,
+  ) {
+    return this.service.abonosDe(id, tenantId);
+  }
+
+  @Post(':id/payments')
+  @ApiOperation({
+    summary: 'Abonar a una venta de tercero (parcial, cliente o tercero)',
+  })
+  abonar(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreateConsignmentPaymentDto,
+    @TenantId() tenantId: string,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.service.abonar(id, dto, tenantId, user.id);
   }
 }
