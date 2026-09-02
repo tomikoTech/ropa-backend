@@ -200,6 +200,10 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       consignments: RCE,
       // Para poder decir a quien le vendio.
       clients: RC,
+      // Gastos: el revendedor también tiene costos (transporte, bolsas…) y
+      // quiere su utilidad **neta**. El módulo no exige bodega ni banco
+      // (ambos opcionales), así que le sirve sin inventario.
+      expenses: RCE,
     }),
   },
   {

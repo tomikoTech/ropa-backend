@@ -78,7 +78,14 @@ describe('catálogo de módulos', () => {
     // muestran. Que sí hace algo lo comprueban las dos pruebas de abajo, para
     // que esta excepción no se vuelva el hueco por donde entra un permiso
     // muerto.
-    const sinRutaPropia = [MODULO_PANTALLA_SIMPLE, MODULO_POS_TERCEROS];
+    // `vender-en-cero` tampoco tiene ruta propia: es un permiso que el POS
+    // consulta en línea (¿puede vender a precio cero?), no un módulo con su
+    // controlador. Como `vender` y `pos-terceros`, gobierna una conducta.
+    const sinRutaPropia = [
+      MODULO_PANTALLA_SIMPLE,
+      MODULO_POS_TERCEROS,
+      'vender-en-cero',
+    ];
     const huerfanos = MODULE_KEYS.filter(
       (k) => !alcanzados.has(k) && !sinRutaPropia.includes(k),
     );

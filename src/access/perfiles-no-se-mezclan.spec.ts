@@ -72,8 +72,13 @@ describe('lo que puede el revendedor', () => {
    * La lista completa, escrita a mano. Si manana alguien le agrega uno, esta
    * prueba lo dice y obliga a preguntarse si de verdad lo necesita.
    */
-  it('tiene exactamente tres modulos, y estos', () => {
-    expect(concedidos).toEqual(['clients', 'consignments', 'pos-terceros']);
+  it('tiene exactamente estos modulos', () => {
+    expect(concedidos).toEqual([
+      'clients',
+      'consignments',
+      'expenses',
+      'pos-terceros',
+    ]);
   });
 
   it('y en ninguno puede borrar', () => {

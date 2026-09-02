@@ -43,6 +43,12 @@ const SIN_MODULO_A_PROPOSITO = new Set([
   'payments',
   'uploads',
   'notifications',
+  // Suscripción de dispositivos al push: por usuario, no es un módulo con
+  // permisos (cualquiera registra su propio celular para recibir avisos).
+  'push',
+  // Pintoso: chat informativo que no expone plata ni escribe nada; no es un
+  // módulo con permisos.
+  'assistant',
   'tutoriales',
 ]);
 
