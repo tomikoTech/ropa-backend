@@ -5,8 +5,9 @@
 -- plantilla incluyera `expenses` no tiene esa fila en role_permissions, y por
 -- eso el frontend dice «tu rol no tiene permiso de Ver en Egresos y caja menor».
 --
--- Este script solo AGREGA/CORRIGE la fila (role_id, 'expenses') con ver+crear+
--- editar (sin borrar), igual que la plantilla. Es idempotente: correrlo dos
+-- Este script solo AGREGA/CORRIGE la fila (role_id, 'expenses') con control
+-- total (ver+crear+editar+borrar): el revendedor maneja sus propias finanzas
+-- y corrige un gasto o tipo mal digitado. Es idempotente: correrlo dos
 -- veces no cambia nada. No toca ningún otro módulo ni ningún otro rol.
 --
 -- Uso (desde tu terminal, con la URL pública de prod):
@@ -24,12 +25,12 @@ WHERE r.template_key = 'revendedor'
 INSERT INTO role_permissions
   (id, role_id, tenant_id, module, can_list, can_create, can_edit, can_delete)
 SELECT
-  gen_random_uuid(), r.id, r.tenant_id, 'expenses', true, true, true, false
+  gen_random_uuid(), r.id, r.tenant_id, 'expenses', true, true, true, true
 FROM access_roles r
 WHERE r.template_key = 'revendedor'
    OR r.name = 'Revendedor (persona natural)'
 ON CONFLICT (role_id, module) DO UPDATE
-  SET can_list = true, can_create = true, can_edit = true;
+  SET can_list = true, can_create = true, can_edit = true, can_delete = true;
 
 -- 3) Ver el resultado.
 SELECT r.name, p.module, p.can_list, p.can_create, p.can_edit, p.can_delete

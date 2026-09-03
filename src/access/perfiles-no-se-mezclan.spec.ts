@@ -81,8 +81,15 @@ describe('lo que puede el revendedor', () => {
     ]);
   });
 
-  it('y en ninguno puede borrar', () => {
-    expect(perfil.permissions.filter((p) => p.delete)).toEqual([]);
+  // Antes no podía borrar en nada (el patrón general es *Inactivar*, no
+  // *Borrar*). La única excepción, deliberada, es Egresos: el revendedor es su
+  // propio negocio y corrige un gasto o un tipo mal digitado sin depender de un
+  // administrador. Todo lo demás sigue sin borrar.
+  it('solo puede borrar en Egresos, y en ningún otro módulo', () => {
+    const conBorrado = perfil.permissions
+      .filter((p) => p.delete)
+      .map((p) => p.module);
+    expect(conBorrado).toEqual(['expenses']);
   });
 
   /**

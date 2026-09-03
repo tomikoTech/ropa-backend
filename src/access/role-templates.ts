@@ -202,8 +202,11 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       clients: RC,
       // Gastos: el revendedor también tiene costos (transporte, bolsas…) y
       // quiere su utilidad **neta**. El módulo no exige bodega ni banco
-      // (ambos opcionales), así que le sirve sin inventario.
-      expenses: RCE,
+      // (ambos opcionales), así que le sirve sin inventario. Aquí SÍ puede
+      // borrar (ALL), a diferencia de los demás roles: es su propio negocio,
+      // y un gasto o un tipo mal digitado lo corrige él, no un administrador
+      // que no existe. La excepción está fijada en perfiles-no-se-mezclan.spec.
+      expenses: ALL,
     }),
   },
   {
