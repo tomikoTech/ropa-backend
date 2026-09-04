@@ -123,4 +123,90 @@ describe('AuthService', () => {
       ).rejects.toThrow(UnauthorizedException);
     });
   });
+
+  describe('refreshTokens', () => {
+    const enUnMinuto = () => new Date(Date.now() + 60_000);
+
+    it('rota un token válido y revoca el viejo con marca de tiempo', async () => {
+      const entity = {
+        token: 'r1',
+        user: mockUser,
+        expiresAt: enUnMinuto(),
+        isRevoked: false,
+        revokedAt: null as Date | null,
+      };
+      refreshTokenRepository.findOne!.mockResolvedValue(entity);
+
+      const result = await service.refreshTokens('r1');
+
+      expect(result).toHaveProperty('accessToken');
+      expect(result).toHaveProperty('refreshToken');
+      expect(entity.isRevoked).toBe(true);
+      expect(entity.revokedAt).toBeInstanceOf(Date);
+      expect(refreshTokenRepository.save).toHaveBeenCalledWith(entity);
+    });
+
+    it('rechaza un token inexistente', async () => {
+      refreshTokenRepository.findOne!.mockResolvedValue(null);
+      await expect(service.refreshTokens('nope')).rejects.toThrow(
+        UnauthorizedException,
+      );
+    });
+
+    it('rechaza un token expirado', async () => {
+      refreshTokenRepository.findOne!.mockResolvedValue({
+        token: 'r1',
+        user: mockUser,
+        expiresAt: new Date(Date.now() - 1000),
+        isRevoked: false,
+        revokedAt: null,
+      });
+      await expect(service.refreshTokens('r1')).rejects.toThrow(
+        UnauthorizedException,
+      );
+    });
+
+    it('acepta un token revocado hace segundos (gracia): la sesión no se cae por una carrera', async () => {
+      const entity = {
+        token: 'r1',
+        user: mockUser,
+        expiresAt: enUnMinuto(),
+        isRevoked: true,
+        revokedAt: new Date(Date.now() - 5_000), // 5 s atrás, dentro de la gracia
+      };
+      refreshTokenRepository.findOne!.mockResolvedValue(entity);
+
+      const result = await service.refreshTokens('r1');
+
+      expect(result).toHaveProperty('accessToken');
+      // No se vuelve a revocar (ya lo estaba): no se guarda el mismo token.
+      expect(refreshTokenRepository.save).not.toHaveBeenCalledWith(entity);
+    });
+
+    it('rechaza un token revocado hace rato (fuera de la gracia)', async () => {
+      refreshTokenRepository.findOne!.mockResolvedValue({
+        token: 'r1',
+        user: mockUser,
+        expiresAt: enUnMinuto(),
+        isRevoked: true,
+        revokedAt: new Date(Date.now() - 5 * 60_000), // 5 min atrás
+      });
+      await expect(service.refreshTokens('r1')).rejects.toThrow(
+        UnauthorizedException,
+      );
+    });
+
+    it('rechaza un token revocado por cierre de sesión (sin revokedAt)', async () => {
+      refreshTokenRepository.findOne!.mockResolvedValue({
+        token: 'r1',
+        user: mockUser,
+        expiresAt: enUnMinuto(),
+        isRevoked: true,
+        revokedAt: null, // logout revoca sin marca → no entra en la gracia
+      });
+      await expect(service.refreshTokens('r1')).rejects.toThrow(
+        UnauthorizedException,
+      );
+    });
+  });
 });

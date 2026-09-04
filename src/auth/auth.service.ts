@@ -46,18 +46,50 @@ export class AuthService {
     return this.generateTokens(user);
   }
 
+  /**
+   * Cuántos milisegundos después de rotar un refresh token se sigue aceptando.
+   *
+   * El refresh es de un solo uso: al usarlo se revoca y se emite uno nuevo. Pero
+   * el POS abre varias pestañas/dispositivos y, cuando el access token vence, se
+   * dispara más de un refresh a la vez; además una respuesta de refresh se puede
+   * perder por red justo después de que el servidor ya revocó el viejo. En esos
+   * casos el cliente se queda con un token recién revocado y, sin gracia, el
+   * siguiente intento lo sacaría a login **sin haber hecho nada malo**. Con la
+   * gracia, un token rotado hace pocos segundos todavía refresca; uno viejo no.
+   */
+  private static readonly GRACIA_ROTACION_MS = 60_000;
+
   async refreshTokens(refreshToken: string) {
+    // Se busca sin filtrar por `is_revoked`: hace falta distinguir "no existe"
+    // de "revocado hace un momento" (gracia) de "revocado hace rato" (fuera).
     const tokenEntity = await this.refreshTokenRepository.findOne({
-      where: { token: refreshToken, isRevoked: false },
+      where: { token: refreshToken },
       relations: ['user'],
     });
 
-    if (!tokenEntity || tokenEntity.expiresAt < new Date()) {
+    const ahora = new Date();
+    if (!tokenEntity || tokenEntity.expiresAt < ahora) {
       throw new UnauthorizedException('Refresh token inválido o expirado');
     }
 
-    // Revoke old token
+    if (tokenEntity.isRevoked) {
+      // Solo entra a la gracia lo revocado por ROTACIÓN (tiene `revokedAt`).
+      // Un token revocado por cierre de sesión no tiene `revokedAt` → se
+      // rechaza: cerrar sesión debe llevar a login de verdad.
+      const revocadoHaceMs = tokenEntity.revokedAt
+        ? ahora.getTime() - new Date(tokenEntity.revokedAt).getTime()
+        : Infinity;
+      if (revocadoHaceMs > AuthService.GRACIA_ROTACION_MS) {
+        throw new UnauthorizedException('Refresh token inválido o expirado');
+      }
+      // Dentro de la gracia: no se vuelve a revocar (ya lo está); se emite un
+      // par nuevo para que la sesión siga viva.
+      return this.generateTokens(tokenEntity.user);
+    }
+
+    // Rotación normal: revocar el viejo (con marca de tiempo para la gracia).
     tokenEntity.isRevoked = true;
+    tokenEntity.revokedAt = ahora;
     await this.refreshTokenRepository.save(tokenEntity);
 
     return this.generateTokens(tokenEntity.user);
