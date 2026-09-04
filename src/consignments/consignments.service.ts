@@ -462,6 +462,8 @@ export class ConsignmentsService {
     to?: string,
   ): Promise<{
     count: number;
+    /** Suma de la columna Cantidad: cuántas unidades se vendieron en el rango. */
+    totalQuantity: number;
     totalSale: number;
     totalCost: number;
     totalProfit: number;
@@ -499,6 +501,7 @@ export class ConsignmentsService {
 
     let totalSale = 0;
     let totalCost = 0;
+    let totalQuantity = 0;
     let owedByClients = 0;
     let owedToThirdParties = 0;
     const byTp = new Map<
@@ -520,6 +523,7 @@ export class ConsignmentsService {
       );
       totalSale += sale;
       totalCost += cost;
+      totalQuantity += qty;
       owedByClients += aPesos(cuentas.saldoClienteCents);
       owedToThirdParties += aPesos(cuentas.saldoTerceroCents);
       const key = r.thirdPartyName || '(sin nombre)';
@@ -544,6 +548,7 @@ export class ConsignmentsService {
 
     return {
       count: rows.length,
+      totalQuantity,
       totalSale,
       totalCost,
       totalProfit: totalSale - totalCost,
