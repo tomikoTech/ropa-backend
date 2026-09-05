@@ -126,6 +126,15 @@ export class UpdateStoreSettingsDto {
   invoiceThankYouNote?: string;
 
   @ApiPropertyOptional({
+    description:
+      'Mostrar el código del producto bajo su nombre en la factura del cliente.',
+    example: true,
+  })
+  @IsOptional()
+  @IsBoolean()
+  invoiceShowCodes?: boolean;
+
+  @ApiPropertyOptional({
     type: [String],
     example: [
       'pos',

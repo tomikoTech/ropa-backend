@@ -319,6 +319,12 @@ export class StoreSettings extends TenantAwareEntity {
   @Column({ name: 'invoice_thank_you_note', type: 'text', nullable: true })
   invoiceThankYouNote: string | null;
 
+  // ¿Se imprime el código del producto bajo su nombre en la factura del
+  // cliente? Encendido por defecto (cierra la trazabilidad del papel). Distri
+  // Amber lo apaga: en su factura el cliente solo debe ver el nombre.
+  @Column({ name: 'invoice_show_codes', type: 'boolean', default: true })
+  invoiceShowCodes: boolean;
+
   // Módulos (keys de nav) que puede ver el rol COLABORADOR. null = default.
   @Column({ name: 'collaborator_modules', type: 'jsonb', nullable: true })
   collaboratorModules: string[] | null;

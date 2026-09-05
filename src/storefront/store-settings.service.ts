@@ -100,6 +100,8 @@ export class StoreSettingsService {
       settings.invoiceDueNote = dto.invoiceDueNote;
     if (dto.invoiceThankYouNote !== undefined)
       settings.invoiceThankYouNote = dto.invoiceThankYouNote;
+    if (dto.invoiceShowCodes !== undefined)
+      settings.invoiceShowCodes = dto.invoiceShowCodes;
     if (dto.collaboratorModules !== undefined)
       settings.collaboratorModules = dto.collaboratorModules;
     if (dto.frascoAutoManaged !== undefined)
