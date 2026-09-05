@@ -29,6 +29,19 @@ export interface VentaLike {
   /** Costo unitario (lo que le debes al tercero), en pesos. */
   costPrice: number;
   quantity: number;
+  /**
+   * Marca "saldado" heredada (los booleanos viejos `client_paid` /
+   * `supplier_paid`). Se usa **solo como respaldo cuando ese lado no tiene
+   * ningún abono**: una venta marcada como pagada pero sin abono registrado
+   * cuenta como saldada, no como deuda. Si hay abonos, ellos mandan y el
+   * booleano se ignora.
+   *
+   * Por qué hace falta: al migrar a abonos, una venta creada como "pagada al
+   * tercero" pero sin abono quedaba con saldo = costo → inflaba el "Debes a
+   * terceros" con deuda fantasma (visto en amawad: $75.000 de una sola venta).
+   */
+  clientPaid?: boolean;
+  supplierPaid?: boolean;
 }
 
 export interface CuentasDeVenta {
@@ -62,11 +75,23 @@ export function cuentasDeVenta(
 
   let cobradoClienteCents = 0;
   let pagadoTerceroCents = 0;
+  let hayAbonoCliente = false;
+  let hayAbonoTercero = false;
   for (const a of abonos) {
     const c = aCentavos(a.amount);
-    if (a.lado === 'CLIENT') cobradoClienteCents += c;
-    else if (a.lado === 'SUPPLIER') pagadoTerceroCents += c;
+    if (a.lado === 'CLIENT') {
+      cobradoClienteCents += c;
+      hayAbonoCliente = true;
+    } else if (a.lado === 'SUPPLIER') {
+      pagadoTerceroCents += c;
+      hayAbonoTercero = true;
+    }
   }
+
+  // Respaldo del booleano viejo: solo cuando ese lado no tiene abonos. Marcada
+  // pagada sin abono ⇒ saldada (no deuda). Con abonos, ellos mandan.
+  if (!hayAbonoCliente && venta.clientPaid) cobradoClienteCents = totalVentaCents;
+  if (!hayAbonoTercero && venta.supplierPaid) pagadoTerceroCents = totalCostoCents;
 
   const saldoClienteCents = Math.max(0, totalVentaCents - cobradoClienteCents);
   const saldoTerceroCents = Math.max(0, totalCostoCents - pagadoTerceroCents);

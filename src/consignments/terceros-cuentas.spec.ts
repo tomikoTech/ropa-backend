@@ -53,6 +53,32 @@ describe('cuentasDeVenta', () => {
     expect(c.saldoTerceroCents).toBe(aCentavos(30000));
     expect(c.supplierPaid).toBe(false);
   });
+
+  // Respaldo del booleano viejo: una venta marcada pagada pero SIN abono no es
+  // deuda (era la "deuda fantasma" que inflaba el "Debes a terceros" de amawad).
+  it('supplierPaid sin abonos: saldo del tercero en cero (no deuda fantasma)', () => {
+    const c = cuentasDeVenta({ ...venta, supplierPaid: true }, []);
+    expect(c.saldoTerceroCents).toBe(0);
+    expect(c.supplierPaid).toBe(true);
+    // El lado del cliente no se toca: sigue debiendo todo.
+    expect(c.saldoClienteCents).toBe(aCentavos(100000));
+  });
+
+  it('clientPaid sin abonos: saldo del cliente en cero', () => {
+    const c = cuentasDeVenta({ ...venta, clientPaid: true }, []);
+    expect(c.saldoClienteCents).toBe(0);
+    expect(c.clientPaid).toBe(true);
+  });
+
+  it('si hay abonos, mandan los abonos y se ignora el booleano', () => {
+    // Marcada pagada al tercero, pero con un abono parcial: el saldo sale del
+    // abono, no del booleano.
+    const c = cuentasDeVenta({ ...venta, supplierPaid: true }, [
+      { lado: 'SUPPLIER', amount: 20000, method: 'EFECTIVO' },
+    ]);
+    expect(c.saldoTerceroCents).toBe(aCentavos(40000)); // 60.000 - 20.000
+    expect(c.supplierPaid).toBe(false);
+  });
 });
 
 describe('saldoDelLado', () => {
