@@ -611,6 +611,13 @@ export class PosService {
             boxContents,
             quantity: data.quantity,
             unitPrice: data.lineCalc.unitPrice,
+            // Precio de lista (catálogo) al momento de la venta: override de la
+            // variante o precio base. Snapshot para el "descuento incluido" de
+            // la factura. null si no hay precio de lista → no se calcula.
+            listUnitPrice:
+              data.variant.priceOverride != null
+                ? Number(data.variant.priceOverride)
+                : Number(data.variant.product.basePrice) || null,
             unitCost,
             stockUnitId: soldUnit?.id ?? null,
             promoterId: data.promoter?.id ?? null,
@@ -1812,6 +1819,14 @@ export class PosService {
                   previous !== undefined
                     ? Number(previous.unitCost)
                     : Number(variant.product.costPrice) || 0,
+                // Precio de lista: conservar el snapshot si la línea ya existía;
+                // si es nueva, el del catálogo (override o base).
+                listUnitPrice:
+                  previous?.listUnitPrice != null
+                    ? Number(previous.listUnitPrice)
+                    : variant.priceOverride != null
+                      ? Number(variant.priceOverride)
+                      : Number(variant.product.basePrice) || null,
                 stockUnitId: keptStockUnitId,
                 // Qué era esa línea —caja o par— y con qué surtido: se
                 // conserva junto al código físico. Si se perdiera, editar el

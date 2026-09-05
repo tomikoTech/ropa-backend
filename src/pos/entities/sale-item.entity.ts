@@ -126,6 +126,22 @@ export class SaleItem extends TenantAwareEntity {
   })
   unitPrice: number;
 
+  /**
+   * Precio de lista al momento de la venta (el del catálogo: override de la
+   * variante o precio base del producto). Snapshot, como el costo: sirve para
+   * mostrar en la factura el descuento incluido (lista − cobrado) aunque se
+   * haya vendido a un precio fijo negociado. `null` = no había precio de lista;
+   * en ese caso no se calcula descuento.
+   */
+  @Column({
+    name: 'list_unit_price',
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+    nullable: true,
+  })
+  listUnitPrice: number | null;
+
   @Column({
     name: 'discount_percent',
     type: 'decimal',
