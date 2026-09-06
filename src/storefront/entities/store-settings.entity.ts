@@ -319,6 +319,15 @@ export class StoreSettings extends TenantAwareEntity {
   @Column({ name: 'invoice_thank_you_note', type: 'text', nullable: true })
   invoiceThankYouNote: string | null;
 
+  /**
+   * El diseño de la etiqueta impresa, tal como lo dejó el panel visual:
+   * tamaño, qué campos salen, en qué orden y cuánto ocupa cada uno. Se guarda
+   * como viene del editor (`{ caja: {...}, par: {...} }`); si es `null` se usa
+   * el diseño de fábrica.
+   */
+  @Column({ name: 'label_design', type: 'jsonb', nullable: true })
+  labelDesign: unknown | null;
+
   // ¿Se imprime el código del producto bajo su nombre en la factura del
   // cliente? Encendido por defecto (cierra la trazabilidad del papel). Distri
   // Amber lo apaga: en su factura el cliente solo debe ver el nombre.

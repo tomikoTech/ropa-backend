@@ -126,6 +126,12 @@ export class UpdateStoreSettingsDto {
   invoiceThankYouNote?: string;
 
   @ApiPropertyOptional({
+    description: 'Diseño de la etiqueta impresa (panel visual), por tienda.',
+  })
+  @IsOptional()
+  labelDesign?: unknown;
+
+  @ApiPropertyOptional({
     description:
       'Mostrar el código del producto bajo su nombre en la factura del cliente.',
     example: true,
