@@ -47,4 +47,25 @@ describe('puedeReajustarPorCaja', () => {
       ),
     ).toBe(true);
   });
+
+  // El bug de amawad: orden nueva vacía → cuenta en cero con isPaid=true
+  // trivial, pero SIN pagos reales. Agregar la primera caja (0 → 4512) no se
+  // puede bloquear: no hay dinero que proteger.
+  it('cuenta en cero marcada pagada (isPaid) pero sin abonos: se permite agregar la primera caja', () => {
+    expect(
+      puedeReajustarPorCaja(
+        { amount: 0, paidAmount: 0, isPaid: true },
+        4512,
+      ),
+    ).toBe(true);
+  });
+
+  it('una baja con abonos reales sí se bloquea aunque isPaid sea false', () => {
+    expect(
+      puedeReajustarPorCaja(
+        { amount: 100, paidAmount: 40, isPaid: false },
+        80,
+      ),
+    ).toBe(false);
+  });
 });

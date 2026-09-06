@@ -24,7 +24,11 @@ export function puedeReajustarPorCaja(
   if (!cuenta) return true; // sin cuenta por pagar, nada que proteger
   const cambia = Number(cuenta.amount) !== nuevoTotal;
   if (!cambia) return true;
-  const tienePagos = cuenta.isPaid || Number(cuenta.paidAmount) > 0;
-  if (!tienePagos) return true; // sin pagos, se puede subir o bajar
+  // "Tiene pagos" se mide por dinero abonado de verdad, NO por el flag isPaid:
+  // una cuenta en cero (orden vacía recién creada) queda con isPaid=true
+  // trivialmente (0 ≥ 0), y eso hacía que agregar la primera caja se bloqueara
+  // como si "ya tuviera pagos" —el bug de amawad en una orden nueva—.
+  const tienePagos = Number(cuenta.paidAmount) > 0;
+  if (!tienePagos) return true; // sin pagos reales, se puede subir o bajar
   return nuevoTotal >= Number(cuenta.amount); // con pagos: solo aumentos
 }
