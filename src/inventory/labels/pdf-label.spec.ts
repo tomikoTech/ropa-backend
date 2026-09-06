@@ -42,6 +42,17 @@ describe('buildLabelsPdf (lo que sale a la impresora)', () => {
     expect(buf.length).toBeGreaterThan(500);
   });
 
+  it('sin tamaño, la CAJA sale más cuadrada (50x40) y el PAR más alargado (58x30)', async () => {
+    const bc = await buildLabelsPdf([caja]); // auto
+    const bp = await buildLabelsPdf([par]); // auto
+    const mbc = mediaBox(bc)!;
+    const mbp = mediaBox(bp)!;
+    expect(mbc.w).toBeCloseTo(pt(50), 0);
+    expect(mbc.h).toBeCloseTo(pt(40), 0);
+    expect(mbp.w).toBeCloseTo(pt(58), 0);
+    expect(mbp.h).toBeCloseTo(pt(30), 0);
+  });
+
   it('funciona sin logo', async () => {
     const buf = await buildLabelsPdf([par], { widthMm: 58, heightMm: 30, logoPng: null });
     expect(buf.slice(0, 5).toString()).toBe('%PDF-');

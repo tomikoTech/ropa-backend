@@ -17,19 +17,36 @@ export interface PdfLabelOptions {
   logoPng?: Buffer | null;
 }
 
+/**
+ * Tamaños por defecto **adivinados** de las fotos del cliente / demachine,
+ * cuando no se fuerza uno: la CAJA sale más cuadrada y el PAR más alargado.
+ * (No sabemos la medida exacta del rollo; el operario puede forzar otra con el
+ * selector.)
+ */
+const DEFAULT_CAJA = { widthMm: 50, heightMm: 40 };
+const DEFAULT_PAR = { widthMm: 58, heightMm: 30 };
+
 export function buildLabelsPdf(
   labels: LabelData[],
   options: PdfLabelOptions = {},
 ): Promise<Buffer> {
-  const widthMm = options.widthMm ?? 50;
-  const heightMm = options.heightMm ?? 25;
   const logo = options.logoPng ?? null;
+  // Si el operario forzó un tamaño (selector), ese manda para todas. Si no, se
+  // decide por página según sea caja o par.
+  const forzado =
+    options.widthMm != null && options.heightMm != null
+      ? { widthMm: options.widthMm, heightMm: options.heightMm }
+      : null;
+  const tamDe = (label: LabelData) =>
+    forzado ?? (label.isBox ? DEFAULT_CAJA : DEFAULT_PAR);
 
   const mm = (v: number) => (v * 72) / 25.4; // milímetros a puntos PDF
-  const width = mm(widthMm);
-  const height = mm(heightMm);
 
-  const doc = new PDFDocument({ size: [width, height], margin: 0, autoFirstPage: false });
+  const doc = new PDFDocument({
+    size: [mm(DEFAULT_CAJA.widthMm), mm(DEFAULT_CAJA.heightMm)],
+    margin: 0,
+    autoFirstPage: false,
+  });
   const chunks: Buffer[] = [];
   doc.on('data', (c: Buffer) => chunks.push(c));
   const done = new Promise<Buffer>((resolve) => {
@@ -55,7 +72,8 @@ export function buildLabelsPdf(
   const fontPt = (fontMm: number) => mm(fontMm / 0.72);
 
   for (const label of labels) {
-    doc.addPage({ size: [width, height], margin: 0 });
+    const { widthMm, heightMm } = tamDe(label);
+    doc.addPage({ size: [mm(widthMm), mm(heightMm)], margin: 0 });
 
     const lay = computeLabelLayout({
       widthMm,
