@@ -58,6 +58,17 @@ export class PurchaseBoxesController {
     return this.boxes.findLines(id, tenantId);
   }
 
+  @Get(':id/label-units')
+  @ApiOperation({
+    summary: 'IDs de los códigos (unidades) de la compra, para imprimir etiquetas',
+  })
+  async labelUnits(
+    @Param('id', ParseUUIDPipe) id: string,
+    @TenantId() tenantId: string,
+  ) {
+    return { ids: await this.boxes.labelUnitIds(id, tenantId) };
+  }
+
   @Post(':id/box-lines')
   @ApiOperation({ summary: 'Agregar renglón por cajas' })
   addLine(

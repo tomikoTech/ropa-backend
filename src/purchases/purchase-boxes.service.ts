@@ -54,6 +54,25 @@ export class PurchaseBoxesService {
   }
 
   /**
+   * Los códigos (stock_units) que salieron de las cajas de esta compra, para
+   * reimprimir sus etiquetas desde el listado de Compras. Sale de la unidad
+   * física (que se crea al recibir la caja), así que respeta el flujo de
+   * siempre: si una compra aún no se ha recibido, no hay unidades y la lista
+   * viene vacía. Ordenados como salen del rollo (caja, luego par).
+   */
+  async labelUnitIds(orderId: string, tenantId: string): Promise<string[]> {
+    const rows: { id: string }[] = await this.dataSource.query(
+      `SELECT su.id
+         FROM stock_units su
+         JOIN purchase_box_lines bl ON bl.id = su.purchase_box_line_id
+        WHERE bl.purchase_order_id = $1 AND su.tenant_id = $2
+        ORDER BY su.box_sequence NULLS FIRST, su.pair_sequence NULLS FIRST, su.created_at`,
+      [orderId, tenantId],
+    );
+    return rows.map((r) => r.id);
+  }
+
+  /**
    * Las líneas por caja son parte financiera de la misma orden, no un anexo.
    * Mantiene cabecera y cuenta por pagar sincronizadas dentro de la transacción
    * que agrega, importa, modifica o elimina el renglón.
