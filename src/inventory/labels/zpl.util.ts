@@ -20,6 +20,8 @@ export interface LabelData {
   productName: string;
   /** Detalle bajo el nombre: color, talla... */
   detail?: string;
+  /** Talla sola, para mostrarla en GRANDE en la etiqueta del par. */
+  size?: string;
   /** Texto destacado: "CAJA x24", "CAJA 3 · PAR 02"... */
   highlight?: string;
   /** Marca del producto. */

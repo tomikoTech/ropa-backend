@@ -1,11 +1,10 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
-import PDFDocument from 'pdfkit';
 import sharp from 'sharp';
 import { StockUnit, StockUnitKind } from '../entities/stock-unit.entity.js';
 import { buildLabelBatchZpl, LabelData, ZplOptions } from './zpl.util.js';
-import { code128Widths } from './code128.js';
+import { buildLabelsPdf } from './pdf-label.js';
 import { parseStockBarcode } from '../barcode.util.js';
 import { StoreSettings } from '../../storefront/entities/store-settings.entity.js';
 
@@ -89,6 +88,7 @@ export class LabelsService {
           barcode: u.barcode,
           productName: u.product?.name ?? 'Producto',
           detail: detail || undefined,
+          size: u.size?.name || undefined,
           brand: u.product?.brand || undefined,
           reference: u.product?.skuPrefix || undefined,
           desglose: desgloseDelCodigo(u.barcode),
@@ -207,131 +207,10 @@ export class LabelsService {
     const raw = await this.fetchLogo(
       settings?.labelLogoUrl || settings?.logoUrl,
     );
-    const logo = raw ? await this.logoPng(raw) : null;
-
-    const mm = (v: number) => (v * 72) / 25.4; // milímetros a puntos PDF
-    const width = mm(options?.widthMm ?? 50);
-    const height = mm(options?.heightMm ?? 25);
-    const pad = mm(2);
-
-    const doc = new PDFDocument({
-      size: [width, height],
-      margin: 0,
-      autoFirstPage: false,
+    return buildLabelsPdf(labels, {
+      widthMm: options?.widthMm,
+      heightMm: options?.heightMm,
+      logoPng: raw ? await this.logoPng(raw) : null,
     });
-    const chunks: Buffer[] = [];
-    doc.on('data', (c: Buffer) => chunks.push(c));
-    const done = new Promise<Buffer>((resolve) => {
-      doc.on('end', () => resolve(Buffer.concat(chunks)));
-    });
-
-    const drawBarcode = (
-      code: string,
-      x: number,
-      y: number,
-      w: number,
-      h: number,
-    ) => {
-      const widths = code128Widths(code);
-      const total = widths.reduce((a, b) => a + b, 0);
-      const unit = w / total;
-      let cursor = x;
-      doc.fillColor('#000');
-      widths.forEach((moduleWidth, i) => {
-        const bw = moduleWidth * unit;
-        if (i % 2 === 0) doc.rect(cursor, y, bw, h).fill('#000'); // par = barra
-        cursor += bw;
-      });
-    };
-
-    for (const label of labels) {
-      doc.addPage({ size: [width, height], margin: 0 });
-
-      // Cada texto se dibuja en **una sola línea**: `height` de la altura de esa
-      // línea + `ellipsis` es lo que hace que pdfkit recorte con "…" en vez de
-      // envolver a dos renglones (que se montaban unos sobre otros) o, peor,
-      // pasar de página y sacar etiquetas fantasma. `w` guarda para no dibujar
-      // por debajo del borde del rollo.
-      const w = width - pad * 2;
-      const linea = (
-        text: string,
-        x: number,
-        y: number,
-        size: number,
-        opts: { font?: string; color?: string; align?: 'center'; width?: number },
-      ) => {
-        const h = size * 1.35; // alto aproximado de una línea
-        if (y + h > height) return y; // no cabe: se omite antes que desbordar
-        doc
-          .fontSize(size)
-          .font(opts.font ?? 'Helvetica')
-          .fillColor(opts.color ?? '#000')
-          .text(text, x, y, {
-            width: opts.width ?? w,
-            align: opts.align,
-            height: h,
-            lineBreak: false,
-            ellipsis: true,
-          });
-        return y + h;
-      };
-
-      // Logo arriba a la izquierda; el texto arranca a su derecha.
-      const logoSize = Math.min(mm(8), height * 0.32);
-      let textX = pad;
-      if (logo) {
-        try {
-          doc.image(logo, pad, pad, { fit: [logoSize, logoSize] });
-          textX = pad + logoSize + mm(1.5);
-        } catch {
-          // Un logo corrupto no debe impedir imprimir.
-        }
-      }
-      const textW = width - textX - pad;
-
-      // Encabezado: nombre y, debajo, marca · referencia.
-      linea(label.productName, textX, mm(1), 7, {
-        font: 'Helvetica-Bold',
-        width: textW,
-      });
-      const head2 = [label.brand, label.reference && `Ref ${label.reference}`]
-        .filter(Boolean)
-        .join('  ·  ');
-      if (head2) linea(head2, textX, mm(4.6), 5.5, { color: '#444', width: textW });
-
-      // Código de barras grande y centrado en la mitad.
-      const bcY = height * 0.32;
-      const bcH = height * 0.3;
-      drawBarcode(label.barcode, pad, bcY, w, bcH);
-      // Los dígitos debajo: si el símbolo se raya, el operario los teclea.
-      linea(label.barcode, pad, bcY + bcH + mm(0.3), 6, { align: 'center' });
-
-      // Pie: caja/par destacado, y una línea con detalle · desglose · precio.
-      let footY = bcY + bcH + mm(3.2);
-      if (label.highlight) {
-        footY = linea(label.highlight, pad, footY, 7, {
-          font: 'Helvetica-Bold',
-          align: 'center',
-        });
-      }
-      const detalles = [label.detail, label.desglose, label.price]
-        .filter(Boolean)
-        .join('  ·  ');
-      if (detalles) {
-        footY = linea(detalles, pad, footY, 5.5, {
-          color: '#333',
-          align: 'center',
-        });
-      }
-      // La línea libre de la tienda solo cabe en rollos altos; en 25 mm el
-      // guardado de `linea` la omite antes que empujar nada fuera de la etiqueta.
-      if (label.extra) {
-        linea(label.extra, pad, footY, 5, { color: '#666', align: 'center' });
-      }
-      doc.fillColor('#000');
-    }
-
-    doc.end();
-    return done;
   }
 }
