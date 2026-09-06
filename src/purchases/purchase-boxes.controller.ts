@@ -66,7 +66,8 @@ export class PurchaseBoxesController {
     @Param('id', ParseUUIDPipe) id: string,
     @TenantId() tenantId: string,
   ) {
-    return { ids: await this.boxes.labelUnitIds(id, tenantId) };
+    const units = await this.boxes.labelUnits(id, tenantId);
+    return { ids: units.map((u) => u.id), units };
   }
 
   @Post(':id/box-lines')

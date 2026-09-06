@@ -60,16 +60,46 @@ export class PurchaseBoxesService {
    * siempre: si una compra aún no se ha recibido, no hay unidades y la lista
    * viene vacía. Ordenados como salen del rollo (caja, luego par).
    */
-  async labelUnitIds(orderId: string, tenantId: string): Promise<string[]> {
-    const rows: { id: string }[] = await this.dataSource.query(
-      `SELECT su.id
+  async labelUnits(orderId: string, tenantId: string) {
+    const rows: {
+      id: string;
+      barcode: string;
+      kind: string;
+      quantity: number;
+      box_sequence: number | null;
+      pair_sequence: number | null;
+      product_name: string | null;
+      sku_prefix: string | null;
+      color_name: string | null;
+      size_name: string | null;
+    }[] = await this.dataSource.query(
+      `SELECT su.id, su.barcode, su.kind, su.quantity,
+              su.box_sequence, su.pair_sequence,
+              p.name AS product_name, p.sku_prefix,
+              c.name AS color_name, sz.name AS size_name
          FROM stock_units su
          JOIN purchase_box_lines bl ON bl.id = su.purchase_box_line_id
+         LEFT JOIN product_variants v ON v.id = su.variant_id
+         LEFT JOIN products p ON p.id = COALESCE(su.product_id, v.product_id)
+         LEFT JOIN colors c ON c.id = v.color_id
+         LEFT JOIN sizes sz ON sz.id = v.size_id
         WHERE bl.purchase_order_id = $1 AND su.tenant_id = $2
         ORDER BY su.box_sequence NULLS FIRST, su.pair_sequence NULLS FIRST, su.created_at`,
       [orderId, tenantId],
     );
-    return rows.map((r) => r.id);
+    // La misma forma que devuelve la búsqueda de bultos, para que el frontend
+    // los imprima con el renderizador compartido sin traducciones aparte.
+    return rows.map((r) => ({
+      id: r.id,
+      barcode: r.barcode,
+      kind: r.kind as 'BOX' | 'UNIT',
+      quantity: Number(r.quantity) || 0,
+      boxSequence: r.box_sequence,
+      pairSequence: r.pair_sequence,
+      product: { name: r.product_name ?? 'Producto', skuPrefix: r.sku_prefix },
+      color: r.color_name ? { name: r.color_name } : null,
+      size: r.size_name ? { name: r.size_name } : null,
+    }));
   }
 
   /**
