@@ -27,6 +27,7 @@ import {
   readPurchaseBoxImport,
 } from './purchase-box-import.util.js';
 import { diaDeCalendario } from '../common/utils/dia-de-calendario.util.js';
+import { puedeReajustarPorCaja } from './ajuste-de-caja.js';
 
 @Injectable()
 export class PurchaseBoxesService {
@@ -61,7 +62,6 @@ export class PurchaseBoxesService {
     manager: EntityManager,
     orderId: string,
     tenantId: string,
-    options?: { allowPayableIncreaseAfterPayment?: boolean },
   ): Promise<void> {
     const orderRepo = manager.getRepository(PurchaseOrder);
     const order = await orderRepo
@@ -109,16 +109,16 @@ export class PurchaseBoxesService {
           : round(subtotal * (rate / 100));
     const total = included ? round(gross) : round(subtotal + taxAmount);
 
-    const payableChanged = payable && Number(payable.amount) !== total;
-    const payableHasPayments =
-      payable && (payable.isPaid || Number(payable.paidAmount) > 0);
-    const isAllowedIncrease =
-      options?.allowPayableIncreaseAfterPayment === true &&
-      payable &&
-      total >= Number(payable.amount);
-    if (payableChanged && payableHasPayments && !isAllowedIncrease) {
+    // Un AUMENTO nunca invalida un abono: solo se debe más. Por eso se permite
+    // siempre, aunque la cuenta ya tenga pagos (agregar una caja es un aumento,
+    // y antes se caía sin razón). Lo que se bloquea es una BAJA con pagos: haría
+    // que la cuenta debiera menos de lo ya abonado. La regla es pura y probada
+    // en `ajuste-de-caja.spec`.
+    const esAumento = !!payable && total >= Number(payable.amount);
+    if (!puedeReajustarPorCaja(payable, total)) {
       throw new BadRequestException(
-        'No se pueden cambiar los valores por caja porque la cuenta por pagar ya tiene pagos.',
+        'No se pueden reducir los valores por caja porque la cuenta por pagar ya tiene pagos. ' +
+          'Aumentarlos (p. ej. agregar una caja) sí se puede.',
       );
     }
 
@@ -126,7 +126,7 @@ export class PurchaseBoxesService {
     order.taxAmount = taxAmount;
     order.total = total;
     await orderRepo.save(order);
-    if (payable && (!payable.isPaid || isAllowedIncrease)) {
+    if (payable && (!payable.isPaid || esAumento)) {
       payable.amount = total;
       const remainsPaid = Number(payable.paidAmount) >= total;
       payable.isPaid = remainsPaid;
@@ -470,12 +470,7 @@ export class PurchaseBoxesService {
         order.status = PurchaseOrderStatus.PARTIAL;
         await orderRepo.save(order);
       }
-      await this.recalculateOrderTotals(
-        manager,
-        line.purchaseOrderId,
-        tenantId,
-        { allowPayableIncreaseAfterPayment: true },
-      );
+      await this.recalculateOrderTotals(manager, line.purchaseOrderId, tenantId);
       return line;
     });
   }
