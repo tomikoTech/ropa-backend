@@ -934,6 +934,8 @@ export class ProductsService {
       type?: string;
       sort?: string;
       warehouseId?: string;
+      /** Solo variantes con existencias (> 0) en cualquier bodega de la tienda. */
+      inStock?: boolean;
     },
   ): Promise<ProductVariant[]> {
     // Límite configurable (para el catálogo del POS con "ver más"), con tope.
@@ -980,6 +982,15 @@ export class ProductsService {
     if (opts?.warehouseId) {
       qb.setParameter('sortWarehouseId', opts.warehouseId);
     }
+    // "Solo con stock": total en CUALQUIER bodega de la tienda (no solo la del
+    // mostrador), para no ocultar lo que la venta sí puede tomar por cascada de
+    // otra bodega. Deja fuera lo que está en cero en todas partes.
+    if (opts?.inStock) {
+      qb.andWhere(
+        `(SELECT COALESCE(SUM(s_in.quantity),0) FROM stock s_in
+            WHERE s_in.variant_id = v.id AND s_in.tenant_id = :tenantId) > 0`,
+      );
+    }
     qb.addSelect(stockQuantitySql, 'inventory_quantity');
     switch (opts?.sort) {
       case 'stock-asc':
@@ -1017,6 +1028,8 @@ export class ProductsService {
       type?: string;
       sort?: string;
       warehouseId?: string;
+      /** Solo productos con existencias (> 0) en las bodegas visibles. */
+      inStock?: boolean;
     },
   ): Promise<{
     data: {
@@ -1121,6 +1134,13 @@ export class ProductsService {
       qb.andWhere("(category.type = 'STANDARD' OR category.type IS NULL)");
     } else if (opts?.type) {
       qb.andWhere('category.type = :type', { type: opts.type });
+    }
+    // Solo con stock: la misma subconsulta del total, ahora como filtro. Deja
+    // fuera del mostrador los productos del catálogo que están en cero (lo que
+    // molestaba: aparecían decenas de referencias sin existencias como si se
+    // pudieran vender).
+    if (opts?.inStock) {
+      qb.andWhere(`${stockQuantitySql} > 0`);
     }
     if (cleanQuery) {
       qb.andWhere(

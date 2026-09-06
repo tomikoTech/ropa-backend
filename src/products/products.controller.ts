@@ -154,6 +154,7 @@ export class ProductsController {
   @ApiQuery({ name: 'type', required: false })
   @ApiQuery({ name: 'sort', required: false })
   @ApiQuery({ name: 'warehouseId', required: false })
+  @ApiQuery({ name: 'inStock', required: false, description: 'Solo con existencias' })
   searchVariants(
     @Query('q') query: string,
     @TenantId() tenantId: string,
@@ -162,6 +163,7 @@ export class ProductsController {
     @Query('type') type?: string,
     @Query('sort') sort?: string,
     @Query('warehouseId') warehouseId?: string,
+    @Query('inStock') inStock?: string,
   ) {
     // Esta búsqueda es la que usa el POS para saber qué vender, así que la puede
     // llamar quien tenga permiso de Ventas (ver `module-registry.ts`). Trae el
@@ -174,6 +176,7 @@ export class ProductsController {
       type: type || undefined,
       sort,
       warehouseId,
+      inStock: inStock === 'true' || inStock === '1',
     });
   }
 
@@ -188,6 +191,7 @@ export class ProductsController {
   @ApiQuery({ name: 'type', required: false })
   @ApiQuery({ name: 'sort', required: false })
   @ApiQuery({ name: 'warehouseId', required: false })
+  @ApiQuery({ name: 'inStock', required: false, description: 'Solo con existencias' })
   searchPosCatalog(
     @TenantId() tenantId: string,
     @Query('q') query?: string,
@@ -196,6 +200,7 @@ export class ProductsController {
     @Query('type') type?: string,
     @Query('sort') sort?: string,
     @Query('warehouseId') warehouseId?: string,
+    @Query('inStock') inStock?: string,
   ) {
     return this.productsService.searchPosCatalog(query ?? '', tenantId, {
       limit: parsePositiveInt(limit, { max: MAX_PAGE_SIZE }),
@@ -203,6 +208,7 @@ export class ProductsController {
       type: type || undefined,
       sort,
       warehouseId,
+      inStock: inStock === 'true' || inStock === '1',
     });
   }
 
