@@ -74,10 +74,11 @@ export class PurchaseBoxesService {
       size_name: string | null;
       order_name: string | null;
       order_number: string | null;
+      lote: string | null;
     }[] = await this.dataSource.query(
       `SELECT su.id, su.barcode, su.kind, su.quantity,
               su.box_sequence, su.pair_sequence,
-              p.name AS product_name, p.sku_prefix,
+              p.name AS product_name, p.sku_prefix, p.lote,
               c.name AS color_name, sz.name AS size_name,
               po.order_name, po.order_number
          FROM stock_units su
@@ -100,7 +101,12 @@ export class PurchaseBoxesService {
       quantity: Number(r.quantity) || 0,
       boxSequence: r.box_sequence,
       pairSequence: r.pair_sequence,
-      product: { name: r.product_name ?? 'Producto', skuPrefix: r.sku_prefix },
+      product: {
+        name: r.product_name ?? 'Producto',
+        skuPrefix: r.sku_prefix,
+        // El lote manda sobre el nombre del pedido al rotular la caja.
+        lote: r.lote,
+      },
       color: r.color_name ? { name: r.color_name } : null,
       size: r.size_name ? { name: r.size_name } : null,
       // Con qué se rotula la caja: el nombre que le puso la tienda al pedido y,

@@ -1829,6 +1829,8 @@ export class StockUnitsService {
             name: unit.product.name,
             skuPrefix: unit.product.skuPrefix,
             imageUrl: unit.product.imageUrl ?? null,
+            // El lote manda sobre el nombre del pedido al rotular la caja.
+            lote: unit.product.lote ?? null,
           },
           color: unit.color
             ? { id: unit.color.id, name: unit.color.name }
