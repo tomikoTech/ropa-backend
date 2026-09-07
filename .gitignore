@@ -38,3 +38,6 @@ saldos-en-rojo.mjs
 que-hay-en-esa-bodega.mjs
 de-quien-es-ese-stock.mjs
 verificar-ag.mjs
+
+# Llaves de firma para QZ Tray: nunca al repositorio
+qz-*.pem
