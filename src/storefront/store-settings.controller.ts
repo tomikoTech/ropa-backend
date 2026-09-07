@@ -6,7 +6,9 @@ import {
   Param,
   Query,
   ParseUUIDPipe,
+  Res,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import {
   ApiTags,
   ApiBearerAuth,
@@ -24,6 +26,38 @@ import { EcommerceOrderStatus } from '../common/enums/ecommerce-order-status.enu
 @ApiBearerAuth()
 @Controller('store-settings')
 export class StoreSettingsController {
+
+  /**
+   * El logo de la etiqueta, servido por nosotros.
+   *
+   * El logo vive en el almacenamiento de archivos (otro dominio) y el navegador
+   * no puede leerlo para incrustarlo en la etiqueta: al imprimir salía **sin
+   * logo**. Sirviéndolo desde acá es el mismo origen y se puede incrustar.
+   *
+   * Solo se trae la dirección guardada en los ajustes de ESA tienda: no es un
+   * proxy de cualquier URL.
+   */
+  @Get('label-logo')
+  @ApiOperation({ summary: 'Logo de la etiqueta (para incrustarlo al imprimir)' })
+  async labelLogo(@TenantId() tenantId: string, @Res() res: Response) {
+    const settings = await this.storeSettingsService.getSettings(tenantId);
+    const url = settings.labelLogoUrl || settings.logoUrl;
+    if (!url) {
+      res.status(404).json({ message: 'La tienda no tiene logo de etiqueta' });
+      return;
+    }
+    try {
+      const remoto = await fetch(url, { signal: AbortSignal.timeout(6000) });
+      if (!remoto.ok) throw new Error(String(remoto.status));
+      const tipo = remoto.headers.get('content-type') ?? 'image/png';
+      const datos = Buffer.from(await remoto.arrayBuffer());
+      res.setHeader('Content-Type', tipo);
+      res.setHeader('Cache-Control', 'private, max-age=3600');
+      res.send(datos);
+    } catch {
+      res.status(404).json({ message: 'No se pudo traer el logo' });
+    }
+  }
   constructor(private readonly storeSettingsService: StoreSettingsService) {}
 
   @Get()
