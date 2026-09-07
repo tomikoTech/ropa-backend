@@ -49,8 +49,11 @@ import { PermissionsGuard } from './access/permissions.guard.js';
 import { CostVisibilityInterceptor } from './access/cost-visibility.interceptor.js';
 import { WarehouseScopeGuard } from './access/warehouse-scope.guard.js';
 
+import { QzModule } from './qz/qz.module.js';
+
 @Module({
   imports: [
+    QzModule,
     ConfigModule.forRoot({
       isGlobal: true,
       load: [configuration],
