@@ -50,6 +50,11 @@ export interface ConsignmentFilters {
   paymentMethod?: string;
   /** A quien limitar. `null` o ausente = sin limitar. */
   userId?: string | null;
+  /** Texto libre: busca en cliente y en tercero. */
+  search?: string;
+  /** Rango de `saleDate`. Los dos o ninguno. */
+  from?: string;
+  to?: string;
 }
 
 @Injectable()
@@ -217,6 +222,18 @@ export class ConsignmentsService {
         "c.paymentMethod ILIKE 'transf%'",
       );
     }
+    const search = filters.search?.trim();
+    if (search) {
+      qb.andWhere('(c.clientName ILIKE :s OR c.thirdPartyName ILIKE :s)', {
+        s: `%${search}%`,
+      });
+    }
+    if (filters.from && filters.to) {
+      qb.andWhere('c.saleDate BETWEEN :from AND :to', {
+        from: filters.from,
+        to: filters.to,
+      });
+    }
     // Cada quien lleva su contabilidad: dos personas naturales en la misma
     // tienda no pueden verse la plata.
     if (filters.userId) {
@@ -252,21 +269,6 @@ export class ConsignmentsService {
   ): Promise<Paginated<Consignment>> {
     const pagina = resolverPagina(filters, { limitDefault: 50, limitMax: 200 });
     const qb = this.baseQuery(tenantId, filters);
-
-    const search = filters.search?.trim();
-    if (search) {
-      // El navegador buscaba sobre `cliente + tercero`; se replica igual.
-      qb.andWhere(
-        '(c.clientName ILIKE :s OR c.thirdPartyName ILIKE :s)',
-        { s: `%${search}%` },
-      );
-    }
-    if (filters.from && filters.to) {
-      qb.andWhere('c.saleDate BETWEEN :from AND :to', {
-        from: filters.from,
-        to: filters.to,
-      });
-    }
 
     const [data, total] = await qb
       .orderBy('c.saleDate', 'DESC')
@@ -457,9 +459,7 @@ export class ConsignmentsService {
    */
   async summary(
     tenantId: string,
-    usuarioId?: string | null,
-    from?: string,
-    to?: string,
+    filters: ConsignmentFilters = {},
   ): Promise<{
     count: number;
     /** Suma de la columna Cantidad: cuántas unidades se vendieron en el rango. */
@@ -480,17 +480,11 @@ export class ConsignmentsService {
     /** Lo cobrado en total (suma de abonos de clientes). */
     totalCobrado: number;
   }> {
-    // Mismo rango de fechas que el listado (`saleDate BETWEEN`), para que la
-    // utilidad y los totales de las tarjetas cuadren con lo que se ve abajo al
-    // filtrar por "hoy" o "ayer". Sin rango, es el total histórico como antes.
-    const qb = this.repo
-      .createQueryBuilder('c')
-      .where('c.tenantId = :tenantId', { tenantId });
-    if (usuarioId) qb.andWhere('c.userId = :usuarioId', { usuarioId });
-    if (from && to) {
-      qb.andWhere('c.saleDate BETWEEN :from AND :to', { from, to });
-    }
-    const rows = await qb.getMany();
+    // EL MISMO filtro que el listado, no uno parecido: las tarjetas de arriba
+    // tienen que hablar de lo que se ve abajo. Antes solo respetaban el rango de
+    // fechas, así que al filtrar por un tercero el saldo seguía siendo el de
+    // todos —que es justo lo que se preguntaba mirando esa pantalla—.
+    const rows = await this.baseQuery(tenantId, filters).getMany();
 
     // Abonos de todas las ventas del rango, de una consulta. El saldo se
     // calcula con ellos (no con el booleano), así el abono parcial cuenta.

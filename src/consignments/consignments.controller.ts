@@ -118,21 +118,45 @@ export class ConsignmentsController {
   }
 
   @Get('summary')
-  @ApiOperation({ summary: 'Resumen: utilidad, por cobrar y por pagar' })
+  @ApiOperation({
+    summary: 'Resumen: utilidad, por cobrar y por pagar',
+    description:
+      'Acepta los MISMOS filtros que el listado: al filtrar por un tercero, ' +
+      'las cifras son las de ese tercero.',
+  })
+  @ApiQuery({ name: 'thirdParty', required: false })
+  @ApiQuery({ name: 'clientPaid', required: false })
+  @ApiQuery({ name: 'supplierPaid', required: false })
+  @ApiQuery({ name: 'paymentMethod', required: false })
+  @ApiQuery({ name: 'search', required: false })
   @ApiQuery({ name: 'from', required: false })
   @ApiQuery({ name: 'to', required: false })
   async summary(
     @CurrentUser()
     user: { id: string; role: Role; accessRoleId: string | null },
     @TenantId() tenantId: string,
+    @Query('thirdParty') thirdParty?: string,
+    @Query('clientPaid') clientPaid?: string,
+    @Query('supplierPaid') supplierPaid?: string,
+    @Query('paymentMethod') paymentMethod?: string,
+    @Query('search') search?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
   ) {
     // Su contabilidad, no la de la tienda: cuánto vendió, cuánto le costó y
-    // cuánto ganó **él**. Con el mismo rango de fechas del listado, para que la
-    // utilidad de arriba responda a "hoy"/"ayer" en vez de quedarse en el total
-    // histórico.
-    return this.service.summary(tenantId, await this.deQuien(user), from, to);
+    // cuánto ganó **él**. Con los MISMOS filtros del listado: si abajo se ve un
+    // solo tercero, arriba tiene que salir el saldo de ese tercero.
+    return this.service.summary(tenantId, {
+      userId: await this.deQuien(user),
+      thirdParty: thirdParty || undefined,
+      clientPaid: clientPaid === undefined ? undefined : clientPaid === 'true',
+      supplierPaid:
+        supplierPaid === undefined ? undefined : supplierPaid === 'true',
+      paymentMethod: paymentMethod || undefined,
+      search,
+      from,
+      to,
+    });
   }
 
   @Get('third-parties')
