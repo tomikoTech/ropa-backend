@@ -195,7 +195,6 @@ export class StockUnitsService {
           unitSequence: 0,
         }).slice(0, 13);
         let barcodeSequence = await this.nextUnitSequence(
-          line.id,
           barcodePrefix,
           tenantId,
           m,
@@ -894,12 +893,7 @@ export class StockUnitsService {
         // cajas y unidades ya emitidas del renglón. Si empezara en 1, la
         // primera unidad tendría el mismo código que la primera caja.
         const ultimaDelRenglon =
-          (await this.nextUnitSequence(
-            box.purchaseBoxLineId,
-            base.slice(0, 13),
-            tenantId,
-            m,
-          )) - 1;
+          (await this.nextUnitSequence(base.slice(0, 13), tenantId, m)) - 1;
         // De dónde salen los códigos: el renglón de la caja solo se continúa
         // si es de una orden de compra. El espacio del día lo administra el
         // ledger y numerar a mano ahí produce etiquetas repetidas. El renglón
@@ -1072,8 +1066,22 @@ export class StockUnitsService {
    * últimos dígitos del código), así que se continúa desde el mayor emitido.
    * Usar el conteo daría colisiones en cuanto se abre una caja.
    */
+  /**
+   * El siguiente número de bulto libre para un prefijo de código.
+   *
+   * **El universo es el prefijo, no el renglón.** Se miraban solo los bultos
+   * del renglón que se estaba recibiendo, y eso no alcanza: el prefijo es
+   * `AAMMDD | orden(4) | renglón(3)`, y el tramo «orden» sale de los últimos
+   * cuatro dígitos del número de orden —un consecutivo que **reinicia cada
+   * día**—. La «0001» de ayer y la «0001» de hoy comparten prefijo; recibidas
+   * el mismo día, sus renglones número 1 pedían el mismo código y la recepción
+   * moría con «Ya existe un registro con ese código de barras».
+   *
+   * Preguntando por el prefijo se ven todos los que ya lo usan —los del propio
+   * renglón incluidos, que comparten prefijo cuando se recibe el mismo día—,
+   * así que el número que sale está libre venga de donde venga.
+   */
   private async nextUnitSequence(
-    boxLineId: string | null,
     prefix: string,
     tenantId: string,
     manager?: EntityManager,
@@ -1081,19 +1089,12 @@ export class StockUnitsService {
     const repository = manager
       ? manager.getRepository(StockUnit)
       : this.unitRepo;
-    // Con renglón de compra el universo son sus bultos; sin él —un ingreso
-    // directo— son los códigos que ya empiezan por el mismo prefijo del día.
-    const rows = boxLineId
-      ? await repository.find({
-          where: { purchaseBoxLineId: boxLineId, tenantId },
-          select: { barcode: true },
-        })
-      : await repository
-          .createQueryBuilder('unit')
-          .select('unit.barcode', 'barcode')
-          .where('unit.tenantId = :tenantId', { tenantId })
-          .andWhere('unit.barcode LIKE :prefix', { prefix: `${prefix}%` })
-          .getRawMany<{ barcode: string }>();
+    const rows = await repository
+      .createQueryBuilder('unit')
+      .select('unit.barcode', 'barcode')
+      .where('unit.tenantId = :tenantId', { tenantId })
+      .andWhere('unit.barcode LIKE :prefix', { prefix: `${prefix}%` })
+      .getRawMany<{ barcode: string }>();
     let max = 0;
     for (const r of rows) {
       if (!r.barcode.startsWith(prefix)) continue;

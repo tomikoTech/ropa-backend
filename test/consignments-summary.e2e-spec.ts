@@ -55,7 +55,7 @@ describe('Terceros: el resumen respeta el filtro (e2e)', () => {
   });
 
   afterAll(async () => {
-    await teardownTestApp(app);
+    await teardownTestApp();
   });
 
   it('sin filtro, suma los dos terceros', async () => {
