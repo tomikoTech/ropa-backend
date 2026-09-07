@@ -47,12 +47,18 @@ export class StoreSettingsController {
       return;
     }
     try {
-      const remoto = await fetch(url, { signal: AbortSignal.timeout(6000) });
+      const remoto = await fetch(url, {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(6000),
+      });
       if (!remoto.ok) throw new Error(String(remoto.status));
       const tipo = remoto.headers.get('content-type') ?? 'image/png';
       const datos = Buffer.from(await remoto.arrayBuffer());
       res.setHeader('Content-Type', tipo);
-      res.setHeader('Cache-Control', 'private, max-age=3600');
+      // Sin guardar: la dirección de este recurso es siempre la misma aunque la
+      // tienda cambie de logo, así que cachearlo dejaba el logo viejo en la
+      // etiqueta hasta una hora después de haberlo cambiado.
+      res.setHeader('Cache-Control', 'no-store');
       res.send(datos);
     } catch {
       res.status(404).json({ message: 'No se pudo traer el logo' });
