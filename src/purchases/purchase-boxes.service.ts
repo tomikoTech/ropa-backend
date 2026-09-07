@@ -72,13 +72,17 @@ export class PurchaseBoxesService {
       sku_prefix: string | null;
       color_name: string | null;
       size_name: string | null;
+      order_name: string | null;
+      order_number: string | null;
     }[] = await this.dataSource.query(
       `SELECT su.id, su.barcode, su.kind, su.quantity,
               su.box_sequence, su.pair_sequence,
               p.name AS product_name, p.sku_prefix,
-              c.name AS color_name, sz.name AS size_name
+              c.name AS color_name, sz.name AS size_name,
+              po.order_name, po.order_number
          FROM stock_units su
          JOIN purchase_box_lines bl ON bl.id = su.purchase_box_line_id
+         JOIN purchase_orders po ON po.id = bl.purchase_order_id
          LEFT JOIN product_variants v ON v.id = su.variant_id
          LEFT JOIN products p ON p.id = COALESCE(su.product_id, v.product_id)
          LEFT JOIN colors c ON c.id = v.color_id
@@ -99,6 +103,9 @@ export class PurchaseBoxesService {
       product: { name: r.product_name ?? 'Producto', skuPrefix: r.sku_prefix },
       color: r.color_name ? { name: r.color_name } : null,
       size: r.size_name ? { name: r.size_name } : null,
+      // Con qué se rotula la caja: el nombre que le puso la tienda al pedido y,
+      // si no le puso, su consecutivo.
+      pedidoNombre: r.order_name || r.order_number || null,
     }));
   }
 

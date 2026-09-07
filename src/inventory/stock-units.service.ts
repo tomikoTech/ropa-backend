@@ -1839,6 +1839,11 @@ export class StockUnitsService {
             ? { id: unit.stand.id, name: unit.stand.name }
             : null,
           orderNumber: line?.purchaseOrder?.orderNumber ?? null,
+          // Con qué se rotula la caja al imprimir su etiqueta.
+          pedidoNombre:
+            line?.purchaseOrder?.orderName ||
+            line?.purchaseOrder?.orderNumber ||
+            null,
           saleNumber: saleItem?.sale?.saleNumber ?? null,
           invoiceNumber: saleItem?.sale?.invoiceNumber ?? null,
         };

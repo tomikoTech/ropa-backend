@@ -119,6 +119,7 @@ export class PurchasesService {
         id: po.id,
         orderNumber: po.orderNumber,
         supplierInvoiceNumber: po.supplierInvoiceNumber ?? null,
+        orderName: po.orderName ?? null,
         date: po.createdAt,
         dueDate: ap?.dueDate ?? null,
         status: po.status,
@@ -263,6 +264,7 @@ export class PurchasesService {
         taxAmount,
         total,
         notes: dto.notes,
+        orderName: dto.orderName?.trim() || null,
         supplierInvoiceNumber: dto.supplierInvoiceNumber,
         status: PurchaseOrderStatus.DRAFT,
         tenantId,
@@ -422,7 +424,7 @@ export class PurchasesService {
       }
       if (search) {
         qb.andWhere(
-          '(po.order_number ILIKE :s OR sup.name ILIKE :s OR po.supplier_invoice_number ILIKE :s)',
+          '(po.order_number ILIKE :s OR po.order_name ILIKE :s OR sup.name ILIKE :s OR po.supplier_invoice_number ILIKE :s)',
           { s: `%${search}%` },
         );
       }
@@ -662,6 +664,7 @@ export class PurchasesService {
       if (dto.supplierId !== undefined) po.supplierId = dto.supplierId;
       if (dto.warehouseId !== undefined) po.warehouseId = dto.warehouseId;
       if (dto.notes !== undefined) po.notes = dto.notes;
+      if (dto.orderName !== undefined) po.orderName = dto.orderName?.trim() || null;
       if (dto.supplierInvoiceNumber !== undefined)
         po.supplierInvoiceNumber = dto.supplierInvoiceNumber;
 

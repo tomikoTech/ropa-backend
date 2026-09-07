@@ -9,6 +9,7 @@ import {
   IsString,
   IsUUID,
   ValidateNested,
+  MaxLength,
 } from 'class-validator';
 import { PurchaseOrderItemDto } from './create-purchase-order.dto.js';
 
@@ -35,6 +36,15 @@ export class UpdatePurchaseOrderDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Cómo llama la tienda a este pedido («PROMO WIMFLO»). Es lo que se rotula en la etiqueta de la caja.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  orderName?: string;
 
   @ApiPropertyOptional({ description: 'Número de factura del proveedor' })
   @IsOptional()

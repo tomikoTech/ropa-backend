@@ -27,6 +27,16 @@ export class PurchaseOrder extends TenantAwareEntity {
   @Column({ name: 'order_number' })
   orderNumber: string;
 
+  /**
+   * Cómo llama la tienda a este pedido: «PROMO WIMFLO», «Contenedor marzo».
+   *
+   * El consecutivo (`OC-20260907-0001`) sirve para buscarlo en el sistema, pero
+   * en la bodega nadie lo usa: la caja se rotula con el nombre del embarque, y
+   * es lo que va impreso en la etiqueta. Opcional; sin nombre, manda el número.
+   */
+  @Column({ name: 'order_name', type: 'varchar', nullable: true })
+  orderName: string | null;
+
   // Número de factura del proveedor (referencia externa, opcional).
   @Column({ name: 'supplier_invoice_number', nullable: true })
   supplierInvoiceNumber: string;
