@@ -58,6 +58,10 @@ import {
   paresVigentesDeLaVenta,
   type MovimientoConPares,
 } from './pares-vigentes.js';
+import {
+  tomarParaLaLinea,
+  type CodigoDisponible,
+} from './repartir-codigos-en-lineas.js';
 
 @Injectable()
 export class PosService {
@@ -1409,23 +1413,42 @@ export class PosService {
     // par concreto hay que mandarle al servidor su bulto.
     const todos = [...porVenta.values()].flatMap((v) => [...v.values()].flat());
     const idPorCodigo = new Map<string, string>();
+    // Cuántas unidades trae cada código: una caja de 24 vale por 24. Sin este
+    // dato el reparto contaba cajas como si fueran pares. Ver
+    // `repartir-codigos-en-lineas.ts`.
+    const unidadesPorCodigo = new Map<string, number>();
     if (todos.length) {
-      const unidades: { id: string; barcode: string }[] =
+      const unidades: { id: string; barcode: string; quantity: number }[] =
         await this.dataSource.query(
-          `SELECT id, barcode FROM stock_units
+          `SELECT id, barcode, quantity FROM stock_units
             WHERE tenant_id = $1 AND barcode = ANY($2::text[])`,
           [tenantId, [...new Set(todos)]],
         );
-      for (const u of unidades) idPorCodigo.set(u.barcode, u.id);
+      for (const u of unidades) {
+        idPorCodigo.set(u.barcode, u.id);
+        unidadesPorCodigo.set(u.barcode, Number(u.quantity) || 1);
+      }
     }
 
     for (const venta of conLineas) {
       const porVariante = porVenta.get(venta.id);
       if (!porVariante) continue;
+      // Por variante, la lista de la que van tomando las líneas en orden.
+      const bolsas = new Map<string, CodigoDisponible[]>();
+      for (const [variantId, codigos] of porVariante) {
+        bolsas.set(
+          variantId,
+          codigos.map((barcode) => ({
+            barcode,
+            unidades: unidadesPorCodigo.get(barcode) ?? 1,
+          })),
+        );
+      }
       for (const item of venta.items) {
-        const disponibles = porVariante.get(item.variantId);
+        const disponibles = bolsas.get(item.variantId);
         if (!disponibles?.length) continue;
-        const suyos = disponibles.splice(0, item.quantity);
+        const suyos = tomarParaLaLinea(disponibles, item.quantity);
+        if (!suyos.length) continue;
         item.unitBarcodes = suyos;
         item.stockUnitIds = suyos
           .map((codigo) => idPorCodigo.get(codigo))
