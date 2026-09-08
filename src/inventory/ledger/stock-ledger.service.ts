@@ -297,16 +297,34 @@ export class StockLedgerService {
     // vende por gramos esto no aplica y el agregado es toda la verdad.
     let unidades: { id: string; barcode: string }[] = [];
     let sinEtiqueta = 0;
-    if (
-      !orden.bultosYaMovidos &&
-      (await this.llevaUnidades(manager, variantId, tenantId))
-    ) {
-      const resultado =
-        delta < 0
-          ? await this.consumir(manager, orden, -delta)
-          : await this.crear(manager, orden, delta);
-      unidades = resultado.unidades;
-      sinEtiqueta = resultado.sinEtiqueta;
+    if (!orden.bultosYaMovidos) {
+      const lleva = await this.llevaUnidades(manager, variantId, tenantId);
+      /**
+       * **Deshacer no depende del interruptor.**
+       *
+       * `unit_tracking` decide si un producto lleva bultos con código, y se
+       * puede apagar en cualquier momento. Pero apagarlo no borra los bultos
+       * que ya salieron: una venta hecha con el interruptor encendido dejó dos
+       * cajas marcadas como vendidas, alguien lo apagó al día siguiente, y al
+       * anular la venta el agregado volvió a la bodega **pero las cajas se
+       * quedaron vendidas para siempre** — sus códigos impresos no se podían
+       * volver a escanear ni vender.
+       *
+       * Así que una reversa siempre mira si este mismo documento sacó bultos.
+       * Si los sacó, vuelven. Lo que el interruptor sí decide es si se
+       * *inventan códigos nuevos*, y eso una reversa no lo hace nunca.
+       */
+      const esReversaConBultosPropios =
+        !lleva && delta > 0 && REVERSAS.has(orden.motivo);
+
+      if (lleva || esReversaConBultosPropios) {
+        const resultado =
+          delta < 0
+            ? await this.consumir(manager, orden, -delta)
+            : await this.crear(manager, orden, delta);
+        unidades = resultado.unidades;
+        sinEtiqueta = resultado.sinEtiqueta;
+      }
     }
 
     // Un movimiento de cero no movió nada: aparece en el historial como una
