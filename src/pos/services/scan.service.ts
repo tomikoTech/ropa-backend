@@ -55,6 +55,17 @@ export interface ScanResult {
   /** Precio mínimo por unidad; null = sin restricción. */
   minimumSalePrice: number | null;
   /**
+   * El precio sugerido **no cubre el costo** de ese bulto.
+   *
+   * Es un sí o un no, no la cifra: quien cobra no tiene por qué ver el costo
+   * (el servidor se lo quita), pero sí tiene que enterarse de que está a punto
+   * de vender a pérdida. De aquí salió el caso real: una tienda tenía el costo
+   * escrito en el campo de precio mayorista, y como la caja se cobra al por
+   * mayor, el POS le proponía el costo en cada venta y había que corregirlo a
+   * mano una por una.
+   */
+  belowCost?: boolean;
+  /**
    * Qué trae la caja: talla y cuántos pares de cada una. Vacío en los pares
    * sueltos y en los productos de siempre.
    */
@@ -182,6 +193,10 @@ export class ScanService {
         suggestedPrice: basePrice * unit.quantity,
         unitPrice: basePrice,
         priceSource,
+        // Costo cero es «sin costo registrado», no «costó cero»: sin costo no
+        // hay nada que comparar y no se avisa.
+        belowCost:
+          Number(unit.cost) > 0 && basePrice > 0 && basePrice <= Number(unit.cost),
         wholesalePrice: mayorista > 0 ? mayorista : null,
         contents,
         stockUnitId: unit.id,

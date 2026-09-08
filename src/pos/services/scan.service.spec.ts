@@ -128,6 +128,38 @@ describe('ScanService — precio y contenido de una caja', () => {
     expect(r2.suggestedPrice).toBe(100000 * 24);
   });
 
+  describe('avisar cuando el precio no cubre el costo', () => {
+    // El caso real: la tienda tenía el COSTO escrito en el campo de precio
+    // mayorista. Como la caja se cobra al por mayor, el POS proponía el costo
+    // en cada venta y había que corregirlo a mano una por una.
+    it('marca la caja cuyo precio mayorista es el costo', async () => {
+      const service = armar({ ...caja, cost: 70000 });
+      const r = await service.resolve('2608190000010011', 'tenant-1');
+      expect(r.priceSource).toBe('WHOLESALE');
+      expect(r.belowCost).toBe(true);
+    });
+
+    it('no avisa cuando el precio sí deja ganancia', async () => {
+      const service = armar({ ...caja, cost: 40000 });
+      const r = await service.resolve('2608190000010011', 'tenant-1');
+      expect(r.belowCost).toBe(false);
+    });
+
+    it('sin costo registrado no hay nada que comparar', async () => {
+      // Cero es «no se registró», no «costó cero»: avisar ahí sería mentir.
+      const service = armar({ ...caja, cost: 0 });
+      const r = await service.resolve('2608190000010011', 'tenant-1');
+      expect(r.belowCost).toBe(false);
+    });
+
+    it('el aviso es un sí o un no: el costo no viaja en la respuesta', async () => {
+      const service = armar({ ...caja, cost: 70000 });
+      const r = await service.resolve('2608190000010011', 'tenant-1');
+      expect(Object.keys(r)).not.toContain('cost');
+      expect(Object.keys(r)).not.toContain('unitCost');
+    });
+  });
+
   it('un par suelto se cobra al detal aunque el producto tenga precio mayorista', async () => {
     // El mayoreo es por vender la caja completa, no por el producto.
     const par = {
