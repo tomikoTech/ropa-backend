@@ -36,6 +36,11 @@ import {
   categoriaDelFrasco,
 } from './donde-va-el-frasco.js';
 
+import {
+  avisoDeVariantesConservadas,
+  seQuedaAunqueNoVengaEnElFormulario,
+} from './variante-en-uso.js';
+
 @Injectable()
 export class ProductsService {
   private readonly log = new Logger(ProductsService.name);
@@ -799,23 +804,54 @@ export class ProductsService {
         dto.variants.filter((v) => v.id).map((v) => v.id!),
       );
 
-      // Remove variants not present in the payload
+      // Las variantes que el formulario no trajo.
+      //
+      // Antes se borraban sin más, y si no se podían borrar —porque tenían
+      // ventas— se **desactivaban en silencio**. Una variante desactivada no se
+      // puede vender: el punto de venta contesta «este producto no está activo»
+      // con las cajas ahí, en la bodega, con su código impreso. Pasó de verdad:
+      // una edición se llevó por delante una talla con tres cajas y 49 pares.
+      //
+      // La mercancía manda sobre el formulario. Ver `variante-en-uso.ts`.
       const existingVariants = await this.variantRepository.find({
         where: { productId: id },
       });
+      const conservadas: string[] = [];
       for (const ev of existingVariants) {
-        if (!incomingIds.has(ev.id)) {
-          try {
-            await this.variantRepository.remove(ev);
-          } catch (err: any) {
-            if (err?.code === '23503') {
-              ev.isActive = false;
-              await this.variantRepository.save(ev);
-            } else {
-              throw err;
-            }
+        if (incomingIds.has(ev.id)) continue;
+
+        const [uso] = (await this.variantRepository.query(
+          `SELECT
+             COALESCE((SELECT SUM(st.quantity) FROM stock st
+                        WHERE st.variant_id = $1), 0)::int AS existencias,
+             COALESCE((SELECT COUNT(*) FROM stock_units su
+                        WHERE su.variant_id = $1
+                          AND su.status = 'IN_STOCK'), 0)::int AS "bultosVivos"`,
+          [ev.id],
+        )) as { existencias: number; bultosVivos: number }[];
+
+        if (seQuedaAunqueNoVengaEnElFormulario(uso)) {
+          conservadas.push(ev.sku);
+          continue;
+        }
+
+        try {
+          await this.variantRepository.remove(ev);
+        } catch (err: any) {
+          if (err?.code === '23503') {
+            // Tiene historia (ventas, compras) pero no mercancía: se archiva.
+            ev.isActive = false;
+            await this.variantRepository.save(ev);
+          } else {
+            throw err;
           }
         }
+      }
+      if (conservadas.length) {
+        // Que se entere quien guardó, no el cajero media hora después.
+        this.log.warn(
+          `Producto ${id}: ${avisoDeVariantesConservadas(conservadas)}`,
+        );
       }
 
       for (const v of dto.variants) {
