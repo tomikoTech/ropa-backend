@@ -39,6 +39,9 @@ export class HttpExceptionFilter implements ExceptionFilter {
       // no le dice nada a quien está recibiendo mercancía. Se traduce a lo que
       // de verdad pasó y a qué hacer.
       if (status === HttpStatus.TOO_MANY_REQUESTS) {
+        this.logger.warn(
+          `${this.describeRequest(request)} -> 429 freno por IP`,
+        );
         response.status(status).json({
           statusCode: status,
           message:
@@ -84,12 +87,45 @@ export class HttpExceptionFilter implements ExceptionFilter {
       }
     }
 
+    this.registrar(status, message, request);
+
     response.status(status).json({
       statusCode: status,
       message,
       ...extra,
       timestamp: new Date().toISOString(),
     });
+  }
+
+  /**
+   * Dejar rastro de los rechazos en el log.
+   *
+   * En producción no quedaba ninguno: un cliente reportó «da error 400 al
+   * anexar en una venta» y los logs no tenían **nada** que mirar —solo se
+   * registraban los errores de base de datos y los 500—. Un 400 es el servidor
+   * diciendo algo concreto y ese algo se perdía en el camino.
+   *
+   * Se dejan fuera dos ruidos que no son problemas: el 401 (una sesión que
+   * venció) y el 404 de un GET, que es el pan de cada día del escaneo —el
+   * buscador le pregunta por un código a medio teclear y la respuesta correcta
+   * es «no existe»—.
+   */
+  private registrar(
+    status: number,
+    message: string | string[],
+    request: Request | undefined,
+  ): void {
+    if (status < 400) return;
+    if (status === HttpStatus.UNAUTHORIZED) return;
+    if (status === HttpStatus.NOT_FOUND && request?.method === 'GET') return;
+    // Los 500 y los errores de base de datos ya se registraron arriba con su
+    // traza; repetirlos solo duplicaría.
+    if (status >= HttpStatus.INTERNAL_SERVER_ERROR) return;
+
+    const texto = Array.isArray(message) ? message.join(' | ') : message;
+    this.logger.warn(
+      `${this.describeRequest(request)} -> ${status}: ${texto}`,
+    );
   }
 
   // Contexto mínimo para poder rastrear el error en los logs de producción:
