@@ -42,6 +42,9 @@ import { StockLedgerModule } from '../inventory/ledger/stock-ledger.module.js';
   ],
   controllers: [PurchasesController, PurchaseBoxesController],
   providers: [PurchasesService, PurchaseBoxesService],
-  exports: [PurchasesService],
+  // `PurchaseBoxesService` sale para que el inventario pueda calcular el costo
+  // puesto en bodega al recibir una orden entera. Sin esto habría que duplicar
+  // el reparto de fletes, que es justo donde no puede haber dos versiones.
+  exports: [PurchasesService, PurchaseBoxesService],
 })
 export class PurchasesModule {}

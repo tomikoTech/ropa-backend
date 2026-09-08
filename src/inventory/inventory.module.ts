@@ -32,9 +32,11 @@ import { StockTransfer } from './entities/stock-transfer.entity.js';
 import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
 import { ProductsModule } from '../products/products.module.js';
 import { SaleItem } from '../pos/entities/sale-item.entity.js';
+import { PurchasesModule } from '../purchases/purchases.module.js';
 
 @Module({
   imports: [
+    PurchasesModule,
     TypeOrmModule.forFeature([
       Shelf,
       Stand,

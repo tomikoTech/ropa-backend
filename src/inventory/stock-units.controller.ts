@@ -106,6 +106,23 @@ export class StockUnitsController {
     return this.units.receiveBoxLine(boxLineId, dto, userId, tenantId);
   }
 
+  @Post('receive-all/:orderId')
+  @ApiOperation({
+    summary: 'Recibir de una vez todas las cajas pendientes de una compra',
+    description:
+      'Recibir renglón por renglón son cuarenta diálogos en una importación. ' +
+      'Cada renglón va en su propia transacción: si uno falla, los anteriores ' +
+      'quedan recibidos y el que falló se devuelve con su motivo.',
+  })
+  receiveAll(
+    @Param('orderId', ParseUUIDPipe) orderId: string,
+    @Body() dto: { standId?: string; warehouseId?: string },
+    @UserId() userId: string,
+    @TenantId() tenantId: string,
+  ) {
+    return this.units.receiveAllBoxLines(orderId, dto ?? {}, userId, tenantId);
+  }
+
   @Post('intake')
   @ApiOperation({
     summary: 'Ingresar cajas que ya están en la bodega, sin orden de compra',

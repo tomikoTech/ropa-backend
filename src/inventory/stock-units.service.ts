@@ -56,6 +56,7 @@ import {
   ConsecutivoAgotadoError,
   explicarConsecutivoAgotado,
 } from './consecutivo-del-dia.js';
+import { PurchaseBoxesService } from '../purchases/purchase-boxes.service.js';
 
 /** Identificadores que llegan por query string: se validan antes de consultar. */
 /**
@@ -95,6 +96,9 @@ export class StockUnitsService {
     private readonly saleItemRepo: Repository<SaleItem>,
     private readonly dataSource: DataSource,
     private readonly ledger: StockLedgerService,
+    // Para el costo puesto en bodega al recibir la orden entera: el mismo
+    // reparto de fletes que usa el recibo de a uno, no una copia.
+    private readonly boxes: PurchaseBoxesService,
   ) {}
 
   /**
@@ -114,6 +118,91 @@ export class StockUnitsService {
    * se puede recibir parcialmente, y queda registrado el movimiento de stock
    * para poder revertirlo.
    */
+  /**
+   * Recibe **toda** la orden de una vez.
+   *
+   * Recibirla renglón por renglón es lo que la tienda venía haciendo: abrir un
+   * diálogo, confirmar, esperar, y otra vez —cuarenta veces en una importación—.
+   * Acá se recorren los renglones con cajas pendientes y se reciben todos.
+   *
+   * Cada renglón va en **su propia transacción**, a propósito: si el número 30
+   * falla —se acabaron los códigos del día, por ejemplo— los 29 anteriores ya
+   * quedaron recibidos y no hay que empezar de cero. Lo que falló se devuelve
+   * con su motivo, para poder terminarlo a mano.
+   *
+   * El costo puesto en bodega se calcula acá y no lo manda la pantalla: es el
+   * mismo que usa el recibo de a uno, con sus fletes ya repartidos, y dejarlo
+   * en manos de quien llama era la puerta por la que entraba un costo sin
+   * fletes al inventario.
+   */
+  async receiveAllBoxLines(
+    orderId: string,
+    dto: { standId?: string; warehouseId?: string },
+    userId: string,
+    tenantId: string,
+  ): Promise<{
+    renglones: number;
+    cajas: number;
+    unidades: number;
+    fallos: { consecutivo: number; producto: string; motivo: string }[];
+  }> {
+    const lineas = await this.dataSource.getRepository(PurchaseBoxLine).find({
+      where: { purchaseOrderId: orderId, tenantId, isActive: true },
+      order: { consecutive: 'ASC' },
+    });
+    const pendientes = lineas.filter((l) => l.boxes - l.boxesReceived > 0);
+    if (pendientes.length === 0) {
+      throw new BadRequestException(
+        'Esta compra ya está recibida: no quedan cajas pendientes.',
+      );
+    }
+
+    // El costo con fletes, el mismo que se manda al recibir de a uno.
+    const landed = await this.boxes.getLandedCost(orderId, tenantId);
+    const costoPorLinea = new Map<string, number>(
+      landed.lines.map((l) => [l.id, Number(l.landedUnitCost)]),
+    );
+
+    let renglones = 0;
+    let cajas = 0;
+    let unidades = 0;
+    const fallos: { consecutivo: number; producto: string; motivo: string }[] =
+      [];
+
+    for (const linea of pendientes) {
+      const porRecibir = linea.boxes - linea.boxesReceived;
+      try {
+        const creados = await this.receiveBoxLine(
+          linea.id,
+          {
+            boxes: porRecibir,
+            ...(dto.standId ? { standId: dto.standId } : {}),
+            ...(dto.warehouseId ? { warehouseId: dto.warehouseId } : {}),
+            ...(costoPorLinea.has(linea.id)
+              ? { landedUnitCost: costoPorLinea.get(linea.id) }
+              : {}),
+          },
+          userId,
+          tenantId,
+        );
+        renglones += 1;
+        cajas += creados.length;
+        unidades += creados.reduce((n, u) => n + Number(u.quantity), 0);
+      } catch (error) {
+        // No se corta: lo que sí se puede recibir, se recibe. Lo que no, se
+        // dice con nombre y renglón para poder terminarlo a mano.
+        fallos.push({
+          consecutivo: linea.consecutive,
+          producto: linea.productId,
+          motivo:
+            error instanceof Error ? error.message : 'No se pudo recibir',
+        });
+      }
+    }
+
+    return { renglones, cajas, unidades, fallos };
+  }
+
   async receiveBoxLine(
     boxLineId: string,
     dto: {
