@@ -26,6 +26,12 @@ import { AccountsReceivablePayment } from './entities/accounts-receivable-paymen
 import { CreateSaleDto } from './dto/create-sale.dto.js';
 import { UpdateSaleDto } from './dto/update-sale.dto.js';
 import { RecordArPaymentDto } from './dto/record-ar-payment.dto.js';
+import { CambiarMetodoDePagoDto } from './dto/cambiar-metodo-de-pago.dto.js';
+import {
+  planDelCambio,
+  porQueNoSePuedeCambiar,
+  type CobroActual,
+} from './metodo-de-pago-de-la-venta.js';
 import { StockLedgerService } from '../inventory/ledger/stock-ledger.service.js';
 import { CajaService } from '../caja/caja.service.js';
 import { ReposicionAutomaticaService } from '../inventory/reposicion-automatica.service.js';
@@ -2291,6 +2297,217 @@ export class PosService {
       await saleRepo.save(sale);
     });
     // Leer fuera de la transacción para devolver el estado ya confirmado.
+    return this.findOne(id, tenantId);
+  }
+
+  /**
+   * Corregir con qué se pagó una venta que ya está hecha.
+   *
+   * «Se cobró en efectivo y era a crédito.» Hasta ahora la única salida era
+   * anular la factura y volver a hacerla: el método de pago no vive en la
+   * venta —vive en la fila de `payments`, o en la cuenta por cobrar cuando es
+   * a crédito— y la edición de la venta no toca ninguna de las dos.
+   *
+   * Qué se mueve lo decide `metodo-de-pago-de-la-venta.ts`, que también dice
+   * que no cuando el cambio no puede ser cierto (venta mixta, cobrada con dos
+   * métodos, cartera con abonos). Acá solo se ejecuta el plan, entero y en una
+   * sola transacción: la plata no puede quedar contada dos veces ni ninguna.
+   */
+  async cambiarMetodoDePago(
+    id: string,
+    dto: CambiarMetodoDePagoDto,
+    tenantId: string,
+  ): Promise<Sale> {
+    await this.dataSource.transaction(async (manager) => {
+      const saleRepo = manager.getRepository(Sale);
+      await this.lockSaleRow(manager, id, tenantId);
+      const sale = await saleRepo.findOne({
+        where: { id, tenantId },
+        relations: ['payments', 'accountsReceivable'],
+      });
+      if (!sale) throw new NotFoundException('Venta no encontrada');
+      if (sale.status !== SaleStatus.COMPLETED) {
+        throw new BadRequestException('La venta no está activa');
+      }
+
+      const cuentas = sale.accountsReceivable ?? [];
+      if (cuentas.length > 1) {
+        throw new BadRequestException(
+          'La venta tiene más de una cuenta por cobrar y requiere revisión manual',
+        );
+      }
+      const cuenta = cuentas[0] ?? null;
+
+      // El cliente que va a quedar en la venta: el que manda el formulario si
+      // viene (fiarle a alguien una venta que salió a nombre del mostrador) o
+      // el que ya tenía.
+      const clienteId = dto.clientId ?? sale.clientId ?? null;
+      const cliente = clienteId
+        ? await manager
+            .getRepository(Client)
+            .findOne({ where: { id: clienteId, tenantId } })
+        : null;
+      if (clienteId && !cliente) {
+        throw new NotFoundException('Cliente no encontrado');
+      }
+
+      const enCentavos = (valor: unknown) =>
+        Math.round(Number(valor ?? 0) * 100);
+      const enPesos = (centavos: number) => centavos / 100;
+
+      const actual: CobroActual = {
+        totalCentavos: enCentavos(sale.total),
+        pagos: (sale.payments ?? []).map((pago) => ({
+          id: pago.id,
+          metodo: pago.method,
+          montoCentavos: enCentavos(pago.amount),
+        })),
+        cartera: cuenta
+          ? {
+              id: cuenta.id,
+              totalCentavos: enCentavos(cuenta.totalAmount),
+              abonadoCentavos: enCentavos(cuenta.paidAmount),
+            }
+          : null,
+        cobrada: sale.isPaid,
+        intencion: sale.intendedPaymentMethod,
+        clienteRegistrado: !!cliente && !cliente.isGeneric,
+      };
+      const pedido = {
+        metodo: dto.method,
+        fechaDeVencimiento: dto.creditDueDate ?? cuenta?.dueDate ?? null,
+      };
+
+      const motivo = porQueNoSePuedeCambiar(actual, pedido);
+      if (motivo) throw new BadRequestException(motivo);
+
+      // La misma regla que al cobrar: si la tienda exige la foto para
+      // transferencia, corregir el método a transferencia también la exige.
+      await this.caja.exigirComprobante(
+        tenantId,
+        [{ method: dto.method, receiptImageUrl: dto.receiptImageUrl }],
+        manager,
+      );
+
+      const plan = planDelCambio(actual, pedido);
+      if (plan.hacer === 'nada') return;
+
+      const paymentRepo = manager.getRepository(Payment);
+      const arRepo = manager.getRepository(AccountsReceivable);
+      const anotar = (texto: string, previo?: string | null) =>
+        [previo, texto].filter(Boolean).join(' · ');
+
+      /**
+       * Se escriben **columnas**, no el árbol de la venta.
+       *
+       * `save(sale)` arrastra sus relaciones: la venta se leyó con sus pagos y
+       * su cartera, y guardarla después de crear una fila nueva —que no está
+       * en esos arreglos— hace que TypeORM la considere desprendida y le ponga
+       * `sale_id = NULL`. Es el mismo tropiezo que ya costó un «Falta un dato
+       * obligatorio (sale_id)» al editar una factura.
+       */
+      const guardarLaVenta = (cambios: Partial<Sale>) =>
+        saleRepo.update({ id: sale.id, tenantId }, cambios);
+
+      if (plan.hacer === 'solo-la-intencion') {
+        await guardarLaVenta({
+          intendedPaymentMethod: plan.metodo as PaymentMethod,
+        });
+        return;
+      }
+
+      if (plan.hacer === 'cambiar-el-metodo-del-pago') {
+        for (const pago of sale.payments) {
+          pago.method = plan.metodo as PaymentMethod;
+          // El banco pertenece al método: cambiarlo sin soltar el banco viejo
+          // dejaría una transferencia registrada en la cuenta de otra cosa.
+          pago.bankId = dto.bankId ?? null;
+          if (dto.reference !== undefined) pago.reference = dto.reference;
+          if (dto.receiptImageUrl !== undefined) {
+            pago.receiptImageUrl = dto.receiptImageUrl;
+          }
+          const monto = Number(pago.amount);
+          if (plan.metodo === PaymentMethod.EFECTIVO) {
+            pago.receivedAmount = Math.max(
+              monto,
+              Number(pago.receivedAmount) || 0,
+            );
+            pago.changeAmount =
+              Math.round((Number(pago.receivedAmount) - monto) * 100) / 100;
+          } else {
+            // Solo el efectivo devuelve cambio.
+            pago.receivedAmount = monto;
+            pago.changeAmount = 0;
+          }
+          await paymentRepo.save(pago);
+        }
+        return;
+      }
+
+      if (plan.hacer === 'volverla-credito') {
+        // La plata nunca entró: la fila del pago no debe seguir sumando al
+        // banco ni al cuadre del día.
+        for (const pago of sale.payments) {
+          await paymentRepo.remove(pago);
+        }
+        sale.payments = [];
+
+        const deuda = plan.carteraQueRevive
+          ? cuenta!
+          : arRepo.create({ saleId: sale.id, tenantId });
+        deuda.clientId = cliente!.id;
+        deuda.totalAmount = enPesos(plan.totalCentavos);
+        deuda.paidAmount = 0;
+        deuda.dueDate = diaDeCalendario(pedido.fechaDeVencimiento!);
+        deuda.isFullyPaid = false;
+        deuda.fullyPaidAt = null;
+        deuda.notes = anotar(
+          dto.creditNotes ?? `Pasada a crédito desde ${plan.pagosQueSeBorran.length ? 'un pago ya registrado' : 'una venta sin cobrar'}`,
+          plan.carteraQueRevive ? cuenta!.notes : null,
+        );
+        await arRepo.save(deuda);
+
+        await guardarLaVenta({
+          clientId: cliente!.id,
+          // En crédito la venta figura cerrada: la deuda vive en cartera.
+          isPaid: true,
+          intendedPaymentMethod: null,
+        });
+        return;
+      }
+
+      // 'cobrarla-ya': la deuda no existía, la plata sí.
+      if (plan.carteraQueSeSalda && cuenta) {
+        cuenta.totalAmount = 0;
+        cuenta.isFullyPaid = true;
+        cuenta.fullyPaidAt = new Date();
+        cuenta.notes = anotar(
+          `Cobrada en ${plan.metodo.toLowerCase()}: ya no es una deuda`,
+          cuenta.notes,
+        );
+        await arRepo.save(cuenta);
+      }
+
+      const total = enPesos(plan.totalCentavos);
+      await paymentRepo.save(
+        paymentRepo.create({
+          saleId: sale.id,
+          method: plan.metodo as PaymentMethod,
+          amount: total,
+          reference: dto.reference,
+          bankId: dto.bankId ?? null,
+          receiptImageUrl: dto.receiptImageUrl,
+          receivedAmount: total,
+          changeAmount: 0,
+          tenantId,
+        }),
+      );
+      await guardarLaVenta({
+        isPaid: true,
+        intendedPaymentMethod: null,
+        ...(cliente ? { clientId: cliente.id } : {}),
+      });
+    });
     return this.findOne(id, tenantId);
   }
 

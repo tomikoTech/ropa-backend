@@ -22,6 +22,7 @@ import { ScanService } from './services/scan.service.js';
 import { buildStatementWorkbook } from '../common/utils/statement-excel.util.js';
 import { CreateSaleDto } from './dto/create-sale.dto.js';
 import { UpdateSaleDto } from './dto/update-sale.dto.js';
+import { CambiarMetodoDePagoDto } from './dto/cambiar-metodo-de-pago.dto.js';
 import { MarkSalePaidDto } from './dto/mark-sale-paid.dto.js';
 import {
   CollectAccountsDto,
@@ -409,6 +410,18 @@ export class PosController {
     @TenantId() tenantId: string,
   ) {
     return this.posService.updateSale(id, dto, user.id, tenantId);
+  }
+
+  @Post('sales/:id/metodo-de-pago')
+  @ApiOperation({
+    summary: 'Corregir con qué se pagó una venta ya hecha (efectivo ↔ crédito…)',
+  })
+  cambiarMetodoDePago(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CambiarMetodoDePagoDto,
+    @TenantId() tenantId: string,
+  ) {
+    return this.posService.cambiarMetodoDePago(id, dto, tenantId);
   }
 
   @Post('sales/:id/mark-paid')
