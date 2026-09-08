@@ -60,6 +60,15 @@ export class PosController {
     return this.scanService.resolve(barcode, tenantId);
   }
 
+  @Get('donde-esta/:barcode')
+  @ApiOperation({
+    summary:
+      'Dónde está un código: disponible, vendido en tal factura, trasladado, dado de baja',
+  })
+  dondeEsta(@Param('barcode') barcode: string, @TenantId() tenantId: string) {
+    return this.scanService.rastroDelCodigo(barcode, tenantId);
+  }
+
   @Get('pares-que-saldrian')
   @ApiOperation({
     summary: 'Qué códigos de par saldrían si se vendiera esto ahora',

@@ -41,6 +41,7 @@ describe('ScanService', () => {
       stockRepo as any,
       boxLineRepo as any,
       contentRepo as any,
+      { query: jest.fn().mockResolvedValue([]) } as any,
     );
 
     const result = await service.resolve('AMA-40', 'tenant-1');
@@ -78,6 +79,7 @@ describe('ScanService — precio y contenido de una caja', () => {
       stockRepo as any,
       boxLineRepo as any,
       contentRepo as any,
+      { query: jest.fn().mockResolvedValue([]) } as any,
     );
   };
 

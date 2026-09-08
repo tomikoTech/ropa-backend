@@ -1,6 +1,11 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
+import {
+  dondeEstaElBulto,
+  noExisteEseCodigo,
+  type RastroDelBulto,
+} from '../donde-esta-el-bulto.js';
 import { ProductVariant } from '../../products/entities/product-variant.entity.js';
 import {
   StockUnit,
@@ -118,7 +123,113 @@ export class ScanService {
     private readonly boxLineRepo: Repository<PurchaseBoxLine>,
     @InjectRepository(StockUnitContent)
     private readonly contentRepo: Repository<StockUnitContent>,
+    private readonly dataSource: DataSource,
   ) {}
+
+  /**
+   * Dónde está este código, exista o no como disponible.
+   *
+   * Es la respuesta a «lo busco y no sale». La misma que usa el escaneo cuando
+   * tiene que negarse, para que el mostrador no se quede con la caja en la
+   * mano y sin explicación.
+   */
+  async rastroDelCodigo(
+    barcode: string,
+    tenantId: string,
+  ): Promise<{
+    encontrado: boolean;
+    disponible: boolean;
+    mensaje: string;
+    rastro: RastroDelBulto | null;
+  }> {
+    const code = (barcode || '').trim();
+    const unit = await this.unitRepo.findOne({
+      where: { barcode: code, tenantId },
+      relations: { warehouse: true },
+    });
+    if (!unit) {
+      return {
+        encontrado: false,
+        disponible: false,
+        mensaje: noExisteEseCodigo(code),
+        rastro: null,
+      };
+    }
+    const rastro = await this.rastroDeLaUnidad(unit, tenantId);
+    return {
+      encontrado: true,
+      disponible: unit.status === StockUnitStatus.IN_STOCK,
+      mensaje: dondeEstaElBulto(rastro),
+      rastro,
+    };
+  }
+
+  /** El rastro de un bulto ya leído, con la factura que lo reclama si la hay. */
+  private async rastroDeLaUnidad(
+    unit: StockUnit,
+    tenantId: string,
+  ): Promise<RastroDelBulto> {
+    const base: RastroDelBulto = {
+      codigo: unit.barcode,
+      esCaja: unit.kind === StockUnitKind.BOX,
+      estado: unit.status,
+      bodega: unit.warehouse?.name ?? null,
+      venta: null,
+    };
+    if (unit.status !== StockUnitStatus.SOLD) return base;
+
+    // Dos caminos, y hacen falta los dos: la línea de la venta anotó el bulto
+    // cuando el cajero lo escaneó, y el ledger deja el evento cuando los pares
+    // los eligió la cascada. Sin el segundo, media tienda queda «vendida sin
+    // factura».
+    const filas: {
+      sale_number: string;
+      created_at: Date;
+      status: string;
+      first_name: string | null;
+      last_name: string | null;
+    }[] = await this.dataSource.query(
+      `SELECT s.sale_number, s.created_at, s.status, c.first_name, c.last_name
+         FROM sales s
+         LEFT JOIN clients c ON c.id = s.client_id
+        WHERE s.tenant_id = $2
+          AND (
+            s.id IN (SELECT si.sale_id FROM sale_items si WHERE si.stock_unit_id = $1)
+            OR s.id IN (
+              SELECT e.reference_id FROM stock_unit_events e
+               WHERE e.stock_unit_id = $1
+                 AND e.to_status = 'SOLD'
+                 AND e.reference_type = 'SALE'
+            )
+          )
+        ORDER BY s.created_at DESC
+        LIMIT 1`,
+      [unit.id, tenantId],
+    );
+    const fila = filas[0];
+    if (!fila) return base;
+
+    return {
+      ...base,
+      venta: {
+        numero: fila.sale_number,
+        fecha: this.diaLegible(fila.created_at),
+        cliente:
+          [fila.first_name, fila.last_name].filter(Boolean).join(' ').trim() ||
+          null,
+        anulada: fila.status === 'CANCELLED',
+      },
+    };
+  }
+
+  /** «8 de septiembre», en la hora de la tienda y no en la del servidor. */
+  private diaLegible(fecha: Date): string {
+    return new Intl.DateTimeFormat('es-CO', {
+      day: 'numeric',
+      month: 'long',
+      timeZone: 'America/Bogota',
+    }).format(new Date(fecha));
+  }
 
   async resolve(barcode: string, tenantId: string): Promise<ScanResult> {
     const code = (barcode || '').trim();
@@ -132,8 +243,10 @@ export class ScanService {
 
     if (unit) {
       if (unit.status !== StockUnitStatus.IN_STOCK) {
+        // Con la factura que lo tiene, no solo el estado: «ya fue vendida»
+        // deja al cajero con la caja en la mano y sin salida.
         throw new NotFoundException(
-          this.explainUnavailable(unit.status, unit.kind),
+          dondeEstaElBulto(await this.rastroDeLaUnidad(unit, tenantId)),
         );
       }
       const purchaseLine = unit.purchaseBoxLineId
@@ -224,9 +337,7 @@ export class ScanService {
       relations: { product: true },
     });
     if (!variant) {
-      throw new NotFoundException(
-        `No se encontró ningún producto con el código ${code}`,
-      );
+      throw new NotFoundException(noExisteEseCodigo(code));
     }
 
     const stocks = await this.stockRepo.find({
@@ -301,27 +412,4 @@ export class ScanService {
     };
   }
 
-  /** Mensajes concretos: el cajero necesita saber por qué no puede venderlo. */
-  private explainUnavailable(
-    status: StockUnitStatus,
-    kind: StockUnitKind,
-  ): string {
-    const what = kind === StockUnitKind.BOX ? 'La caja' : 'El par';
-    switch (status) {
-      case StockUnitStatus.SOLD:
-        return `${what} ya fue vendida.`;
-      case StockUnitStatus.SPLIT:
-        return 'Esta caja ya se abrió: escanea las unidades que salieron de ella.';
-      case StockUnitStatus.CONSIGNED:
-        return `${what} está entregada en consignación.`;
-      case StockUnitStatus.TRANSFERRED:
-        return `${what} fue trasladada a otra bodega.`;
-      case StockUnitStatus.WRITTEN_OFF:
-        return `${what} fue dada de baja.`;
-      default:
-        // Con el estado a la vista: «no está disponible» a secas no dice qué
-        // hacer, y desde el mostrador se lee como que el código está malo.
-        return `${what} no está disponible para la venta (estado: ${status}).`;
-    }
-  }
 }
