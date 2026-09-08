@@ -66,6 +66,15 @@ export interface ScanResult {
    */
   belowCost?: boolean;
   /**
+   * El precio de lista del producto, por unidad.
+   *
+   * Viaja aparte del sugerido para que el punto de venta pueda **volver** al
+   * precio normal cuando el sugerido salió del mayorista: una caja se cobra al
+   * por mayor por defecto, pero a veces no se quiere, y sin este dato la única
+   * salida era teclear el precio a mano.
+   */
+  listPrice?: number | null;
+  /**
    * Qué trae la caja: talla y cuántos pares de cada una. Vacío en los pares
    * sueltos y en los productos de siempre.
    */
@@ -197,6 +206,7 @@ export class ScanService {
         // hay nada que comparar y no se avisa.
         belowCost:
           Number(unit.cost) > 0 && basePrice > 0 && basePrice <= Number(unit.cost),
+        listPrice: deLista > 0 ? deLista : null,
         wholesalePrice: mayorista > 0 ? mayorista : null,
         contents,
         stockUnitId: unit.id,

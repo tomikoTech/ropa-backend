@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Injectable,
   Logger,
   NotFoundException,
@@ -12,6 +13,7 @@ import { SizesService } from '../catalogs/sizes.service.js';
 import { ColorsService } from '../catalogs/colors.service.js';
 import { ProductEssence } from './entities/product-essence.entity.js';
 import { Product } from './entities/product.entity.js';
+import { problemaDelPrecioMayorista } from './precio-mayorista-valido.js';
 import { ProductVariant } from './entities/product-variant.entity.js';
 import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
 import { Category } from '../categories/entities/category.entity.js';
@@ -423,6 +425,13 @@ export class ProductsService {
         tenantId,
       );
 
+      const problema = problemaDelPrecioMayorista({
+        nuevo: dto.wholesalePrice,
+        anterior: null,
+        costo: dto.costPrice,
+      });
+      if (problema) throw new BadRequestException(problema);
+
       const product = this.productRepository.create({
         name: dto.name,
         displayName: dto.displayName,
@@ -698,8 +707,16 @@ export class ProductsService {
     if (dto.description !== undefined) product.description = dto.description;
     if (dto.basePrice !== undefined) product.basePrice = dto.basePrice;
     if (dto.costPrice !== undefined) product.costPrice = dto.costPrice;
-    if (dto.wholesalePrice !== undefined)
+    if (dto.wholesalePrice !== undefined) {
+      // El costo que manda es el que va a quedar, no el que había.
+      const problema = problemaDelPrecioMayorista({
+        nuevo: dto.wholesalePrice,
+        anterior: product.wholesalePrice,
+        costo: dto.costPrice ?? product.costPrice,
+      });
+      if (problema) throw new BadRequestException(problema);
       product.wholesalePrice = dto.wholesalePrice ?? null;
+    }
     if (dto.minimumSalePrice !== undefined)
       product.minimumSalePrice = dto.minimumSalePrice ?? null;
     if (dto.fixedPrice !== undefined) product.fixedPrice = !!dto.fixedPrice;
