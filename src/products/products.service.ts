@@ -40,6 +40,10 @@ import {
   avisoDeVariantesConservadas,
   seQuedaAunqueNoVengaEnElFormulario,
 } from './variante-en-uso.js';
+import {
+  apagaElRastreoConBultosVivos,
+  porQueNoSePuedeApagar,
+} from './apagar-el-rastreo.js';
 
 @Injectable()
 export class ProductsService {
@@ -745,7 +749,29 @@ export class ProductsService {
     if (dto.imageUrl !== undefined) product.imageUrl = dto.imageUrl;
     if (dto.imageUrls !== undefined) product.imageUrls = dto.imageUrls;
     if (dto.videoUrl !== undefined) product.videoUrl = dto.videoUrl;
-    if (dto.unitTracking !== undefined) product.unitTracking = dto.unitTracking;
+    // Apagar el manejo por cajas con cajas vivas encima deja sus etiquetas sin
+    // efecto y descuadra el inventario. Y casi nunca es intencional: la
+    // pantalla podía mandarlo apagado sin que nadie tocara el interruptor.
+    // Ver `apagar-el-rastreo.ts`.
+    if (dto.unitTracking !== undefined) {
+      const [conteo] = (await this.variantRepository.query(
+        `SELECT COUNT(*)::int AS vivos FROM stock_units
+          WHERE product_id = $1 AND status = 'IN_STOCK'`,
+        [id],
+      )) as { vivos: number }[];
+      if (
+        apagaElRastreoConBultosVivos({
+          actual: product.unitTracking ?? null,
+          pedido: dto.unitTracking,
+          bultosVivos: conteo?.vivos ?? 0,
+        })
+      ) {
+        throw new BadRequestException(
+          porQueNoSePuedeApagar(conteo?.vivos ?? 0),
+        );
+      }
+      product.unitTracking = dto.unitTracking;
+    }
     if (dto.isPublished !== undefined) {
       product.isPublished = dto.isPublished;
       product.publishedAt = dto.isPublished ? new Date() : null!;

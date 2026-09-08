@@ -101,6 +101,29 @@ describe('Editar un producto respeta las variantes con mercancía (e2e)', () => 
     expect(conMercancia!.isActive).toBe(true);
   }, 60000);
 
+  it('tampoco se puede apagar el manejo por cajas con cajas en bodega', async () => {
+    // La otra mitad del mismo accidente: la pantalla mandaba el interruptor
+    // apagado sin que nadie lo tocara, y eso dejaba las etiquetas sin efecto.
+    await request(app.getHttpServer())
+      .post('/api/stock-units/intake')
+      .set(auth())
+      .send({
+        productId,
+        boxes: 2,
+        unitsPerBox: 12,
+        warehouseId,
+        unitCost: 40000,
+      })
+      .expect(201);
+
+    const r = await request(app.getHttpServer())
+      .patch(`/api/products/${productId}`)
+      .set(auth())
+      .send({ unitTracking: false })
+      .expect(400);
+    expect(r.body.message).toContain('cajas etiquetadas');
+  }, 60000);
+
   it('y se puede seguir vendiendo esa talla', async () => {
     await request(app.getHttpServer())
       .post('/api/pos/sales')
