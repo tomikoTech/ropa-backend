@@ -35,6 +35,19 @@ export class HttpExceptionFilter implements ExceptionFilter {
     if (exception instanceof HttpException) {
       status = exception.getStatus();
       const exceptionResponse = exception.getResponse();
+      // El freno por IP contesta «ThrottlerException: Too Many Requests», que
+      // no le dice nada a quien está recibiendo mercancía. Se traduce a lo que
+      // de verdad pasó y a qué hacer.
+      if (status === HttpStatus.TOO_MANY_REQUESTS) {
+        response.status(status).json({
+          statusCode: status,
+          message:
+            'Demasiadas peticiones seguidas desde esta conexión. Espera un ' +
+            'minuto y vuelve a intentarlo.',
+          timestamp: new Date().toISOString(),
+        });
+        return;
+      }
       if (typeof exceptionResponse === 'string') {
         message = exceptionResponse;
       } else if (

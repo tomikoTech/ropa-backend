@@ -58,12 +58,29 @@ import { QzModule } from './qz/qz.module.js';
       isGlobal: true,
       load: [configuration],
     }),
-    // Freno por IP. El límite global es holgado (uso normal ni lo roza); su
-    // razón de ser es cortar el scraping y, sobre todo, la fuerza bruta contra
-    // `/auth/login`, que además lleva su propio límite estricto. `skipIf` deja
-    // apagarlo en los E2E, que disparan cientos de peticiones desde una sola IP.
+    /**
+     * Freno por IP. Su razón de ser es cortar el scraping y la fuerza bruta
+     * contra `/auth/login`, que además lleva su propio límite estricto (10 por
+     * minuto) — ahí es donde este freno de verdad protege algo.
+     *
+     * Estaba en 200 por minuto con la nota «uso normal ni lo roza», y sí lo
+     * rozaba: recibir una compra de cuarenta renglones son cuarenta POST más la
+     * recarga de la pantalla —seis llamadas cada vez—, casi trescientas. Quien
+     * recibía mercancía terminaba viendo «Too Many Requests».
+     *
+     * Y el límite es **por IP**, no por persona: una tienda con cinco cajeros
+     * detrás del mismo router comparte el cupo entre los cinco. Con 200 eso son
+     * 40 peticiones por cajero por minuto, que es menos de lo que gasta abrir
+     * seis pantallas.
+     *
+     * Mil deja el trabajo tranquilo y sigue cortando lo que este freno existe
+     * para cortar: nadie recorre un catálogo entero a mil por minuto sin que se
+     * note, y el login ni se acerca.
+     */
     ThrottlerModule.forRoot({
-      throttlers: [{ ttl: 60_000, limit: 200 }],
+      throttlers: [{ ttl: 60_000, limit: 1000 }],
+      // `skipIf` deja apagarlo en los E2E, que disparan cientos de peticiones
+      // desde una sola IP.
       skipIf: () => process.env.THROTTLE_DISABLED === 'true',
     }),
     TypeOrmModule.forRootAsync({
