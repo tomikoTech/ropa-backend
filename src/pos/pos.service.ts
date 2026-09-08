@@ -1902,14 +1902,21 @@ export class PosService {
                   })
                 : [];
               const reparto = repartirPorBodega(
-                pedidos.map((u) => ({ id: u.id, warehouseId: u.warehouseId })),
+                // Cuánto trae cada bulto: una caja de 24 cubre 24 de la línea,
+                // no una. Contarla como una dejaba «faltando 23», que salían
+                // ADEMÁS por la cascada: cada edición se comía 24 unidades.
+                pedidos.map((u) => ({
+                  id: u.id,
+                  warehouseId: u.warehouseId,
+                  unidades: Number(u.quantity) || 1,
+                })),
                 item.quantity,
               );
               for (const grupo of reparto.porBodega) {
                 await this.ledger.mover(manager, {
                   variantId: variant.id,
                   warehouseId: grupo.warehouseId,
-                  cantidad: -grupo.unidades.length,
+                  cantidad: -grupo.cantidad,
                   motivo: 'SALE',
                   referenciaId: sale.id,
                   notas: `Edición venta ${sale.saleNumber}`,

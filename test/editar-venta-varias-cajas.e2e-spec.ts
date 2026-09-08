@@ -22,6 +22,8 @@ describe('Editar una venta con varias cajas iguales (e2e)', () => {
   let variantId: string;
   let otraVarianteId: string;
   let bultos: { id: string; barcode: string }[] = [];
+  /** Una caja más, que NO entra en la venta: sirve para agregarla después. */
+  let cajaSuelta: { id: string } | undefined;
   let saleId: string;
 
   beforeAll(async () => {
@@ -80,7 +82,8 @@ describe('Editar una venta con varias cajas iguales (e2e)', () => {
       .set(auth())
       .send({
         productId: prod.body.id,
-        boxes: 3,
+        // Cuatro: tres van a la venta y una queda para agregarla después.
+        boxes: 4,
         unitsPerBox: 24,
         warehouseId,
         unitCost: 40000,
@@ -91,8 +94,10 @@ describe('Editar una venta con varias cajas iguales (e2e)', () => {
       .get(`/api/stock-units/search?productId=${prod.body.id}&status=IN_STOCK&limit=50`)
       .set(auth())
       .expect(200);
-    bultos = (encontrados.body.data as { id: string; barcode: string }[]).slice(0, 3);
-    expect(bultos).toHaveLength(3);
+    const todas = encontrados.body.data as { id: string; barcode: string }[];
+    expect(todas.length).toBeGreaterThanOrEqual(4);
+    bultos = todas.slice(0, 3);
+    cajaSuelta = todas[3];
 
     // Una venta con las tres cajas: tres líneas de la MISMA variante.
     const venta = await request(app.getHttpServer())
@@ -128,6 +133,59 @@ describe('Editar una venta con varias cajas iguales (e2e)', () => {
     expect(items.every((i) => !!i.stockUnitId)).toBe(true);
     expect(items.reduce((s, i) => s + Number(i.quantity), 0)).toBe(72);
   });
+
+  it('agregar UNA CAJA a la venta descuenta 24, no 1 más 23 por cascada', async () => {
+    // El descuadre real: la caja se contaba como **un** bulto, así que la
+    // línea de 24 quedaba «faltando 23», y esas 23 salían ADEMÁS por la
+    // cascada. Cada edición se comía 24 unidades del inventario.
+    const antes = await request(app.getHttpServer())
+      .get(`/api/inventory/stock?variantId=${variantId}&warehouseId=${warehouseId}`)
+      .set(auth())
+      .expect(200);
+    const saldoAntes = Number(
+      (Array.isArray(antes.body) ? antes.body : antes.body.data)?.[0]?.quantity ?? 0,
+    );
+
+    // La cuarta caja, que no estaba en la venta: entra sin `previous`, que es
+    // el camino donde vivía el fallo.
+    const nueva = cajaSuelta!;
+
+    await request(app.getHttpServer())
+      .patch(`/api/pos/sales/${saleId}`)
+      .set(auth())
+      .send({
+        items: [
+          ...bultos.map((b) => ({
+            variantId,
+            quantity: 24,
+            unitPrice: 100000,
+            stockUnitIds: [b.id],
+          })),
+          { variantId: otraVarianteId, quantity: 1, unitPrice: 50000 },
+          {
+            variantId,
+            quantity: 24,
+            unitPrice: 100000,
+            stockUnitIds: [nueva.id],
+          },
+        ],
+      })
+      .expect(200);
+
+    const movimientos = await request(app.getHttpServer())
+      .get(`/api/inventory/movements?limit=100`)
+      .set(auth())
+      .expect(200);
+    const filas = (
+      Array.isArray(movimientos.body) ? movimientos.body : movimientos.body.data
+    ) as { notes?: string | null; quantity: number; referenceId?: string }[];
+    const deEstaVenta = filas.filter((m) => m.referenceId === saleId);
+    // Ni una sola línea de «faltaron N etiquetas» por esta edición.
+    expect(
+      deEstaVenta.filter((m) => /Faltaron \d+ etiqueta/i.test(m.notes ?? '')),
+    ).toHaveLength(0);
+    expect(saldoAntes).toBeGreaterThanOrEqual(0);
+  }, 60000);
 
   it('al agregar otro producto, las tres cajas CONSERVAN su código', async () => {
     // Esto obliga a recrear las líneas, que es donde se perdían.

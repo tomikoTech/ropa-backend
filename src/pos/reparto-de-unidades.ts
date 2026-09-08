@@ -13,15 +13,34 @@
  * que agruparlos por dónde están. Y puede que no alcancen para toda la línea:
  * el resto sale de la cascada de siempre, y por eso se devuelve cuántos faltan
  * en vez de fallar.
+ *
+ * **Un bulto no vale uno: vale lo que trae.** Una caja de 24 es UN bulto con 24
+ * unidades adentro. Contarla como una dejaba la línea corta en 23 —«faltaron 23
+ * etiquetas»— y esas 23 salían por la cascada, además de las 24 que la caja ya
+ * se llevaba. Cada edición de una venta con cajas se comía 24 unidades del
+ * inventario y lo dejaba en negativo.
+ *
+ * Y una caja **no se parte**: si trae 24 y solo faltan 10, no se toma. Vender
+ * media caja no significa nada, y descontar 24 para cubrir 10 es peor.
  */
 
 export interface UnidadElegida {
   id: string;
   warehouseId: string;
+  /**
+   * Cuántas unidades trae ese bulto: una caja de 24 vale 24, un par vale 1.
+   * Ausente = uno, que es lo que era antes de que existieran las cajas.
+   */
+  unidades?: number;
 }
 
 export interface RepartoDeUnidades {
-  porBodega: { warehouseId: string; unidades: string[] }[];
+  porBodega: {
+    warehouseId: string;
+    unidades: string[];
+    /** Lo que suman esos bultos. NO es `unidades.length` si hay cajas. */
+    cantidad: number;
+  }[];
   /** Cuántas unidades quedan por cubrir con la cascada. */
   faltan: number;
 }
@@ -32,7 +51,7 @@ export function repartirPorBodega(
 ): RepartoDeUnidades {
   const tope = Math.max(0, Math.trunc(cantidad));
   const vistos = new Set<string>();
-  const porBodega = new Map<string, string[]>();
+  const porBodega = new Map<string, { unidades: string[]; cantidad: number }>();
   let tomadas = 0;
 
   for (const unidad of elegidas) {
@@ -40,11 +59,22 @@ export function repartirPorBodega(
     // El mismo bulto no se puede descontar dos veces: contarlo doble dejaría
     // la línea corta sin que nadie se entere.
     if (vistos.has(unidad.id)) continue;
+    const trae = Math.max(1, Math.trunc(unidad.unidades ?? 1));
+    // Una caja no se parte: si no cabe en lo que falta, se salta y lo cubre la
+    // cascada. Tomarla entera descontaría de más.
+    if (tomadas + trae > tope) continue;
     vistos.add(unidad.id);
-    const lista = porBodega.get(unidad.warehouseId);
-    if (lista) lista.push(unidad.id);
-    else porBodega.set(unidad.warehouseId, [unidad.id]);
-    tomadas++;
+    const grupo = porBodega.get(unidad.warehouseId);
+    if (grupo) {
+      grupo.unidades.push(unidad.id);
+      grupo.cantidad += trae;
+    } else {
+      porBodega.set(unidad.warehouseId, {
+        unidades: [unidad.id],
+        cantidad: trae,
+      });
+    }
+    tomadas += trae;
   }
 
   return {
@@ -52,7 +82,7 @@ export function repartirPorBodega(
     // bodegas en el mismo orden, o un descuadre deja de ser reproducible.
     porBodega: [...porBodega.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([warehouseId, unidades]) => ({ warehouseId, unidades })),
+      .map(([warehouseId, grupo]) => ({ warehouseId, ...grupo })),
     faltan: tope - tomadas,
   };
 }
