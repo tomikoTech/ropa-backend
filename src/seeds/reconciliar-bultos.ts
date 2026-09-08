@@ -113,6 +113,46 @@ async function descuadres(
   }));
 }
 
+/**
+ * Saldos por debajo de cero: imposibles, y ningún script los tocaba.
+ *
+ * Salen cuando algo descuenta más de lo que había —una edición que movía dos
+ * veces la misma caja, por ejemplo—. El ledger no frena la venta y lo anota en
+ * el movimiento, pero el número queda mal hasta que alguien lo sube.
+ */
+async function negativosDe(
+  manager: EntityManager,
+  tenantId: string,
+): Promise<
+  {
+    variant_id: string;
+    warehouse_id: string;
+    sku: string;
+    warehouse_name: string;
+    quantity: number;
+  }[]
+> {
+  const filas = await manager.query<
+    {
+      variant_id: string;
+      warehouse_id: string;
+      sku: string;
+      warehouse_name: string;
+      quantity: string;
+    }[]
+  >(
+    `SELECT s.variant_id, s.warehouse_id, pv.sku, w.name AS warehouse_name,
+            s.quantity
+       FROM stock s
+       JOIN product_variants pv ON pv.id = s.variant_id
+       JOIN warehouses w ON w.id = s.warehouse_id
+      WHERE s.tenant_id = $1 AND s.quantity < 0
+      ORDER BY s.quantity ASC`,
+    [tenantId],
+  );
+  return filas.map((f) => ({ ...f, quantity: Number(f.quantity) }));
+}
+
 async function main() {
   const aplicar = process.env.MODE === 'apply';
   const slug = process.env.CONFIRM_TENANT;
@@ -132,8 +172,21 @@ async function main() {
       throw new Error(`No existe la tienda «${slug}».`);
     }
 
+    // Un saldo por debajo de cero es **imposible**: no hay bodegas con menos
+    // uno. Se corrige aparte porque el resto del script da por bueno el
+    // agregado, así que un negativo se le iba por delante.
+    const negativos = await negativosDe(AppDataSource.manager, tenant.id);
+    if (negativos.length > 0) {
+      console.log(`\n«${slug}» — ${negativos.length} saldo(s) en negativo:\n`);
+      for (const n of negativos) {
+        console.log(
+          `  ${n.sku.padEnd(22)} ${n.warehouse_name.padEnd(22)} saldo ${n.quantity} → 0`,
+        );
+      }
+    }
+
     const puntos = await descuadres(AppDataSource.manager, tenant.id);
-    if (puntos.length === 0) {
+    if (puntos.length === 0 && negativos.length === 0) {
       console.log(`«${slug}»: las dos cuentas ya están de acuerdo.`);
       return;
     }
@@ -173,6 +226,26 @@ async function main() {
       const unitRepo = manager.getRepository(StockUnit);
       const eventRepo = manager.getRepository(StockUnitEvent);
       const hoy = new Date();
+
+      // Primero los negativos: subirlos a cero es la única lectura posible
+      // —no hay bodegas con menos uno— y hay que hacerlo antes de comparar
+      // contra las etiquetas, o el desacuerdo se calcula sobre un número que
+      // no puede ser.
+      //
+      // Se escribe el agregado directo, sin pasar por el ledger, **a
+      // propósito**: el ledger crearía etiquetas para la unidad que sube, y
+      // acá no entró mercancía —se está corrigiendo una resta que sobró—.
+      // Queda el rastro en el evento y en la salida del script.
+      for (const n of await negativosDe(manager, tenant.id)) {
+        await manager.query(
+          `UPDATE stock SET quantity = 0
+            WHERE tenant_id = $1 AND variant_id = $2 AND warehouse_id = $3`,
+          [tenant.id, n.variant_id, n.warehouse_id], // ledger-exento: repara el agregado, no mueve mercancía
+        );
+        console.log(
+          `  ${n.sku}: saldo ${n.quantity} → 0 en ${n.warehouse_name}.`,
+        );
+      }
 
       // El diagnóstico se rehace aquí adentro: el de arriba era para que un
       // humano lo leyera, y entre leerlo y aplicarlo la tienda pudo vender.
@@ -252,7 +325,72 @@ async function main() {
           continue;
         }
 
-        // Falta etiqueta: se crea una por unidad, para poder imprimirla.
+        // Falta etiqueta. **Antes de inventar una, se busca la que se perdió.**
+        //
+        // Un bulto marcado vendido al que ninguna venta apunta es un artefacto,
+        // no mercancía que salió: pasa cuando una edición marca la caja y luego
+        // pierde el vínculo. Devolverlo a disponible recupera la caja real —con
+        // su código impreso, su costo y su contenido— en vez de crear pares
+        // sueltos que nadie tiene en la mano.
+        const huerfanos: { id: string; barcode: string; quantity: number }[] =
+          await manager.query(
+            `SELECT su.id, su.barcode, su.quantity
+               FROM stock_units su
+              WHERE su.tenant_id = $1
+                AND su.variant_id = $2
+                AND su.warehouse_id = $3
+                AND su.status = 'SOLD'
+                AND NOT EXISTS (
+                  SELECT 1 FROM sale_items si WHERE si.stock_unit_id = su.id
+                )
+              ORDER BY su.created_at DESC, su.id DESC`,
+            [tenant.id, p.variant_id, p.warehouse_id],
+          );
+        let porRecuperar = diferencia;
+        const recuperados: typeof huerfanos = [];
+        for (const h of huerfanos) {
+          if (porRecuperar <= 0) break;
+          // Una caja no se parte: si trae más de lo que falta, se deja.
+          if (Number(h.quantity) > porRecuperar) continue;
+          recuperados.push(h);
+          porRecuperar -= Number(h.quantity);
+        }
+        if (recuperados.length > 0) {
+          await unitRepo.update(
+            { id: In(recuperados.map((h) => h.id)), tenantId: tenant.id },
+            { status: StockUnitStatus.IN_STOCK },
+          );
+          await eventRepo.save(
+            recuperados.map((h) =>
+              eventRepo.create({
+                stockUnitId: h.id,
+                eventType: StockUnitEventType.RECEIVED,
+                fromStatus: StockUnitStatus.SOLD,
+                toStatus: StockUnitStatus.IN_STOCK,
+                referenceType: REFERENCIA,
+                referenceId: null,
+                metadata: {
+                  motivo:
+                    'Estaba marcado como vendido pero ninguna venta lo ' +
+                    'reclamaba: se devolvió a disponible al poner de acuerdo ' +
+                    'las dos cuentas.',
+                  agregado: p.agregado,
+                  etiquetadas: p.etiquetadas,
+                },
+                tenantId: tenant.id,
+              }),
+            ),
+          );
+          console.log(
+            `  ${p.sku}: se recuperaron ${recuperados.length} bulto(s) que ` +
+              `figuraban vendidos sin venta (${recuperados
+                .map((h) => h.barcode)
+                .join(', ')}).`,
+          );
+        }
+        // Lo que ni así se cubre, sí hay que crearlo.
+        if (porRecuperar <= 0) continue;
+
         const variante = await manager.getRepository(ProductVariant).findOne({
           where: { id: p.variant_id, tenantId: tenant.id },
         });
@@ -265,7 +403,7 @@ async function main() {
               'llegó a 999 en un mismo día. Corre el resto mañana.',
           );
         }
-        for (let i = 0; i < diferencia; i++) {
+        for (let i = 0; i < porRecuperar; i++) {
           nuevas.push(
             unitRepo.create({
               barcode: withCheckDigit(
