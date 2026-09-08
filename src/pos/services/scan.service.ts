@@ -319,7 +319,9 @@ export class ScanService {
       case StockUnitStatus.WRITTEN_OFF:
         return `${what} fue dada de baja.`;
       default:
-        return `${what} no está disponible para la venta.`;
+        // Con el estado a la vista: «no está disponible» a secas no dice qué
+        // hacer, y desde el mostrador se lee como que el código está malo.
+        return `${what} no está disponible para la venta (estado: ${status}).`;
     }
   }
 }
