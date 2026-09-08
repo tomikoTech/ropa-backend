@@ -30,6 +30,24 @@ export type Veredicto =
   | { permitido: true }
   | { permitido: false; porque: string };
 
+/**
+ * Cuánto habría que reconocer como **faltante** después de mover.
+ *
+ * Un saldo por debajo de cero no es un aviso: es un número imposible. No hay
+ * bodegas con menos uno, y todo lo que se calcule después —la valorización, el
+ * balance, el «cuánto queda del pedido»— arrastra la mentira sin que nadie la
+ * vea. Que el sistema lo dejara así era decir «acá hay algo raro» en el único
+ * sitio donde nadie mira.
+ *
+ * Lo que de verdad pasó es que salió mercancía que el inventario no tenía
+ * registrada. Eso tiene nombre en contabilidad y no es «saldo negativo»: es un
+ * **faltante**, y se reconoce con un ajuste. La salida queda por su valor real
+ * —la venta no se toca— y el faltante aparte, con su propio movimiento.
+ */
+export function faltanteAReconocer(despues: number): number {
+  return despues < 0 ? -despues : 0;
+}
+
 /** Cuánto saca este movimiento. Cero o negativo si no saca nada. */
 export function loQueSaca(m: Movimiento): number {
   return Math.max(0, m.antes - m.despues);

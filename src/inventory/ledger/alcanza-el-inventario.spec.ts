@@ -1,6 +1,7 @@
 import {
   alcanzaElInventario,
   loQueSaca,
+  faltanteAReconocer,
 } from './alcanza-el-inventario.js';
 
 describe('alcanzaElInventario', () => {
@@ -102,5 +103,18 @@ describe('alcanzaElInventario', () => {
     it('es cero cuando no se mueve nada', () => {
       expect(loQueSaca({ antes: 3, despues: 3 })).toBe(0);
     });
+  });
+});
+
+describe('faltanteAReconocer', () => {
+  it('un saldo que queda en rojo es un faltante, no un saldo', () => {
+    // No hay bodegas con menos uno: salió mercancía que no estaba registrada.
+    expect(faltanteAReconocer(-1)).toBe(1);
+    expect(faltanteAReconocer(-24)).toBe(24);
+  });
+
+  it('un saldo sano no reconoce nada', () => {
+    expect(faltanteAReconocer(0)).toBe(0);
+    expect(faltanteAReconocer(15)).toBe(0);
   });
 });

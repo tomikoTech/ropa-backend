@@ -31,7 +31,9 @@ import {
   repartirEtiquetasDelDia,
   type TramoDeEtiquetas,
 } from '../reparto-de-etiquetas.js';
-import { alcanzaElInventario } from './alcanza-el-inventario.js';
+import { alcanzaElInventario,
+  faltanteAReconocer,
+} from './alcanza-el-inventario.js';
 
 /**
  * El único sitio por donde se mueve el inventario.
@@ -319,9 +321,40 @@ export class StockLedgerService {
       });
     }
 
+    // **El inventario nunca queda en un número imposible.**
+    //
+    // Si el movimiento dejó el saldo en rojo, lo que pasó de verdad es que
+    // salió mercancía que el inventario no tenía registrada. Eso es un
+    // **faltante**, y se reconoce con su propio ajuste: la salida queda por su
+    // valor real —la venta no se toca— y el faltante aparte, con su
+    // movimiento, su fecha y su explicación.
+    //
+    // Antes se dejaba el saldo negativo «como aviso». Pero un aviso que vive
+    // en una columna que nadie mira no avisa: envenena la valorización, el
+    // balance y el «cuánto queda», y el descuadre crece sin que nadie lo note.
+    let saldoFinal = despues;
+    const faltante = faltanteAReconocer(despues);
+    if (faltante > 0) {
+      stock.quantity = 0;
+      await manager.getRepository(Stock).save(stock);
+      await this.registrarMovimiento(
+        manager,
+        {
+          ...orden,
+          motivo: 'ADJUSTMENT',
+          notas:
+            `Faltante reconocido: el inventario tenía ${antes} y salieron ` +
+            `${-delta}. Se ajusta a cero — un saldo negativo no existe.`,
+        },
+        faltante,
+        { antes: despues, despues: 0, sinEtiqueta: 0, unidades: [] },
+      );
+      saldoFinal = 0;
+    }
+
     await this.exigirCuadre(manager, tenantId, variantId, warehouseId, orden);
 
-    return { saldo: despues, unidades, sinEtiqueta };
+    return { saldo: saldoFinal, unidades, sinEtiqueta };
   }
 
   /**
