@@ -1585,9 +1585,30 @@ export class PosService {
         const stockRepo = manager.getRepository(Stock);
         const saleItemRepo = manager.getRepository(SaleItem);
         const variantRepo = manager.getRepository(ProductVariant);
-        const previousByVariant = new Map(
-          sale.items.map((item) => [item.variantId, item]),
-        );
+        /**
+         * Las líneas que tenía la venta, para heredar de ellas.
+         *
+         * Era un `Map` por variante, y eso **perdía líneas**: una venta con
+         * cuatro cajas de la misma referencia entra al mapa como una sola —la
+         * última—, así que tres se quedaban sin su `previous` y perdían el
+         * vínculo con su caja física. La caja dejaba de marcarse como vendida y
+         * el detalle la mostraba «sin código».
+         *
+         * Una lista que se va consumiendo sí distingue las cuatro.
+         */
+        const anteriores = [...sale.items];
+        /** Toma la línea anterior que le corresponde a esta, y la consume. */
+        const tomarAnterior = (variantId: string, cantidad: number) => {
+          // Primero la que coincide en variante Y cantidad: es la que puede
+          // conservar su código físico.
+          let i = anteriores.findIndex(
+            (a) => a.variantId === variantId && Number(a.quantity) === cantidad,
+          );
+          // Si no, cualquiera de esa variante: sirve para heredar el IVA y el
+          // nombre, aunque el código ya no aplique.
+          if (i < 0) i = anteriores.findIndex((a) => a.variantId === variantId);
+          return i < 0 ? undefined : anteriores.splice(i, 1)[0];
+        };
         const settings = await manager
           .getRepository(StoreSettings)
           .findOne({ where: { tenantId } });
@@ -1775,10 +1796,9 @@ export class PosService {
               precioFijo: !!variant.product.fixedPrice,
             });
 
-            // Se consume el snapshot: si la venta traía dos líneas de la misma
-            // variante, la segunda no puede heredar el mismo código físico.
-            const previous = previousByVariant.get(variant.id);
-            if (previous) previousByVariant.delete(variant.id);
+            // Se consume el snapshot: cada línea hereda **el suyo**, y dos
+            // líneas de la misma variante no se quedan con el mismo código.
+            const previous = tomarAnterior(variant.id, item.quantity);
             const taxRate = previous
               ? Number(previous.taxRate)
               : fallbackTaxRate;
