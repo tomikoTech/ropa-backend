@@ -15,8 +15,8 @@ export class AuthController {
 
   // Límite estricto: 10 intentos por minuto y por IP. Un humano que se
   // equivoca no llega ahí; un ataque de fuerza bruta, que necesita miles por
-  // segundo, se queda sin margen. El freno global (200/min) es demasiado laxo
-  // para esto, así que login y refresh llevan el suyo propio.
+  // segundo, se queda sin margen. El freno global es demasiado laxo para
+  // adivinar contraseñas, así que el login lleva el suyo propio.
   @Public()
   @Throttle({ default: { ttl: 60_000, limit: 10 } })
   @Post('login')
@@ -30,8 +30,21 @@ export class AuthController {
   // El antiguo `POST /auth/register` era público y creaba un usuario sin
   // tenant —una cuenta que cualquiera podía abrir en el backend—.
 
+  /**
+   * Renovar la sesión **no** es adivinar una contraseña.
+   *
+   * Compartía el límite de 10 por minuto con el login, y el límite es por IP:
+   * una tienda con cinco cajeros detrás del mismo router lo agota sin que nadie
+   * haga nada raro —cada pantalla renueva sola cada quince minutos—. Cuando se
+   * agotaba, la renovación fallaba y la persona veía «tu sesión expiró» en
+   * mitad de una venta.
+   *
+   * Quien pide esto ya trae un token válido de un solo uso: no hay nada que
+   * adivinar a fuerza bruta. Sesenta por minuto y por IP deja trabajar a una
+   * tienda entera y sigue cortando un bucle desbocado.
+   */
   @Public()
-  @Throttle({ default: { ttl: 60_000, limit: 10 } })
+  @Throttle({ default: { ttl: 60_000, limit: 60 } })
   @Post('refresh')
   @ApiOperation({ summary: 'Refrescar token de acceso' })
   refresh(@Body() refreshTokenDto: RefreshTokenDto) {
