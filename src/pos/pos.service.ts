@@ -62,6 +62,10 @@ import {
   tomarParaLaLinea,
   type CodigoDisponible,
 } from './repartir-codigos-en-lineas.js';
+import {
+  bultosRepetidos,
+  porQueNoSePuedeGuardar,
+} from './bultos-repetidos.js';
 
 @Injectable()
 export class PosService {
@@ -1604,6 +1608,16 @@ export class PosService {
       ) {
         if (requestedItems.length === 0) {
           throw new BadRequestException('La venta debe tener al menos un ítem');
+        }
+
+        // Un código es **esa** caja o **ese** par: repetido, la factura estaría
+        // vendiendo dos veces la misma mercancía. Se comprueba antes de tocar
+        // nada. Ver `bultos-repetidos.ts`.
+        {
+          const repetidos = bultosRepetidos(requestedItems);
+          if (repetidos.length) {
+            throw new BadRequestException(porQueNoSePuedeGuardar(repetidos));
+          }
         }
         const stockRepo = manager.getRepository(Stock);
         const saleItemRepo = manager.getRepository(SaleItem);

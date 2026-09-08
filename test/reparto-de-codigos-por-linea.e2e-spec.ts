@@ -113,6 +113,24 @@ describe('Cada línea se queda con sus cajas (e2e)', () => {
     expect(new Set(todos).size).toBe(3);
   }, 60000);
 
+  it('el servidor no acepta la misma caja en dos renglones', async () => {
+    // Lo que rompió una factura de verdad: una pantalla aplanó siete cajas de
+    // 24 en renglones de un par, cada uno arrastrando el código de su caja.
+    const r = await request(app.getHttpServer())
+      .patch(`/api/pos/sales/${saleId}`)
+      .set(auth())
+      .send({
+        items: Array.from({ length: 24 }, () => ({
+          variantId,
+          quantity: 1,
+          unitPrice: 100000,
+          stockUnitIds: [cajas[0].id],
+        })),
+      })
+      .expect(400);
+    expect(r.body.message).toContain('24 veces');
+  }, 60000);
+
   it('y por eso se le puede anexar un producto sin que reviente', async () => {
     const actual = await request(app.getHttpServer())
       .get(`/api/pos/sales/${saleId}`)
