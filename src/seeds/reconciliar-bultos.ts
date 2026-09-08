@@ -90,7 +90,10 @@ async function descuadres(
            pv.sku, p.name AS product_name,
            COALESCE(a.warehouse_id, e.warehouse_id) AS warehouse_id,
            w.name AS warehouse_name,
-           COALESCE(a.u, 0) AS agregado,
+           -- Un negativo se lee como cero: es lo que va a ser en cuanto se
+           -- corrija (paso 1). Sin esto el ensayo decía «sobran etiquetas»
+           -- para una fila que después del arreglo ya está de acuerdo.
+           GREATEST(COALESCE(a.u, 0), 0) AS agregado,
            COALESCE(e.u, 0) AS etiquetadas
     FROM agregado a
     FULL OUTER JOIN etiquetadas e
@@ -101,7 +104,7 @@ async function descuadres(
     WHERE (p.unit_tracking OR EXISTS (
             SELECT 1 FROM store_settings ss
              WHERE ss.tenant_id = $1 AND ss.unit_tracking_enabled))
-      AND COALESCE(a.u, 0) <> COALESCE(e.u, 0)
+      AND GREATEST(COALESCE(a.u, 0), 0) <> COALESCE(e.u, 0)
     ORDER BY p.name, pv.sku, w.name
     `,
     [tenantId],
@@ -153,6 +156,53 @@ async function negativosDe(
   return filas.map((f) => ({ ...f, quantity: Number(f.quantity) }));
 }
 
+/**
+ * Bultos marcados vendidos a los que **ninguna venta apunta**.
+ *
+ * No es mercancía que salió: es el rastro de una edición que marcó la caja y
+ * perdió el vínculo. Recuperarlos devuelve la caja real —con su código impreso,
+ * su costo y su contenido— en vez de crear pares sueltos que nadie tiene.
+ */
+async function huerfanosDe(
+  manager: EntityManager,
+  tenantId: string,
+  variantId: string,
+  warehouseId: string,
+): Promise<{ id: string; barcode: string; quantity: number }[]> {
+  const filas = await manager.query<
+    { id: string; barcode: string; quantity: string }[]
+  >(
+    `SELECT su.id, su.barcode, su.quantity
+       FROM stock_units su
+      WHERE su.tenant_id = $1 AND su.variant_id = $2 AND su.warehouse_id = $3
+        AND su.status = 'SOLD'
+        AND NOT EXISTS (
+          SELECT 1 FROM sale_items si WHERE si.stock_unit_id = su.id
+        )
+      ORDER BY su.created_at DESC, su.id DESC`,
+    [tenantId, variantId, warehouseId],
+  );
+  return filas.map((f) => ({ ...f, quantity: Number(f.quantity) }));
+}
+
+/** Cuántos de esos huérfanos caben en lo que falta. Una caja no se parte. */
+function cuantosCaben(
+  huerfanos: { quantity: number }[],
+  falta: number,
+): { recuperables: number; unidades: number } {
+  let porCubrir = falta;
+  let recuperables = 0;
+  let unidades = 0;
+  for (const h of huerfanos) {
+    if (porCubrir <= 0) break;
+    if (h.quantity > porCubrir) continue;
+    recuperables += 1;
+    unidades += h.quantity;
+    porCubrir -= h.quantity;
+  }
+  return { recuperables, unidades };
+}
+
 async function main() {
   const aplicar = process.env.MODE === 'apply';
   const slug = process.env.CONFIRM_TENANT;
@@ -193,13 +243,31 @@ async function main() {
 
     let sobran = 0;
     let faltan = 0;
+    let recuperables = 0;
     console.log(
       `\n«${slug}» — ${puntos.length} combinaciones de variante y bodega en desacuerdo:\n`,
     );
     for (const p of puntos) {
       const diferencia = p.agregado - p.etiquetadas;
+      // Lo que se puede recuperar de bultos marcados vendidos sin venta: eso
+      // NO se crea, se rescata. El ensayo tiene que decir cuál es cuál.
+      const rescate =
+        diferencia > 0
+          ? cuantosCaben(
+              await huerfanosDe(
+                AppDataSource.manager,
+                tenant.id,
+                p.variant_id,
+                p.warehouse_id,
+              ),
+              diferencia,
+            )
+          : { recuperables: 0, unidades: 0 };
       if (diferencia < 0) sobran += -diferencia;
-      else faltan += diferencia;
+      else {
+        faltan += diferencia - rescate.unidades;
+        recuperables += rescate.recuperables;
+      }
       console.log(
         `  ${p.sku.padEnd(22)} ${p.warehouse_name.padEnd(22)} ` +
           `agregado ${String(p.agregado).padStart(4)} · códigos ${String(
@@ -207,11 +275,18 @@ async function main() {
           ).padStart(4)} · ` +
           (diferencia < 0
             ? `sobran ${-diferencia} etiqueta(s)`
-            : `falta(n) ${diferencia} etiqueta(s)`),
+            : rescate.unidades >= diferencia
+              ? `se recuperan ${rescate.recuperables} bulto(s) marcado(s) vendido(s) sin venta`
+              : rescate.unidades > 0
+                ? `se recuperan ${rescate.recuperables} bulto(s) y se crean ${
+                    diferencia - rescate.unidades
+                  } etiqueta(s)`
+                : `falta(n) ${diferencia} etiqueta(s)`),
       );
     }
     console.log(
-      `\nTotal: ${sobran} etiqueta(s) a dar de baja, ${faltan} a crear.\n`,
+      `\nTotal: ${sobran} etiqueta(s) a dar de baja, ${recuperables} bulto(s) ` +
+        `a recuperar, ${faltan} etiqueta(s) a crear.\n`,
     );
 
     if (!aplicar) {
