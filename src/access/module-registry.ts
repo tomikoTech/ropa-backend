@@ -208,6 +208,9 @@ export const MODULE_KEYS = MODULES.map((m) => m.key);
  * aunque compartan controlador.
  */
 const ROUTE_MODULES: Record<string, string> = {
+  // Cuánto tarda cada pantalla: información de administración, no de
+  // mostrador. Va con Auditoría, que es donde vive el resto de lo mismo.
+  tiempos: 'audit',
   // POS: el controlador es uno, los módulos son varios.
   // `pos/sales` sigue listado aparte de `pos` aunque apunten al mismo módulo:
   // es lo que hace que `POST /pos/sales` cuente como CREAR (cerrar una venta) y

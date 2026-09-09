@@ -25,6 +25,9 @@ export const getDatabaseConfig = (
     migrations: [__dirname + '/../migrations/*.{js,ts}'],
     migrationsRun: !isLocal,
     logging: configService.get<string>('NODE_ENV') === 'development',
+    // Deja en el log la consulta que pasa de este tiempo. Es lo que permite
+    // saber **cuál** SQL pesa sin tener que reproducir la lentitud a mano.
+    maxQueryExecutionTime: Number(process.env.LOG_SQL_LENTO_MS ?? 300),
     ...(sslEnabled && { ssl: { rejectUnauthorized: false } }),
   };
 };

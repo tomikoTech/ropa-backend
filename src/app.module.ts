@@ -24,6 +24,8 @@ import { PromotionsModule } from './promotions/promotions.module.js';
 import { ReturnsModule } from './returns/returns.module.js';
 import { ReportsModule } from './reports/reports.module.js';
 import { AuditModule } from './audit/audit.module.js';
+import { ObservabilidadModule } from './observabilidad/observabilidad.module.js';
+import { TiemposInterceptor } from './observabilidad/tiempos.interceptor.js';
 import { TenantsModule } from './tenants/tenants.module.js';
 import { StorefrontModule } from './storefront/storefront.module.js';
 import { PaymentsModule } from './payments/payments.module.js';
@@ -106,6 +108,7 @@ import { QzModule } from './qz/qz.module.js';
     ReturnsModule,
     ReportsModule,
     AuditModule,
+    ObservabilidadModule,
     TenantsModule,
     StorefrontModule,
     PaymentsModule,
@@ -152,6 +155,11 @@ import { QzModule } from './qz/qz.module.js';
     // Va PRIMERO: los interceptores globales se componen de fuera hacia dentro,
     // así que el primero registrado ve la respuesta ya serializada (objetos
     // planos) y puede limpiarla.
+    {
+      // Primero: así mide también lo que tardan los demás interceptores.
+      provide: APP_INTERCEPTOR,
+      useClass: TiemposInterceptor,
+    },
     {
       provide: APP_INTERCEPTOR,
       useClass: CostVisibilityInterceptor,
