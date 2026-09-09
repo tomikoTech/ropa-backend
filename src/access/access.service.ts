@@ -53,6 +53,11 @@ interface RoleAccess {
  * El costo real es una consulta indexada por `role_id` (una fila por módulo
  * concedido, ~30 como máximo), y la sesión ya consulta el usuario en cada
  * petición: no cambia el orden de magnitud.
+ *
+ * Medido en producción (sept 2026), buscando de dónde salían los cuatro
+ * segundos que reportaba el mostrador: son **2,75 ms** por ida y vuelta a la
+ * base, unos 40 ms por pantalla completa. No es ahí donde está el tiempo, y no
+ * vale abrir un hueco en el control de acceso por eso.
  */
 @Injectable()
 export class AccessService {
