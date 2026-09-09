@@ -13,6 +13,15 @@
  * que volvió resta. Así también sirve para una anulación parcial y para
  * cualquier motivo que se agregue después, sin tener que acordarse de este
  * archivo.
+ *
+ * Y un código no puede quedar **dos veces**. Un bulto es una caja física: o
+ * está en esta factura o no está, nunca dos. Una tarde de ediciones deja el
+ * historial desparejo —tres salidas del mismo código contra dos devoluciones,
+ * porque alguna edición no alcanzó a registrar su vuelta— y sin esta regla la
+ * lista lo repite. Ese código repetido se reparte entre dos renglones, la
+ * pantalla los siembra así, y al guardar el servidor se niega: «esta factura
+ * repite un bulto». La factura quedaba imposible de editar sin que nadie
+ * pudiera ver por qué.
  */
 
 export interface MovimientoConPares {
@@ -34,7 +43,9 @@ export function paresVigentesDeLaVenta(
     }
   }
 
-  const vigentes: string[] = [];
+  // Un `Set` y no una lista: conserva el orden de aparición y garantiza que
+  // ningún bulto salga dos veces.
+  const vigentes = new Set<string>();
   for (const m of movimientos) {
     if (m.quantity >= 0) continue;
     for (const codigo of m.unitBarcodes ?? []) {
@@ -44,8 +55,8 @@ export function paresVigentesDeLaVenta(
         devueltos.set(codigo, pendiente - 1);
         continue;
       }
-      vigentes.push(codigo);
+      vigentes.add(codigo);
     }
   }
-  return vigentes;
+  return [...vigentes];
 }

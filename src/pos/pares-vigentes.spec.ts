@@ -95,3 +95,50 @@ describe('paresVigentesDeLaVenta', () => {
     expect(paresVigentesDeLaVenta([])).toEqual([]);
   });
 });
+
+/**
+ * El caso que dejó una factura imposible de editar.
+ *
+ * Una tarde de ediciones sobre la misma venta dejó el historial desparejo: el
+ * código …0014 salió **tres** veces y volvió **dos**. La lista de vigentes lo
+ * devolvía repetido, el reparto se lo entregaba a dos renglones distintos, y
+ * al guardar el servidor se negaba —«esta factura repite un bulto»— sin que
+ * nadie pudiera ver por qué. Desde el mostrador: la factura no se deja tocar.
+ */
+describe('un bulto no puede quedar dos veces en la misma factura', () => {
+  it('con más salidas que devoluciones, el código sale una sola vez', () => {
+    const vigentes = paresVigentesDeLaVenta([
+      { quantity: -24, unitBarcodes: ['26090800010090014'] },
+      { quantity: -24, unitBarcodes: ['26090800010090014'] },
+      { quantity: -24, unitBarcodes: ['26090800010090014'] },
+      { quantity: 24, unitBarcodes: ['26090800010090014'] },
+    ]);
+    expect(vigentes).toEqual(['26090800010090014']);
+  });
+
+  it('dos cajas distintas siguen siendo dos', () => {
+    const vigentes = paresVigentesDeLaVenta([
+      { quantity: -24, unitBarcodes: ['A'] },
+      { quantity: -24, unitBarcodes: ['B'] },
+    ]);
+    expect(vigentes).toEqual(['A', 'B']);
+  });
+
+  it('conserva el orden en que salieron', () => {
+    const vigentes = paresVigentesDeLaVenta([
+      { quantity: -24, unitBarcodes: ['B'] },
+      { quantity: -24, unitBarcodes: ['A', 'B'] },
+      { quantity: -24, unitBarcodes: ['A'] },
+    ]);
+    expect(vigentes).toEqual(['B', 'A']);
+  });
+
+  it('lo que volvió sigue sin contar', () => {
+    const vigentes = paresVigentesDeLaVenta([
+      { quantity: -24, unitBarcodes: ['A'] },
+      { quantity: -24, unitBarcodes: ['A'] },
+      { quantity: 48, unitBarcodes: ['A', 'A'] },
+    ]);
+    expect(vigentes).toEqual([]);
+  });
+});
