@@ -20,7 +20,7 @@ import {
 } from './dto/stock-unit.dto.js';
 import { AbrirCajaDto } from './dto/abrir-caja.dto.js';
 import { DarDeBajaDto } from './dto/dar-de-baja.dto.js';
-import { RecostearDto } from './dto/recostear.dto.js';
+import { AlcanceRecosteo, RecostearDto } from './dto/recostear.dto.js';
 import { ReasignarDto } from './dto/reasignar.dto.js';
 
 /**
@@ -173,6 +173,18 @@ export class StockUnitsController {
     @TenantId() tenantId: string,
   ) {
     return this.units.darDeBaja(id, dto.motivo, userId, tenantId);
+  }
+
+  @Get(':id/recostear/alcance')
+  @ApiOperation({
+    summary: 'A cuántas filas llegaría el cambio de costo, antes de hacerlo',
+  })
+  alcanceDelRecosteo(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('alcance') alcance: AlcanceRecosteo,
+    @TenantId() tenantId: string,
+  ) {
+    return this.units.alcanceDelRecosteo(id, alcance, tenantId);
   }
 
   @Post(':id/recostear')

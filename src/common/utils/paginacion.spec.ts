@@ -64,7 +64,9 @@ describe('armarPaginado', () => {
   });
 
   it('un total que cabe justo en una página no inventa una segunda', () => {
-    expect(armarPaginado([], 20, { page: 1, limit: 20, offset: 0 }).totalPages).toBe(1);
+    // `armarPaginado` solo necesita página y tamaño: el `offset` es cosa de la
+    // consulta, no de la respuesta.
+    expect(armarPaginado([], 20, { page: 1, limit: 20 }).totalPages).toBe(1);
   });
 
   it('adjunta el resumen tal cual, para los agregados de TODO el filtro', () => {

@@ -211,6 +211,32 @@ describe('Detallar individual: costo, referencia y baja (e2e)', () => {
       expect(await costoDe(cajas[1].id)).toBe(40000);
     });
 
+    it('dice a cuántas filas va a llegar, antes de tocarlas', async () => {
+      // «Vendidos» reescribe el costo histórico de TODAS las ventas del
+      // producto, sin límite de fecha. Se puede hacer —lo pidió el dueño— pero
+      // hay que poder verlo antes de apretar el botón.
+      const vendidos = await request(app.getHttpServer())
+        .get(`/api/stock-units/${cajas[1].id}/recostear/alcance?alcance=vendidos`)
+        .set(auth())
+        .expect(200);
+      expect(vendidos.body.afectados).toBeGreaterThanOrEqual(1);
+      expect(vendidos.body.desde).toBeTruthy();
+
+      const existencias = await request(app.getHttpServer())
+        .get(`/api/stock-units/${cajas[0].id}/recostear/alcance?alcance=existencias`)
+        .set(auth())
+        .expect(200);
+      // Las tres que quedan en inventario; la vendida no.
+      expect(existencias.body.afectados).toBe(3);
+      expect(existencias.body.desde).toBeNull();
+
+      const unaSola = await request(app.getHttpServer())
+        .get(`/api/stock-units/${cajas[0].id}/recostear/alcance?alcance=unidad`)
+        .set(auth())
+        .expect(200);
+      expect(unaSola.body.afectados).toBe(1);
+    });
+
     it('no acepta un costo negativo', async () => {
       await request(app.getHttpServer())
         .post(`/api/stock-units/${cajas[0].id}/recostear`)

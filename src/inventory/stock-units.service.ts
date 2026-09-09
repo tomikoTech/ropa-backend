@@ -1754,6 +1754,66 @@ export class StockUnitsService {
   }
 
   /**
+   * A cuánto va a llegar el cambio de costo, **antes** de hacerlo.
+   *
+   * «Vendidos» reescribe el costo histórico de todas las ventas del producto,
+   * sin límite de fecha: corregir la caja que llegó hoy puede reescribir el
+   * margen de todo el año. Eso lo pidió el dueño y así se queda, pero hay que
+   * poder verlo antes de apretar el botón.
+   */
+  async alcanceDelRecosteo(
+    id: string,
+    alcance: AlcanceRecosteo,
+    tenantId: string,
+  ): Promise<{
+    alcance: AlcanceRecosteo;
+    afectados: number;
+    /** Solo en «vendidos»: la venta más vieja que se reescribiría. */
+    desde: string | null;
+    hasta: string | null;
+  }> {
+    const unit = await this.unitRepo.findOne({ where: { id, tenantId } });
+    if (!unit) throw new NotFoundException('Código no encontrado');
+    const productId = unit.productId;
+    if (!productId) {
+      throw new BadRequestException('Este código no está asociado a un producto.');
+    }
+
+    if (alcance === AlcanceRecosteo.UNIDAD) {
+      return { alcance, afectados: 1, desde: null, hasta: null };
+    }
+
+    if (alcance === AlcanceRecosteo.VENDIDOS) {
+      const [fila] = (await this.unitRepo.query(
+        `SELECT COUNT(*)::int AS afectados,
+                MIN(s.created_at) AS desde,
+                MAX(s.created_at) AS hasta
+           FROM sale_items si
+           JOIN product_variants v ON si.variant_id = v.id
+           JOIN sales s ON s.id = si.sale_id
+          WHERE v.product_id = $1 AND si.tenant_id = $2`,
+        [productId, tenantId],
+      )) as { afectados: number; desde: string | null; hasta: string | null }[];
+      return {
+        alcance,
+        afectados: fila?.afectados ?? 0,
+        desde: fila?.desde ?? null,
+        hasta: fila?.hasta ?? null,
+      };
+    }
+
+    const soloEnCero = alcance === AlcanceRecosteo.COSTO_CERO;
+    const [fila] = (await this.unitRepo.query(
+      `SELECT COUNT(*)::int AS afectados
+         FROM stock_units
+        WHERE product_id = $1 AND tenant_id = $2 AND status = 'IN_STOCK'
+          ${soloEnCero ? 'AND (cost IS NULL OR cost = 0)' : ''}`,
+      [productId, tenantId],
+    )) as { afectados: number }[];
+    return { alcance, afectados: fila?.afectados ?? 0, desde: null, hasta: null };
+  }
+
+  /**
    * Reasignar un bulto a **otra variante que ya existe**.
    *
    * «Le puedes cambiar el nombre, pero por algo que ya exista.» Es la corrección

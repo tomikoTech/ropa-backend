@@ -50,6 +50,11 @@ const SIN_MODULO_A_PROPOSITO = new Set([
   // módulo con permisos.
   'assistant',
   'tutoriales',
+  // Firma para QZ Tray: la necesita cualquiera que imprima —el POS, bodega,
+  // compras—, así que atarla a un módulo dejaría sin imprimir a quien tiene
+  // permiso de imprimir. El certificado es público a propósito y firmar no
+  // expone la llave, que vive solo en el servidor.
+  'qz',
 ]);
 
 describe('todo controlador decide su modulo', () => {

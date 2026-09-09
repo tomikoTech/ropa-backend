@@ -7,6 +7,7 @@ import { QuotationItem } from './entities/quotation-item.entity.js';
 import { ProductVariant } from '../products/entities/product-variant.entity.js';
 import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
 import { TaxService } from '../pos/services/tax.service.js';
+import { NotificationsService } from '../notifications/notifications.service.js';
 import { PosService } from '../pos/pos.service.js';
 
 // Query builder encadenable que devuelve el valor dado en getRawOne().
@@ -70,6 +71,15 @@ describe('QuotationsService', () => {
         { provide: getRepositoryToken(ProductVariant), useValue: variantRepo },
         { provide: getRepositoryToken(StoreSettings), useValue: settingsRepo },
         { provide: PosService, useValue: { createSale: jest.fn() } },
+        // Al crear una cotización se avisa a los administradores. Acá no se
+        // prueba el aviso, pero sin el doble el servicio no se puede construir.
+        {
+          provide: NotificationsService,
+          useValue: {
+            idsDeAdmins: jest.fn().mockResolvedValue([]),
+            crearPara: jest.fn().mockResolvedValue(undefined),
+          },
+        },
       ],
     }).compile();
 
