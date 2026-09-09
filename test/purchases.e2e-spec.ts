@@ -121,12 +121,13 @@ describe('Purchases & Accounts Payable (e2e)', () => {
 
   it('GET /api/purchases - should return list containing created order', async () => {
     const res = await request(app.getHttpServer())
-      .get('/api/purchases')
+      .get(`/api/purchases?supplierId=${supplierId}&limit=200`)
       .set('Authorization', `Bearer ${authToken}`)
       .expect(200);
 
-    expect(Array.isArray(res.body)).toBe(true);
-    const found = res.body.find((po: any) => po.id === purchaseOrderId);
+    // El listado pagina: `{ data, ... }` con su resumen por proveedor.
+    expect(Array.isArray(res.body.data)).toBe(true);
+    const found = res.body.data.find((po: any) => po.id === purchaseOrderId);
     expect(found).toBeDefined();
     expect(found.status).toBe('DRAFT');
   });
@@ -206,12 +207,13 @@ describe('Purchases & Accounts Payable (e2e)', () => {
 
   it('GET /api/purchases/accounts-payable - should return AP entry', async () => {
     const res = await request(app.getHttpServer())
-      .get('/api/purchases/accounts-payable')
+      .get(`/api/purchases/accounts-payable?supplierId=${supplierId}&limit=200`)
       .set('Authorization', `Bearer ${authToken}`)
       .expect(200);
 
-    expect(Array.isArray(res.body)).toBe(true);
-    const ap = res.body.find((a: any) => a.id === accountsPayableId);
+    // Cuentas por pagar también pagina, con la deuda por proveedor aparte.
+    expect(Array.isArray(res.body.data)).toBe(true);
+    const ap = res.body.data.find((a: any) => a.id === accountsPayableId);
     expect(ap).toBeDefined();
     expect(ap.isPaid).toBe(false);
     expect(Number(ap.amount)).toBe(quantityOrdered * unitCost);
@@ -239,11 +241,11 @@ describe('Purchases & Accounts Payable (e2e)', () => {
 
   it('GET /api/purchases/accounts-payable - should show updated paidAmount, isPaid false', async () => {
     const res = await request(app.getHttpServer())
-      .get('/api/purchases/accounts-payable')
+      .get(`/api/purchases/accounts-payable?supplierId=${supplierId}&limit=200`)
       .set('Authorization', `Bearer ${authToken}`)
       .expect(200);
 
-    const ap = res.body.find((a: any) => a.id === accountsPayableId);
+    const ap = res.body.data.find((a: any) => a.id === accountsPayableId);
     expect(ap).toBeDefined();
     expect(ap.isPaid).toBe(false);
     expect(Number(ap.paidAmount)).toBeGreaterThan(0);

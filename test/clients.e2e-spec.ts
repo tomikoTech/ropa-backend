@@ -45,13 +45,16 @@ describe('Clients (e2e)', () => {
   // ─── LIST ───
 
   it('GET /api/clients → returns array including created client', async () => {
+    // El listado pagina: `{ data, meta }`. Se busca por el nombre único para
+    // no depender de que el cliente recién creado caiga en la primera página.
     const res = await request(app.getHttpServer())
-      .get('/api/clients')
+      .get(`/api/clients?search=${encodeURIComponent(uniqueSuffix)}`)
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
 
-    const clients = res.body;
+    const clients = res.body.data;
     expect(Array.isArray(clients)).toBe(true);
+    expect(res.body.total).toBeGreaterThan(0);
 
     const found = clients.find((c: any) => c.id === createdClientId);
     expect(found).toBeDefined();

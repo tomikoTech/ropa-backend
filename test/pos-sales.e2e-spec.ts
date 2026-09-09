@@ -215,7 +215,10 @@ describe('POS Sales & Accounts Receivable (e2e)', () => {
         payments: [{ method: 'EFECTIVO', amount: 50000 }],
       });
     expect(res.status).toBe(400);
-    expect(String(res.body.message)).toMatch(/no puede venderse por debajo/i);
+    // El mensaje nombra el producto y el precio mínimo: quien cobra necesita
+    // saber cuál de las líneas es y hasta dónde puede bajar.
+    expect(String(res.body.message)).toMatch(/no se puede vender por debajo/i);
+    expect(String(res.body.message)).toMatch(/40\.000/);
   });
 
   it('guarda canal Instagram e impulsador como snapshot por línea', async () => {

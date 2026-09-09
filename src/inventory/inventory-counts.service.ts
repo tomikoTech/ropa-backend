@@ -573,6 +573,34 @@ export class InventoryCountsService {
       }
       let writtenOffCodes = 0;
 
+      // La foto de códigos y lo que se escaneó, **antes** de tocar el
+      // agregado: bajar la existencia hace que el ledger consuma bultos por
+      // antigüedad, y sin decirle cuáles podía dar de baja un par que sí se
+      // escaneó —está en la bodega— dejando en inventario el que de verdad
+      // faltaba. El número cuadraba y los códigos mentían, que es justo lo
+      // contrario de lo que un conteo busca.
+      const expectedUnits = await manager
+        .getRepository(InventoryCountExpectedUnit)
+        .find({
+          where: { countId, tenantId },
+          relations: { stockUnit: true },
+        });
+      const successfulScans = await manager
+        .getRepository(InventoryCountScan)
+        .find({
+          where: { countId, tenantId, result: In(SUCCESS_RESULTS) },
+        });
+      const foundIds = new Set(successfulScans.map((scan) => scan.stockUnitId));
+      /** Los que la foto tenía y el lector no encontró, por referencia. */
+      const noAparecieronPorVariante = new Map<string, string[]>();
+      for (const esperado of expectedUnits) {
+        const variantId = esperado.stockUnit?.variantId;
+        if (!variantId || foundIds.has(esperado.stockUnitId)) continue;
+        const lista = noAparecieronPorVariante.get(variantId) ?? [];
+        lista.push(esperado.stockUnitId);
+        noAparecieronPorVariante.set(variantId, lista);
+      }
+
       if (adjust) {
         for (const line of differences) {
           // La existencia **de este momento**, no la foto de apertura: si hubo
@@ -612,21 +640,13 @@ export class InventoryCountsService {
                 ? ` (al abrir el conteo había ${line.expectedQuantity})`
                 : ''),
             usuarioId: userId,
+            // Si hay que bajar la existencia, que salgan **los que no
+            // aparecieron**. Es una preferencia, no una orden: si alguno ya no
+            // está disponible el ledger sigue por antigüedad, como siempre.
+            unidadesPreferidas: noAparecieronPorVariante.get(line.variantId),
             tenantId,
           });
         }
-
-        const expectedUnits = await manager
-          .getRepository(InventoryCountExpectedUnit)
-          .find({
-            where: { countId, tenantId },
-            relations: { stockUnit: true },
-          });
-        const successfulScans = await manager
-          .getRepository(InventoryCountScan)
-          .find({
-            where: { countId, tenantId, result: In(SUCCESS_RESULTS) },
-          });
 
         // Dar de baja lo que no apareció solo tiene sentido donde de verdad se
         // pasó el lector.
@@ -641,9 +661,6 @@ export class InventoryCountsService {
         // físicamente ahí. Por eso el barrido se limita a las **variantes** que
         // sí se recorrieron con el lector: de una variante que nadie escaneó no
         // se puede concluir nada.
-        const foundIds = new Set(
-          successfulScans.map((scan) => scan.stockUnitId),
-        );
         const variantesEscaneadas = new Set(
           expectedUnits
             .filter((e) => foundIds.has(e.stockUnitId))

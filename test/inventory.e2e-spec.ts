@@ -283,17 +283,30 @@ describe('Inventory (e2e)', () => {
     });
   });
 
-  describe('Cleanup: DELETE warehouses', () => {
-    it('should delete warehouse 1', async () => {
-      await request(app.getHttpServer())
+  describe('DELETE warehouses', () => {
+    it('no borra una bodega con mercancía adentro, y dice cuánta', async () => {
+      // La base ya lo impedía por las llaves foráneas, pero el mensaje era
+      // «la operación afecta datos relacionados» y no decía qué hacer.
+      const res = await request(app.getHttpServer())
         .delete(`/api/inventory/warehouses/${warehouseId1}`)
         .set('Authorization', `Bearer ${token}`)
-        .expect(200);
+        .expect(409);
+      expect(String(res.body.message)).toMatch(/no se puede borrar/i);
+      expect(String(res.body.message)).toMatch(/unidades|movimientos/i);
     });
 
-    it('should delete warehouse 2', async () => {
+    it('borra una bodega recién creada, que no tiene nada', async () => {
+      const vacia = await request(app.getHttpServer())
+        .post('/api/inventory/warehouses')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          name: `E2E Bodega vacía ${Date.now()}`,
+          code: `VAC-${Date.now().toString().slice(-6)}`,
+        })
+        .expect(201);
+
       await request(app.getHttpServer())
-        .delete(`/api/inventory/warehouses/${warehouseId2}`)
+        .delete(`/api/inventory/warehouses/${vacia.body.id}`)
         .set('Authorization', `Bearer ${token}`)
         .expect(200);
     });

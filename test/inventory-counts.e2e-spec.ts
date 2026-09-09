@@ -326,10 +326,14 @@ describe('Conteo físico de inventario (e2e)', () => {
       .get(`/api/inventory-counts/${physicalCountId}/session`)
       .set(auth())
       .expect(200);
-    expect(session.body.summary.expectedCodes).toBe(3);
+    // Siete y no tres: a los tres códigos puestos a mano se suman los cuatro
+    // que creó el ajuste de +4. Desde que el inventario pasa por el ledger,
+    // toda entrada queda respaldada por etiquetas.
+    expect(session.body.summary.expectedCodes).toBe(7);
     expect(session.body.summary.countedCodes).toBe(2);
     expect(session.body.summary.countedQuantity).toBe(3);
-    expect(session.body.summary.missingCodes).toBe(1);
+    // Los dos que se escanearon dejan cinco sin aparecer.
+    expect(session.body.summary.missingCodes).toBe(5);
     expect(session.body.summary.exceptions).toBe(2); // duplicado + desconocido
 
     await request(app.getHttpServer())
@@ -347,10 +351,19 @@ describe('Conteo físico de inventario (e2e)', () => {
         acknowledgeExceptions: true,
       })
       .expect(201);
-    expect(closed.body.writtenOffCodes).toBe(1);
+    // Cinco códigos salen del inventario: uno lo saca el ajuste del agregado
+    // —que tenía que bajar en 1— y los otros cuatro el barrido del conteo.
+    expect(closed.body.writtenOffCodes).toBe(4);
 
     const missingUnit = await unitRepo.findOneByOrFail({ id: units[1].id });
     expect(missingUnit.status).toBe(StockUnitStatus.WRITTEN_OFF);
+
+    // Y lo que sí se escaneó **se queda**. Antes el ajuste consumía por
+    // antigüedad y podía llevarse este par —que está en la bodega, en la mano
+    // de quien contó— dejando en inventario el que de verdad faltaba: el
+    // número cuadraba y los códigos mentían.
+    const contado = await unitRepo.findOneByOrFail({ id: units[0].id });
+    expect(contado.status).toBe(StockUnitStatus.IN_STOCK);
   }, 30000);
 
   it('avisa cuántas referencias quedarían en cero antes de ajustar', async () => {

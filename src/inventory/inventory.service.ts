@@ -313,8 +313,38 @@ export class InventoryService {
     return this.warehouseRepository.save(warehouse);
   }
 
+  /**
+   * Borrar una bodega, cuando de verdad se puede.
+   *
+   * La base ya lo impedía por las llaves foráneas, pero el mensaje que salía
+   * era «la operación afecta datos relacionados», que no le dice a nadie qué
+   * hacer. Acá se mira antes y se dice qué tiene adentro.
+   */
   async removeWarehouse(id: string, tenantId: string): Promise<void> {
     const warehouse = await this.findWarehouse(id, tenantId);
+
+    const [{ existencias }] = (await this.stockRepository.query(
+      `SELECT COALESCE(SUM(quantity), 0)::int AS existencias
+         FROM stock WHERE warehouse_id = $1 AND tenant_id = $2`,
+      [id, tenantId],
+    )) as { existencias: number }[];
+    if (existencias > 0) {
+      throw new ConflictException(
+        `No se puede borrar «${warehouse.name}»: todavía tiene ${existencias} unidades. Trasládalas o dalas de baja primero.`,
+      );
+    }
+
+    const [{ movimientos }] = (await this.stockRepository.query(
+      `SELECT COUNT(*)::int AS movimientos
+         FROM stock_movements WHERE warehouse_id = $1 AND tenant_id = $2`,
+      [id, tenantId],
+    )) as { movimientos: number }[];
+    if (movimientos > 0) {
+      throw new ConflictException(
+        `No se puede borrar «${warehouse.name}»: tiene ${movimientos} movimientos en su historial y borrarla perdería ese rastro. Desactívala en su lugar.`,
+      );
+    }
+
     await this.warehouseRepository.remove(warehouse);
   }
 

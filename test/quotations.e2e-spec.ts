@@ -116,6 +116,7 @@ describe('Quotations (e2e)', () => {
       .get('/api/quotations')
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
-    expect(res.body.some((q: any) => q.id === quotationId)).toBe(true);
+    // El listado pagina: `{ data, meta }`.
+    expect(res.body.data.some((q: any) => q.id === quotationId)).toBe(true);
   });
 });

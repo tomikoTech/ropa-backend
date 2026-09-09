@@ -118,7 +118,7 @@ describe('Permisos granulares (e2e)', () => {
 
   // ── Catálogo y plantillas ─────────────────────────────────────────────────
 
-  it('GET /access/catalog → módulos, las 4 acciones y las 6 plantillas', async () => {
+  it('GET /access/catalog → módulos, las 4 acciones y las 8 plantillas', async () => {
     const res = await request(app.getHttpServer())
       .get('/api/access/catalog')
       .set(auth(adminToken))
@@ -130,10 +130,14 @@ describe('Permisos granulares (e2e)', () => {
       'edit',
       'delete',
     ]);
+    // Las dos de vendedor llegaron después, con la pantalla simple y el POS
+    // de terceros. El orden importa: es el que ve quien crea un rol.
     expect(res.body.templates.map((t: { name: string }) => t.name)).toEqual([
       'Administrador',
       'Gerente',
       'Cajero',
+      'Vendedor externo',
+      'Vendedor (cobra directo)',
       'Jefe de Bodega',
       'Inventario',
       'Consulta',

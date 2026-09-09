@@ -197,8 +197,9 @@ describe('Stock transfers / remisiones y préstamos (e2e)', () => {
       .get('/api/inventory/transfers')
       .set(auth())
       .expect(200);
-    expect(Array.isArray(res.body)).toBe(true);
-    expect(res.body.length).toBeGreaterThan(0);
+    // El listado pagina: `{ data, meta }`.
+    expect(Array.isArray(res.body.data)).toBe(true);
+    expect(res.body.data.length).toBeGreaterThan(0);
   });
 
   it('la petición puede decidir la confirmación, sin depender del ajuste', async () => {

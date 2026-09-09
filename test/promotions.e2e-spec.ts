@@ -74,8 +74,9 @@ describe('Promotions (e2e)', () => {
       .set('Authorization', `Bearer ${authToken}`)
       .expect(200);
 
-    expect(Array.isArray(res.body)).toBe(true);
-    const found = res.body.find((p: any) => p.id === promotionId);
+    // El listado pagina: `{ data, meta }`.
+    expect(Array.isArray(res.body.data)).toBe(true);
+    const found = res.body.data.find((p: any) => p.id === promotionId);
     expect(found).toBeDefined();
     expect(found.name).toBe(uniqueName);
   });
