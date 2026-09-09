@@ -18,6 +18,7 @@ import {
   MarkPrintedDto,
   UpdateBoxContentsDto,
 } from './dto/stock-unit.dto.js';
+import { AbrirCajaDto } from './dto/abrir-caja.dto.js';
 import { DarDeBajaDto } from './dto/dar-de-baja.dto.js';
 import { RecostearDto } from './dto/recostear.dto.js';
 import { ReasignarDto } from './dto/reasignar.dto.js';
@@ -148,13 +149,19 @@ export class StockUnitsController {
   }
 
   @Post(':id/split')
-  @ApiOperation({ summary: 'Abrir una caja en sus unidades, según su curva' })
+  @ApiOperation({
+    summary: 'Abrir una caja: entera, o sacando solo unos pares',
+    description:
+      'Sin cuerpo sale toda la caja. Con `items` salen esos pares y la caja ' +
+      'se queda con el resto, con su mismo código.',
+  })
   split(
     @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AbrirCajaDto,
     @UserId() userId: string,
     @TenantId() tenantId: string,
   ) {
-    return this.units.splitBox(id, userId, tenantId);
+    return this.units.splitBox(id, userId, tenantId, dto?.items);
   }
 
   @Post(':id/baja')

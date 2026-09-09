@@ -29,6 +29,11 @@ import { PurchaseOrderStatus } from '../common/enums/purchase-order-status.enum.
 import { buildStockBarcode, withCheckDigit } from './barcode.util.js';
 import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
 import { StockUnitContent } from './entities/stock-unit-content.entity.js';
+import {
+  AperturaImposible,
+  repartoDeLaApertura,
+  type RenglonDeTalla,
+} from './apertura-parcial.js';
 import { AlcanceRecosteo } from './dto/recostear.dto.js';
 import {
   StockUnitEvent,
@@ -871,10 +876,19 @@ export class StockUnitsService {
    * La caja **no se borra**: queda en `SPLIT` para que el código ya impreso
    * siga siendo rastreable si aparece pegado en algún lado.
    */
+  /**
+   * Abrir una caja: entera, o sacando solo unos pares.
+   *
+   * `pedido` sin definir abre la caja completa, que es como funcionó siempre.
+   * Con `pedido`, salen esos pares y **la caja se queda con el resto**: sigue
+   * siendo una caja, con su código, su etiqueta y menos pares adentro. Es lo
+   * que pasa de verdad cuando se sacan tres para la vitrina.
+   */
   async splitBox(
     unitId: string,
     userId: string,
     tenantId: string,
+    pedido?: RenglonDeTalla[],
   ): Promise<{ parent: StockUnit; units: StockUnit[] }> {
     return retryOnUniqueViolation(async () =>
       this.dataSource.transaction(async (m) => {
@@ -930,20 +944,28 @@ export class StockUnitsService {
                 sizeId: item.sizeId,
                 quantity: item.quantity,
               }));
-        if (distribution.length === 0) {
-          throw new BadRequestException(
-            'La caja no tiene un contenido detallado. Registra sus tallas antes de abrirla.',
-          );
-        }
-        const curveQuantity = distribution.reduce(
+        const dentroDeLaCaja = distribution.reduce(
           (sum, item) => sum + item.quantity,
           0,
         );
-        if (curveQuantity !== box.quantity) {
+        if (distribution.length > 0 && dentroDeLaCaja !== box.quantity) {
           throw new BadRequestException(
-            `La curva reparte ${curveQuantity} unidades pero la caja contiene ${box.quantity}. Corrige el renglón antes de abrirla.`,
+            `La curva reparte ${dentroDeLaCaja} unidades pero la caja contiene ${box.quantity}. Corrige el renglón antes de abrirla.`,
           );
         }
+        // Qué sale y qué queda. La aritmética vive aparte, con sus pruebas y
+        // sin base de datos. Ver `apertura-parcial.ts`.
+        let apertura;
+        try {
+          apertura = repartoDeLaApertura(distribution, pedido);
+        } catch (error) {
+          if (error instanceof AperturaImposible) {
+            throw new BadRequestException(error.message);
+          }
+          throw error;
+        }
+        const queSale = apertura.sale;
+        const curveQuantity = apertura.totalQueSale;
 
         const variantRepo = m.getRepository(ProductVariant);
         const boxVariant = await variantRepo.findOne({
@@ -955,7 +977,7 @@ export class StockUnitsService {
             productId: box.productId,
             tenantId,
             isActive: true,
-            sizeId: In(distribution.map((item) => item.sizeId)),
+            sizeId: In(queSale.map((item) => item.sizeId)),
             ...(targetColorId ? { colorId: targetColorId } : {}),
           },
           order: { createdAt: 'ASC' },
@@ -966,7 +988,7 @@ export class StockUnitsService {
             variantBySize.set(variant.sizeId, variant);
           }
         }
-        const missingSize = distribution.find(
+        const missingSize = queSale.find(
           (item) => !variantBySize.has(item.sizeId),
         );
         if (missingSize) {
@@ -1020,12 +1042,20 @@ export class StockUnitsService {
           tramosDelDia,
           fecha: hoy,
         });
-        let pairSequence = 1;
+        // El número de par continúa después de los que ya salieron de esta
+        // misma caja: en una apertura parcial la segunda tanda no puede volver
+        // a llamarse 1, 2, 3 —dos pares distintos con el mismo puesto—.
+        const yaSalieron = await unitRepo.count({
+          where: { parentUnitId: box.id, tenantId },
+        });
+        let pairSequence = yaSalieron + 1;
+        let indiceDelCodigo = 0;
 
-        for (const item of distribution) {
+        for (const item of queSale) {
           const variant = variantBySize.get(item.sizeId)!;
           for (let i = 0; i < item.quantity; i++) {
-            const body = codigos[pairSequence - 1];
+            const body = codigos[indiceDelCodigo];
+            indiceDelCodigo++;
             units.push(
               unitRepo.create({
                 barcode: withCheckDigit(body),
@@ -1053,7 +1083,7 @@ export class StockUnitsService {
         // La caja cerrada vive en el agregado de una variante equivalente. Al
         // abrirla, redistribuye esas mismas unidades entre sus tallas reales.
         const targetQuantities = new Map<string, number>();
-        for (const item of distribution) {
+        for (const item of queSale) {
           const variantId = variantBySize.get(item.sizeId)!.id;
           targetQuantities.set(
             variantId,
@@ -1076,13 +1106,13 @@ export class StockUnitsService {
           stocks.map((stock) => [stock.variantId, stock]),
         );
         const sourceStock = stockByVariant.get(box.variantId);
-        if (!sourceStock || Number(sourceStock.quantity) < box.quantity) {
+        if (!sourceStock || Number(sourceStock.quantity) < curveQuantity) {
           throw new BadRequestException(
             'El stock agregado de la caja no alcanza para abrirla. Corrige el inventario antes de continuar.',
           );
         }
         const deltas = new Map<string, number>([
-          [box.variantId, -box.quantity],
+          [box.variantId, -curveQuantity],
         ]);
         for (const [variantId, quantity] of targetQuantities) {
           deltas.set(variantId, (deltas.get(variantId) ?? 0) + quantity);
@@ -1106,21 +1136,51 @@ export class StockUnitsService {
         }
 
         const saved = await unitRepo.save(units);
-        await unitRepo.update(
-          { id: box.id, tenantId },
-          { status: StockUnitStatus.SPLIT },
-        );
+
+        // La caja que queda con pares adentro **sigue siendo una caja**: su
+        // código y su etiqueta valen, y se le pueden sacar más después. Solo
+        // cuando no queda nada deja de existir como caja.
+        if (apertura.seVacia) {
+          await unitRepo.update(
+            { id: box.id, tenantId },
+            { status: StockUnitStatus.SPLIT },
+          );
+        } else {
+          await unitRepo.update(
+            { id: box.id, tenantId },
+            // ledger-exento: es el bulto, no la existencia; el agregado ya se
+            // movió arriba.
+            { quantity: box.quantity - curveQuantity },
+          );
+          const contentRepo = m.getRepository(StockUnitContent);
+          const quedaPorTalla = new Map<string, number>(
+            apertura.queda.map((r) => [r.sizeId, r.quantity] as const),
+          );
+          for (const contenido of boxContents) {
+            const queda = quedaPorTalla.get(contenido.sizeId) ?? 0;
+            if (contenido.actualQuantity !== queda) {
+              contenido.actualQuantity = queda;
+              await contentRepo.save(contenido);
+            }
+          }
+        }
         const eventRepo = m.getRepository(StockUnitEvent);
         await eventRepo.save([
           eventRepo.create({
             stockUnitId: box.id,
             eventType: StockUnitEventType.SPLIT,
             fromStatus: StockUnitStatus.IN_STOCK,
-            toStatus: StockUnitStatus.SPLIT,
+            toStatus: apertura.seVacia
+              ? StockUnitStatus.SPLIT
+              : StockUnitStatus.IN_STOCK,
             referenceType: 'STOCK_UNIT',
             referenceId: box.id,
             userId,
-            metadata: { children: saved.length },
+            metadata: {
+              children: saved.length,
+              parcial: !apertura.seVacia,
+              quedanEnLaCaja: apertura.totalQueQueda,
+            },
             tenantId,
           }),
           ...saved.map((child) =>
@@ -1141,7 +1201,15 @@ export class StockUnitsService {
         // El total agregado no cambia; solo deja de estar concentrado en la
         // variante equivalente de la caja y pasa a las tallas de la curva.
         return {
-          parent: { ...box, status: StockUnitStatus.SPLIT },
+          parent: {
+            ...box,
+            status: apertura.seVacia
+              ? StockUnitStatus.SPLIT
+              : StockUnitStatus.IN_STOCK,
+            quantity: apertura.seVacia
+              ? box.quantity
+              : box.quantity - curveQuantity,
+          },
           units: saved,
         };
       }),
