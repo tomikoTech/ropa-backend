@@ -103,7 +103,26 @@ describe('Anular libera los bultos aunque el rastreo esté apagado (e2e)', () =>
     expect(estados[cajas[1].id]).toBe('SOLD');
   }, 60000);
 
+  it('no deja apagar el rastreo mientras quede una caja etiquetada en bodega', async () => {
+    // La salvaguarda que se puso después de este mismo caso: apagarlo con
+    // cajas vivas deja sus etiquetas sin efecto. Ver `apagar-el-rastreo.ts`.
+    const res = await request(app.getHttpServer())
+      .patch(`/api/products/${productId}`)
+      .set(auth())
+      .send({ unitTracking: false })
+      .expect(400);
+    expect(String(res.body.message)).toMatch(/no se puede apagar/i);
+  }, 60000);
+
   it('apagar el rastreo del producto no borra lo ya vendido', async () => {
+    // Sacada la caja que quedaba, apagarlo ya es legítimo: nadie tiene una
+    // etiqueta suya en la mano.
+    await request(app.getHttpServer())
+      .post(`/api/stock-units/${cajas[2].id}/baja`)
+      .set(auth())
+      .send({ motivo: 'Sobrante de la prueba' })
+      .expect(201);
+
     await request(app.getHttpServer())
       .patch(`/api/products/${productId}`)
       .set(auth())
@@ -112,6 +131,7 @@ describe('Anular libera los bultos aunque el rastreo esté apagado (e2e)', () =>
 
     const estados = await estadoDeLasCajas();
     expect(estados[cajas[0].id]).toBe('SOLD');
+    expect(estados[cajas[2].id]).toBe('WRITTEN_OFF');
   }, 60000);
 
   it('anular devuelve las cajas al inventario, no solo el número', async () => {

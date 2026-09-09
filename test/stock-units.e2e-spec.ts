@@ -656,10 +656,14 @@ describe('Recepción por cajas y apertura de cajas (e2e)', () => {
       .set(auth())
       .expect(200);
     expect(replacementTrace.body.unit.status).toBe('SOLD');
+    // `RETURN_EXCHANGE` y no `RETURN`: el ledger separa el par que vuelve del
+    // que se lleva en su lugar, y el historial los muestra distinto
+    // («Devolución» vs «Cambio por otro producto»).
     expect(
       replacementTrace.body.events.some(
         (event: { eventType: string; referenceType: string }) =>
-          event.eventType === 'SOLD' && event.referenceType === 'RETURN',
+          event.eventType === 'SOLD' &&
+          event.referenceType === 'RETURN_EXCHANGE',
       ),
     ).toBe(true);
   });
@@ -1025,7 +1029,10 @@ describe('Recepción por cajas y apertura de cajas (e2e)', () => {
       .set(auth());
 
     expect(res.status).toBe(404);
-    expect(String(res.body.message)).toMatch(/no se encontró/i);
+    // El sistema ya no se limita a decir que no lo encontró: nombra el código
+    // y dice qué revisar. Ver `donde-esta-el-bulto.ts`.
+    expect(String(res.body.message)).toMatch(/no hay ningún producto ni caja/i);
+    expect(String(res.body.message)).toContain('00000000000000000');
   });
 
   it('registra qué etiquetas se imprimieron', async () => {
