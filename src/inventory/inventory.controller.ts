@@ -108,10 +108,22 @@ export class InventoryController {
       'esto: sin el filtro tendria que traerse el inventario entero de la ' +
       'tienda para leer tres filas.',
   })
+  @ApiQuery({
+    name: 'resumido',
+    required: false,
+    description:
+      'Solo variante, bodega y cantidad. Es lo único que el punto de venta ' +
+      'usa, y sin esto cada fila viaja con su variante, su producto y su ' +
+      'bodega anidados: dos mil bytes por fila para leer tres campos.',
+  })
   getAllStock(
     @TenantId() tenantId: string,
     @Query('productId') productId?: string,
+    @Query('resumido') resumido?: string,
   ) {
+    if (resumido === '1' || resumido === 'true') {
+      return this.inventoryService.getStockResumido(tenantId);
+    }
     return this.inventoryService.getAllStock(tenantId, productId);
   }
 
@@ -211,10 +223,15 @@ export class InventoryController {
 
   @Get('stock/warehouse/:warehouseId')
   @ApiOperation({ summary: 'Stock por bodega' })
+  @ApiQuery({ name: 'resumido', required: false })
   getStockByWarehouse(
     @Param('warehouseId', ParseUUIDPipe) warehouseId: string,
     @TenantId() tenantId: string,
+    @Query('resumido') resumido?: string,
   ) {
+    if (resumido === '1' || resumido === 'true') {
+      return this.inventoryService.getStockResumido(tenantId, warehouseId);
+    }
     return this.inventoryService.getStockByWarehouse(warehouseId, tenantId);
   }
 

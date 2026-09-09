@@ -368,6 +368,44 @@ export class InventoryService {
     return this.withBoxBreakdown(rows, tenantId);
   }
 
+  /**
+   * Las existencias en crudo: variante, bodega y cuánto hay. Nada más.
+   *
+   * El punto de venta necesita saber de cuánto dispone cada variante, y para
+   * eso se traía la tabla entera **con** la variante, su producto y la bodega
+   * anidados en cada fila: dos mil bytes por fila para leer tres campos. En una
+   * tienda con 2.400 renglones de inventario eso son casi cinco megas, en cada
+   * carga y en cada cambio de bodega —y esa es la espera de cuatro segundos que
+   * reportaba el mostrador—.
+   *
+   * Es la misma lección que ya se aprendió con el listado de existencias
+   * (`getAllStockPaginado`); el punto de venta se quedó fuera de aquel arreglo.
+   *
+   * Va por SQL y no por el repositorio para que el ahorro sea también del
+   * servidor: sin relaciones no hay JOIN ni entidades que hidratar.
+   */
+  async getStockResumido(
+    tenantId: string,
+    warehouseId?: string,
+  ): Promise<{ variantId: string; warehouseId: string; quantity: number }[]> {
+    const filas: {
+      variant_id: string;
+      warehouse_id: string;
+      quantity: string;
+    }[] = await this.dataSource.query(
+      `SELECT variant_id, warehouse_id, quantity
+         FROM stock
+        WHERE tenant_id = $1
+          ${warehouseId ? 'AND warehouse_id = $2' : ''}`,
+      warehouseId ? [tenantId, warehouseId] : [tenantId],
+    );
+    return filas.map((f) => ({
+      variantId: f.variant_id,
+      warehouseId: f.warehouse_id,
+      quantity: Number(f.quantity),
+    }));
+  }
+
   async getAllStock(tenantId: string, productId?: string): Promise<Stock[]> {
     const rows = await this.stockRepository.find({
       where: productId
