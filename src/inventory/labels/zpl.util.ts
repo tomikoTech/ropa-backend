@@ -107,9 +107,16 @@ export function buildLabelZpl(
 
   if (options.logoBlock) lines.push(options.logoBlock);
 
-  // Encabezado: nombre, y debajo marca · referencia.
+  // Encabezado: en la CAJA va el rótulo del pedido, que es lo que se busca de
+  // lejos cuando llega la importación y hay cuarenta apiladas; el nombre del
+  // producto baja al puesto que ocupaba el rótulo. En el par manda el nombre,
+  // como siempre. Los dos van del **mismo tamaño**: ninguno manda sobre el otro.
+  const enCabecera =
+    data.isBox && data.highlight ? data.highlight : data.productName;
+  const abajo = data.isBox && data.highlight ? data.productName : data.highlight;
+  const letraGrande = data.isBox ? 2.8 : 3;
   lines.push(
-    `^FO${textLeft},${dots(1.5)}^A0N,${dots(3)},${dots(3)}^FB${width - textLeft - margin},1,0,L^FD${truncate(data.productName, 28)}^FS`,
+    `^FO${textLeft},${dots(1.5)}^A0N,${dots(letraGrande)},${dots(letraGrande)}^FB${width - textLeft - margin},1,0,L^FD${truncate(enCabecera, 28)}^FS`,
   );
   const head2 = [data.brand, data.reference && `Ref ${data.reference}`]
     .filter(Boolean)
@@ -144,7 +151,7 @@ export function buildLabelZpl(
   };
   // Los dígitos: si el símbolo se raya, el operario todavía puede teclearlos.
   put(data.barcode, 2.2, 20);
-  if (data.highlight) put(data.highlight, 2.7, 30);
+  if (abajo) put(abajo, data.isBox ? letraGrande : 2.7, 30);
   const pie = [data.detail, data.desglose, data.price]
     .filter(Boolean)
     .join(' · ');

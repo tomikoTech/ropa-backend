@@ -76,3 +76,43 @@ describe('computeLabelLayout: nada se sale del sticker (no se corta)', () => {
     expect(l.nombre.xMm).toBeCloseTo(l.marginMm, 5);
   });
 });
+
+describe('en la caja el pedido va arriba y el producto abajo', () => {
+  const caja = computeLabelLayout({
+    widthMm: 62,
+    heightMm: 50,
+    isBox: true,
+    hasLogo: true,
+  });
+  const par = computeLabelLayout({
+    widthMm: 62,
+    heightMm: 30,
+    isBox: false,
+    hasLogo: true,
+  });
+
+  it('el rótulo del pedido queda en el primer renglón', () => {
+    // Cuarenta cajas apiladas: el embarque se lee de lejos, sin agacharse a
+    // mirar el resto de la etiqueta.
+    expect(caja.destacado.yMm).toBeLessThan(caja.barcode.yMm);
+    expect(caja.nombre.yMm).toBeGreaterThan(caja.digitos.yMm);
+  });
+
+  it('los dos se imprimen del mismo tamaño', () => {
+    expect(caja.nombre.fontMm).toBeCloseTo(caja.destacado.fontMm, 5);
+  });
+
+  it('en el par no cambia nada: la talla sigue abajo y grande', () => {
+    expect(par.nombre.yMm).toBeLessThan(par.barcode.yMm);
+    expect(par.destacado.yMm).toBeGreaterThan(par.digitos.yMm);
+    expect(par.destacado.fontMm).toBeGreaterThan(par.nombre.fontMm);
+  });
+
+  it('todo sigue cabiendo dentro del sticker', () => {
+    for (const zona of [caja.nombre, caja.destacado, caja.pie]) {
+      expect(zona.yMm + zona.hMm).toBeLessThanOrEqual(50 + 0.001);
+      expect(zona.xMm + zona.wMm).toBeLessThanOrEqual(62 + 0.001);
+    }
+  });
+});
+

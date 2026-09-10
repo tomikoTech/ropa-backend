@@ -98,3 +98,48 @@ describe('etiquetas ZPL', () => {
     });
   });
 });
+
+describe('en la caja el pedido va arriba', () => {
+  const caja = {
+    barcode: '26090600010010018',
+    productName: 'AMA MAYLU 41/42 NEW BALANCE H',
+    detail: 'MULTICOLOR',
+    brand: 'NEW BALANCE',
+    reference: 'AMAMAY5',
+    desglose: '06/09/26 · Pedido 1 · N.º 1',
+    isBox: true,
+    highlight: 'PROMO WIMFLO',
+  };
+
+  it('el rótulo del pedido se imprime antes que el nombre del producto', () => {
+    const zpl = buildLabelZpl(caja, { widthMm: 62, heightMm: 50 });
+    expect(zpl.indexOf('PROMO WIMFLO')).toBeGreaterThan(-1);
+    expect(zpl.indexOf('PROMO WIMFLO')).toBeLessThan(
+      zpl.indexOf('AMA MAYLU 41/42'),
+    );
+  });
+
+  it('los dos van del mismo tamaño de letra', () => {
+    const zpl = buildLabelZpl(caja, { widthMm: 62, heightMm: 50 });
+    // Cada renglón de ZPL trae su alto de letra en `^A0N,<alto>,<ancho>`.
+    const altoDeLaLetra = (texto: string) => {
+      const linea = zpl
+        .split('\n')
+        .find((l) => l.includes(texto) && l.includes('^A0N,'));
+      return linea?.match(/\^A0N,(\d+)/)?.[1];
+    };
+    const rotulo = altoDeLaLetra('PROMO WIMFLO');
+    const producto = altoDeLaLetra('AMA MAYLU 41/42');
+    expect(rotulo).toBeTruthy();
+    expect(producto).toBeTruthy();
+    expect(rotulo).toBe(producto);
+  });
+
+  it('en el par sigue mandando el nombre', () => {
+    const zpl = buildLabelZpl(
+      { ...caja, isBox: false, highlight: undefined, size: '40' },
+      { widthMm: 58, heightMm: 30 },
+    );
+    expect(zpl.indexOf('AMA MAYLU 41/42')).toBeLessThan(zpl.indexOf('^BCN'));
+  });
+});

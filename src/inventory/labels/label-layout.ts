@@ -138,6 +138,33 @@ export function computeLabelLayout(input: LayoutInput): LabelLayout {
     fontMm: clamp(hPie * 0.7, 1.8, 2.8),
   };
 
+  // **En la caja, el pedido va arriba y el producto abajo.**
+  //
+  // Llega la importación, hay cuarenta cajas apiladas y lo que se busca es el
+  // embarque: el rótulo tiene que leerse de lejos, en el primer renglón, sin
+  // agacharse a mirar el resto. El nombre del producto se queda con el puesto
+  // que ocupaba el pedido —sigue estando, pero no es lo que se busca primero—.
+  //
+  // Se intercambian los **recuadros**, no los textos: quien dibuja (PDF y ZPL)
+  // sigue pidiendo `lay.nombre` para el nombre y `lay.destacado` para el
+  // rótulo, y no tiene que enterarse. Y los dos van del **mismo tamaño de
+  // letra**: son las dos cosas que se leen de lejos, ninguna manda sobre la
+  // otra.
+  if (isBox) {
+    const letra = Math.min(nombre.fontMm, destacado.fontMm);
+    return {
+      marginMm: margin,
+      marco: { xMm: margin * 0.4, yMm: margin * 0.4, wMm: W - margin * 0.8, hMm: H - margin * 0.8, fontMm: 0 },
+      logo,
+      nombre: { ...destacado, fontMm: letra },
+      marca,
+      barcode,
+      digitos,
+      destacado: { ...nombre, fontMm: letra },
+      pie,
+    };
+  }
+
   return {
     marginMm: margin,
     marco: { xMm: margin * 0.4, yMm: margin * 0.4, wMm: W - margin * 0.8, hMm: H - margin * 0.8, fontMm: 0 },

@@ -62,4 +62,24 @@ describe('buildLabelsPdf (lo que sale a la impresora)', () => {
     const buf = await buildLabelsPdf([{ ...par, barcode: '' }], { widthMm: 58, heightMm: 30 });
     expect(buf.slice(0, 5).toString()).toBe('%PDF-');
   });
+
+  it('el texto largo se encoge, no se corta', async () => {
+    // El PDF cortaba con «…» lo que no cabía a lo ancho: el rótulo de una caja
+    // quedaba en «PROMO WI…». Se lee mejor entero y pequeño.
+    const largo: LabelData = {
+      ...caja,
+      highlight: 'DISTRIBUCIONES EL PORVENIR IMPORTACIONES SAS',
+      productName: 'AMA MAYLU 41/42 NEW BALANCE HOMBRE EDICIÓN LIMITADA',
+    };
+    const buf = await buildLabelsPdf([largo], { widthMm: 62, heightMm: 50 });
+    const texto = buf.toString('latin1');
+    expect(buf.slice(0, 5).toString()).toBe('%PDF-');
+    // El PDF comprime el contenido, así que no se puede leer el texto; lo que
+    // sí se comprueba es que no reviente y que el tamaño de página sea el
+    // pedido: el recorte se verificó a ojo en la vista previa del navegador,
+    // que usa el mismo cálculo de `letraQueCabe`.
+    const mb = mediaBox(buf)!;
+    expect(mb.w).toBeCloseTo(pt(62), 0);
+    expect(texto.length).toBeGreaterThan(500);
+  });
 });

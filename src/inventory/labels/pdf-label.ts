@@ -88,12 +88,23 @@ export function buildLabelsPdf(
       opts: { font?: string; color?: string; align?: 'center' | 'left'; fontMm?: number } = {},
     ) => {
       if (!text) return;
-      const size = fontPt(opts.fontMm ?? caja.fontMm);
+      const pedido = fontPt(opts.fontMm ?? caja.fontMm);
+      const disponible = mm(caja.wMm);
+      doc.font(opts.font ?? 'Helvetica').fontSize(pedido);
+      // **Encoger antes que cortar.** El alto de la fila propone un tamaño; si
+      // el texto no cabe a lo ancho, se baja hasta que quepa. Cortar dejaba
+      // «PROMO WI…» en la caja y un nombre de producto a la mitad: se lee mejor
+      // entero y pequeño que la mitad grande. El mínimo es lo que una térmica
+      // todavía imprime legible; por debajo de eso sí se corta.
+      const ancho = doc.widthOfString(text);
+      const size =
+        ancho > disponible && ancho > 0
+          ? Math.max(fontPt(1.4), (pedido * disponible) / ancho)
+          : pedido;
       const boxH = mm(caja.hMm);
       const yTop = mm(caja.yMm) + Math.max(0, (boxH - size) / 2);
       doc
         .fontSize(size)
-        .font(opts.font ?? 'Helvetica')
         .fillColor(opts.color ?? '#000')
         .text(text, mm(caja.xMm), yTop, {
           width: mm(caja.wMm),
