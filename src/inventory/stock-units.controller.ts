@@ -155,7 +155,8 @@ export class StockUnitsController {
     summary: 'Abrir una caja: entera, o sacando solo unos pares',
     description:
       'Sin cuerpo sale toda la caja. Con `items` salen esos pares y la caja ' +
-      'se queda con el resto, con su mismo código.',
+      'se queda con el resto, con su mismo código. Con `warehouseId` los ' +
+      'pares nacen en otra bodega: es abrir y repartir en un solo paso.',
   })
   split(
     @Param('id', ParseUUIDPipe) id: string,
@@ -163,7 +164,7 @@ export class StockUnitsController {
     @UserId() userId: string,
     @TenantId() tenantId: string,
   ) {
-    return this.units.splitBox(id, userId, tenantId, dto?.items);
+    return this.units.splitBox(id, userId, tenantId, dto?.items, dto?.warehouseId);
   }
 
   @Post(':id/baja')

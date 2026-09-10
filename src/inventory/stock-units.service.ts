@@ -889,12 +889,18 @@ export class StockUnitsService {
    * Con `pedido`, salen esos pares y **la caja se queda con el resto**: sigue
    * siendo una caja, con su código, su etiqueta y menos pares adentro. Es lo
    * que pasa de verdad cuando se sacan tres para la vitrina.
+   *
+   * `destinoId` manda los pares a **otra bodega**: la caja llega a la central,
+   * se abre y los pares se van al local donde se van a vender. Antes eso eran
+   * dos pasos —abrir acá y después trasladar—, y el traslado había que armarlo
+   * a mano código por código.
    */
   async splitBox(
     unitId: string,
     userId: string,
     tenantId: string,
     pedido?: RenglonDeTalla[],
+    destinoId?: string,
   ): Promise<{ parent: StockUnit; units: StockUnit[] }> {
     return retryOnUniqueViolation(async () =>
       this.dataSource.transaction(async (m) => {
@@ -1003,6 +1009,19 @@ export class StockUnitsService {
           );
         }
 
+        // A dónde van los pares. La caja no se mueve: se abre donde está y lo
+        // que sale nace en la bodega que se pidió.
+        const destino = destinoId
+          ? await m
+              .getRepository(Warehouse)
+              .findOne({ where: { id: destinoId, tenantId } })
+          : null;
+        if (destinoId && !destino) {
+          throw new NotFoundException('La bodega de destino no existe.');
+        }
+        const bodegaDeLosPares = destino?.id ?? box.warehouseId;
+        const mudanza = bodegaDeLosPares !== box.warehouseId;
+
         const units: StockUnit[] = [];
         const base = box.barcode.slice(0, 16);
 
@@ -1071,8 +1090,9 @@ export class StockUnitsService {
                 variantId: variant.id,
                 colorId: targetColorId,
                 sizeId: item.sizeId,
-                warehouseId: box.warehouseId,
-                standId: box.standId,
+                warehouseId: bodegaDeLosPares,
+                // El estante es de la bodega de la caja: en otra no existe.
+                standId: mudanza ? null : box.standId,
                 quantity: 1,
                 cost: box.cost,
                 purchaseBoxLineId: box.purchaseBoxLineId,
@@ -1117,24 +1137,32 @@ export class StockUnitsService {
             'El stock agregado de la caja no alcanza para abrirla. Corrige el inventario antes de continuar.',
           );
         }
+        // Qué sale de dónde y qué entra a dónde. Con destino distinto son dos
+        // bodegas en la misma operación: lo que sale de la caja sale de la de
+        // ella, y los pares entran a la otra. Por eso la clave lleva las dos
+        // cosas y no solo la variante.
         const deltas = new Map<string, number>([
-          [box.variantId, -curveQuantity],
+          [`${box.variantId}|${box.warehouseId}`, -curveQuantity],
         ]);
         for (const [variantId, quantity] of targetQuantities) {
-          deltas.set(variantId, (deltas.get(variantId) ?? 0) + quantity);
+          const clave = `${variantId}|${bodegaDeLosPares}`;
+          deltas.set(clave, (deltas.get(clave) ?? 0) + quantity);
         }
-        for (const [variantId, delta] of deltas) {
+        for (const [clave, delta] of deltas) {
           if (delta === 0) continue;
+          const [variantId, warehouseId] = clave.split('|');
           // Los bultos los crea y marca este mismo bloque —la caja pasa a
           // SPLIT y nacen sus pares—, así que el ledger solo mueve el
           // agregado; si además creara códigos, el inventario se duplicaría.
           await this.ledger.mover(m, {
             variantId,
-            warehouseId: box.warehouseId,
+            warehouseId,
             cantidad: delta,
             motivo: 'STOCK_UNIT',
             referenciaId: box.id,
-            notas: `Apertura de la caja ${box.barcode}`,
+            notas: mudanza
+              ? `Apertura de la caja ${box.barcode} hacia ${destino!.name}`
+              : `Apertura de la caja ${box.barcode}`,
             usuarioId: userId,
             bultosYaMovidos: true,
             tenantId,
@@ -1186,6 +1214,7 @@ export class StockUnitsService {
               children: saved.length,
               parcial: !apertura.seVacia,
               quedanEnLaCaja: apertura.totalQueQueda,
+              ...(mudanza ? { haciaLaBodega: destino!.name } : {}),
             },
             tenantId,
           }),

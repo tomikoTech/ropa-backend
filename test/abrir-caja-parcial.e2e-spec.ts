@@ -261,4 +261,71 @@ describe('Abrir una caja por partes (e2e)', () => {
     expect(res.body.units).toHaveLength(6);
     expect(res.body.parent.status).toBe('SPLIT');
   });
+
+  it('los pares pueden nacer en otra bodega: abrir y repartir en un paso', async () => {
+    // La caja llega a la central, se abre y los pares se van al local donde se
+    // van a vender. Antes eran dos pasos, y el traslado había que armarlo a
+    // mano código por código.
+    const local = await request(app.getHttpServer())
+      .post('/api/inventory/warehouses')
+      .set(auth())
+      .send({
+        name: `E2E Parcial Local ${ts}`,
+        code: `PL-${ts.toString().slice(-5)}`,
+        isPosLocation: true,
+      })
+      .expect(201);
+
+    const otra = await request(app.getHttpServer())
+      .post('/api/stock-units/intake')
+      .set(auth())
+      .send({ productId, boxes: 1, unitsPerBox: 6, warehouseId, unitCost: 40000 })
+      .expect(201);
+    const id = otra.body[0].id;
+    await request(app.getHttpServer())
+      .post(`/api/stock-units/${id}/contents`)
+      .set(auth())
+      .send({ items: tallas.map((t) => ({ sizeId: t.sizeId, quantity: 2 })) })
+      .expect(201);
+
+    const antesEnLaCaja = await existenciaTotal();
+
+    const res = await request(app.getHttpServer())
+      .post(`/api/stock-units/${id}/split`)
+      .set(auth())
+      .send({ warehouseId: local.body.id })
+      .expect(201);
+    expect(res.body.units).toHaveLength(6);
+
+    // Los pares están en el local, no en la bodega de la caja.
+    const enElLocal = await request(app.getHttpServer())
+      .get(
+        `/api/stock-units/search?productId=${productId}&kind=UNIT&warehouseId=${local.body.id}&limit=50`,
+      )
+      .set(auth())
+      .expect(200);
+    expect(enElLocal.body.data).toHaveLength(6);
+
+    // Y la existencia salió de la bodega de la caja: no se duplicó.
+    expect(await existenciaTotal()).toBe(antesEnLaCaja - 6);
+  });
+
+  it('no manda los pares a una bodega que no existe', async () => {
+    const otra = await request(app.getHttpServer())
+      .post('/api/stock-units/intake')
+      .set(auth())
+      .send({ productId, boxes: 1, unitsPerBox: 3, warehouseId, unitCost: 40000 })
+      .expect(201);
+    await request(app.getHttpServer())
+      .post(`/api/stock-units/${otra.body[0].id}/contents`)
+      .set(auth())
+      .send({ items: [{ sizeId: tallas[0].sizeId, quantity: 3 }] })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post(`/api/stock-units/${otra.body[0].id}/split`)
+      .set(auth())
+      .send({ warehouseId: '3f2504e0-4f89-41d3-9a0c-0305e82c3301' })
+      .expect(404);
+  });
 });

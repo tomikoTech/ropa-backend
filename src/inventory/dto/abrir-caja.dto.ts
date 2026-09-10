@@ -28,6 +28,14 @@ export class ParesDeUnaTallaDto {
  */
 export class AbrirCajaDto {
   @ApiPropertyOptional({
+    description:
+      'Bodega a la que van los pares. Sin esto se quedan donde está la caja.',
+  })
+  @IsOptional()
+  @IsUUID()
+  warehouseId?: string;
+
+  @ApiPropertyOptional({
     type: [ParesDeUnaTallaDto],
     description: 'Pares que salen, por talla. Sin esto sale la caja completa.',
   })
