@@ -18,6 +18,14 @@
 export interface RenglonDeTalla {
   sizeId: string;
   quantity: number;
+  /**
+   * A qué bodega van **esos** pares.
+   *
+   * No siempre van todos al mismo sitio: de una caja de 24 salen 6 para el
+   * local y el resto se queda en la central. Sin esto había que abrirla dos
+   * veces, una por destino.
+   */
+  warehouseId?: string;
 }
 
 export interface Apertura {
@@ -92,6 +100,8 @@ export function repartoDeLaApertura(
     }
   }
 
+  // Se conserva `warehouseId` de cada renglón: es lo que decide a dónde va
+  // cada talla.
   const sale = pedidas.filter((r) => r.quantity > 0).map((r) => ({ ...r }));
   const salePorTalla = new Map(sale.map((r) => [r.sizeId, r.quantity]));
   const queda = dentro

@@ -328,4 +328,68 @@ describe('Abrir una caja por partes (e2e)', () => {
       .send({ warehouseId: '3f2504e0-4f89-41d3-9a0c-0305e82c3301' })
       .expect(404);
   });
+
+  it('cada talla puede ir a una bodega distinta, en una sola apertura', async () => {
+    // De una caja salen unos para el local y el resto se queda en la central.
+    // Obligar a un único destino era abrir la caja dos veces.
+    const local = await request(app.getHttpServer())
+      .post('/api/inventory/warehouses')
+      .set(auth())
+      .send({
+        name: `E2E Parcial Repartir ${ts}`,
+        code: `PR-${ts.toString().slice(-5)}`,
+        isPosLocation: true,
+      })
+      .expect(201);
+
+    const otra = await request(app.getHttpServer())
+      .post('/api/stock-units/intake')
+      .set(auth())
+      .send({ productId, boxes: 1, unitsPerBox: 6, warehouseId, unitCost: 40000 })
+      .expect(201);
+    const id = otra.body[0].id;
+    await request(app.getHttpServer())
+      .post(`/api/stock-units/${id}/contents`)
+      .set(auth())
+      .send({
+        items: [
+          { sizeId: tallas[0].sizeId, quantity: 3 },
+          { sizeId: tallas[1].sizeId, quantity: 3 },
+        ],
+      })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post(`/api/stock-units/${id}/split`)
+      .set(auth())
+      .send({
+        items: [
+          // La primera talla al local; la segunda se queda donde está la caja.
+          { sizeId: tallas[0].sizeId, quantity: 3, warehouseId: local.body.id },
+          { sizeId: tallas[1].sizeId, quantity: 3 },
+        ],
+      })
+      .expect(201);
+
+    const enElLocal = await request(app.getHttpServer())
+      .get(
+        `/api/stock-units/search?productId=${productId}&kind=UNIT&warehouseId=${local.body.id}&limit=100`,
+      )
+      .set(auth())
+      .expect(200);
+    const tallasEnElLocal = (
+      enElLocal.body.data as { size: { name: string } | null }[]
+    ).map((p) => p.size?.name);
+    expect(tallasEnElLocal).toHaveLength(3);
+    expect(new Set(tallasEnElLocal)).toEqual(new Set([tallas[0].name]));
+
+    // Y los otros tres se quedaron con la caja.
+    const aqui = await request(app.getHttpServer())
+      .get(
+        `/api/stock-units/search?parentId=${id}&warehouseId=${warehouseId}&limit=100`,
+      )
+      .set(auth())
+      .expect(200);
+    expect(aqui.body.data).toHaveLength(3);
+  });
 });

@@ -99,3 +99,31 @@ describe('sacar unos pares y dejar el resto', () => {
     ).toThrow(/solo puede aparecer una vez/i);
   });
 });
+
+describe('cada talla puede ir a una bodega distinta', () => {
+  it('conserva el destino de cada renglón', () => {
+    // De una caja de 24 salen 6 para el local y el resto se queda: sin esto
+    // había que abrirla dos veces, una por destino.
+    const r = repartoDeLaApertura(caja, [
+      { sizeId: '40', quantity: 2, warehouseId: 'local' },
+      { sizeId: '42', quantity: 3 },
+    ]);
+    expect(r.sale).toEqual([
+      { sizeId: '40', quantity: 2, warehouseId: 'local' },
+      { sizeId: '42', quantity: 3 },
+    ]);
+    expect(r.totalQueSale).toBe(5);
+    expect(r.totalQueQueda).toBe(19);
+  });
+
+  it('el destino no cambia la cuenta de lo que queda en la caja', () => {
+    const conDestino = repartoDeLaApertura(caja, [
+      { sizeId: '40', quantity: 6, warehouseId: 'local' },
+    ]);
+    const sinDestino = repartoDeLaApertura(caja, [
+      { sizeId: '40', quantity: 6 },
+    ]);
+    expect(conDestino.queda).toEqual(sinDestino.queda);
+    expect(conDestino.seVacia).toBe(sinDestino.seVacia);
+  });
+});

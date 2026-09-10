@@ -1010,18 +1010,37 @@ export class StockUnitsService {
           );
         }
 
-        // A dónde van los pares. La caja no se mueve: se abre donde está y lo
+        // A dónde va cada talla. La caja no se mueve: se abre donde está y lo
         // que sale nace en la bodega que se pidió.
-        const destino = destinoId
-          ? await m
-              .getRepository(Warehouse)
-              .findOne({ where: { id: destinoId, tenantId } })
-          : null;
-        if (destinoId && !destino) {
-          throw new NotFoundException('La bodega de destino no existe.');
+        //
+        // **No todo tiene que ir al mismo sitio.** De una caja de 24 salen 6
+        // para el local y el resto se queda en la central; obligar a un único
+        // destino era abrir la caja dos veces, una por cada bodega.
+        const pedidas = [
+          ...new Set(
+            [
+              destinoId,
+              ...queSale.map((r) => r.warehouseId).filter(Boolean),
+            ].filter((x): x is string => !!x),
+          ),
+        ];
+        const bodegas = pedidas.length
+          ? await m.getRepository(Warehouse).find({
+              where: { id: In(pedidas), tenantId },
+            })
+          : [];
+        const porId = new Map(bodegas.map((b) => [b.id, b]));
+        for (const pedida of pedidas) {
+          if (!porId.has(pedida)) {
+            throw new NotFoundException('La bodega de destino no existe.');
+          }
         }
-        const bodegaDeLosPares = destino?.id ?? box.warehouseId;
-        const mudanza = bodegaDeLosPares !== box.warehouseId;
+        /** La bodega de esa talla: la suya, la general, o la de la caja. */
+        const bodegaDe = (renglon: RenglonDeTalla) =>
+          renglon.warehouseId ?? destinoId ?? box.warehouseId;
+        const seMudaAlgo = queSale.some(
+          (r) => bodegaDe(r) !== box.warehouseId,
+        );
 
         const units: StockUnit[] = [];
         const base = box.barcode.slice(0, 16);
@@ -1101,6 +1120,8 @@ export class StockUnitsService {
 
         for (const item of enOrdenDeTalla) {
           const variant = variantBySize.get(item.sizeId)!;
+          const bodegaDelRenglon = bodegaDe(item);
+          const seMuda = bodegaDelRenglon !== box.warehouseId;
           for (let i = 0; i < item.quantity; i++) {
             // Ya viene con su verificador: los derivados lo traen y a los
             // numerados a la antigua se les puso arriba.
@@ -1115,9 +1136,9 @@ export class StockUnitsService {
                 variantId: variant.id,
                 colorId: targetColorId,
                 sizeId: item.sizeId,
-                warehouseId: bodegaDeLosPares,
+                warehouseId: bodegaDelRenglon,
                 // El estante es de la bodega de la caja: en otra no existe.
-                standId: mudanza ? null : box.standId,
+                standId: seMuda ? null : box.standId,
                 quantity: 1,
                 cost: box.cost,
                 purchaseBoxLineId: box.purchaseBoxLineId,
@@ -1133,17 +1154,26 @@ export class StockUnitsService {
 
         // La caja cerrada vive en el agregado de una variante equivalente. Al
         // abrirla, redistribuye esas mismas unidades entre sus tallas reales.
+        // Por variante **y bodega**: la misma talla puede terminar en dos
+        // sitios distintos si se abre en dos tandas.
         const targetQuantities = new Map<string, number>();
         for (const item of queSale) {
           const variantId = variantBySize.get(item.sizeId)!.id;
+          const clave = `${variantId}|${bodegaDe(item)}`;
           targetQuantities.set(
-            variantId,
-            (targetQuantities.get(variantId) ?? 0) + item.quantity,
+            clave,
+            (targetQuantities.get(clave) ?? 0) + item.quantity,
           );
         }
         const stockRepo = m.getRepository(Stock);
+        // Ojo: las claves de `targetQuantities` son «variante|bodega», no
+        // identificadores. Pasarlas a un `IN` mandaba a la base un uuid mal
+        // formado y la apertura moría con «formato inválido».
         const affectedVariantIds = [
-          ...new Set([box.variantId, ...targetQuantities.keys()]),
+          ...new Set<string>([
+            box.variantId,
+            ...queSale.map((r) => variantBySize.get(r.sizeId)!.id),
+          ]),
         ];
         const stocks = await stockRepo.find({
           where: {
@@ -1169,8 +1199,7 @@ export class StockUnitsService {
         const deltas = new Map<string, number>([
           [`${box.variantId}|${box.warehouseId}`, -curveQuantity],
         ]);
-        for (const [variantId, quantity] of targetQuantities) {
-          const clave = `${variantId}|${bodegaDeLosPares}`;
+        for (const [clave, quantity] of targetQuantities) {
           deltas.set(clave, (deltas.get(clave) ?? 0) + quantity);
         }
         for (const [clave, delta] of deltas) {
@@ -1185,9 +1214,12 @@ export class StockUnitsService {
             cantidad: delta,
             motivo: 'STOCK_UNIT',
             referenciaId: box.id,
-            notas: mudanza
-              ? `Apertura de la caja ${box.barcode} hacia ${destino!.name}`
-              : `Apertura de la caja ${box.barcode}`,
+            notas:
+              warehouseId === box.warehouseId
+                ? `Apertura de la caja ${box.barcode}`
+                : `Apertura de la caja ${box.barcode} hacia ${
+                    porId.get(warehouseId)?.name ?? 'otra bodega'
+                  }`,
             usuarioId: userId,
             bultosYaMovidos: true,
             tenantId,
@@ -1239,7 +1271,13 @@ export class StockUnitsService {
               children: saved.length,
               parcial: !apertura.seVacia,
               quedanEnLaCaja: apertura.totalQueQueda,
-              ...(mudanza ? { haciaLaBodega: destino!.name } : {}),
+              ...(seMudaAlgo
+                ? {
+                    haciaLasBodegas: [
+                      ...new Set<string>(queSale.map((r) => bodegaDe(r))),
+                    ].map((id) => porId.get(id)?.name ?? id),
+                  }
+                : {}),
             },
             tenantId,
           }),

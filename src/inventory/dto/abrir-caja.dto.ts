@@ -18,6 +18,14 @@ export class ParesDeUnaTallaDto {
   @IsInt()
   @Min(0)
   quantity!: number;
+
+  @ApiPropertyOptional({
+    description:
+      'A qué bodega van estos pares. Sin esto, la de la caja (o la general).',
+  })
+  @IsOptional()
+  @IsUUID()
+  warehouseId?: string;
 }
 
 /**
@@ -29,7 +37,8 @@ export class ParesDeUnaTallaDto {
 export class AbrirCajaDto {
   @ApiPropertyOptional({
     description:
-      'Bodega a la que van los pares. Sin esto se quedan donde está la caja.',
+      'Bodega a la que van los pares que no digan la suya. Sin esto se quedan ' +
+      'donde está la caja.',
   })
   @IsOptional()
   @IsUUID()
