@@ -7,13 +7,19 @@ import {
   Param,
   Delete,
   ParseUUIDPipe,
+  Query,
   Res,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
-import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiQuery,
+} from '@nestjs/swagger';
 import { PurchaseBoxesService } from './purchase-boxes.service.js';
 import {
   CreateBoxLineDto,
@@ -60,13 +66,19 @@ export class PurchaseBoxesController {
 
   @Get(':id/label-units')
   @ApiOperation({
-    summary: 'IDs de los códigos (unidades) de la compra, para imprimir etiquetas',
+    summary: 'Los códigos de la compra, para imprimir etiquetas',
+    description:
+      'Con `boxLineId` devuelve solo los de ese renglón: la caja suelta o el ' +
+      'producto que hay que reimprimir sin sacar otra vez toda la importación.',
   })
+  @ApiQuery({ name: 'boxLineId', required: false })
   async labelUnits(
     @Param('id', ParseUUIDPipe) id: string,
     @TenantId() tenantId: string,
+    @Query('boxLineId', new ParseUUIDPipe({ optional: true }))
+    boxLineId?: string,
   ) {
-    const units = await this.boxes.labelUnits(id, tenantId);
+    const units = await this.boxes.labelUnits(id, tenantId, boxLineId);
     return { ids: units.map((u) => u.id), units };
   }
 

@@ -53,7 +53,7 @@ export class StockUnitsController {
   @Get('search')
   @ApiOperation({
     summary:
-      'Buscar códigos por texto, tipo (caja o par), producto, estado, bodega, caja de origen y fecha',
+      'Buscar códigos por texto, tipo (caja o par), producto, estado, bodega, caja de origen, venta y fecha',
   })
   search(
     @Query('q') q: string | undefined,
@@ -63,6 +63,7 @@ export class StockUnitsController {
     @Query('status') status: string | undefined,
     @Query('warehouseId') warehouseId: string | undefined,
     @Query('parentId') parentId: string | undefined,
+    @Query('saleId') saleId: string | undefined,
     @Query('from') from: string | undefined,
     @Query('to') to: string | undefined,
     @Query('page') page: string | undefined,
@@ -77,6 +78,7 @@ export class StockUnitsController {
       status,
       warehouseId,
       parentId,
+      saleId,
       from,
       to,
       page: Number(page),

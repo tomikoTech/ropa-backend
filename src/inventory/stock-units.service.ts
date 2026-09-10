@@ -1912,6 +1912,8 @@ export class StockUnitsService {
     warehouseId?: string;
     /** Los pares que salieron de una caja concreta. */
     parentId?: string;
+    /** Los códigos que se llevó una factura, para reimprimir sus etiquetas. */
+    saleId?: string;
     from?: string;
     to?: string;
     page?: number;
@@ -2058,6 +2060,7 @@ export class StockUnitsService {
           stand: unit.stand
             ? { id: unit.stand.id, name: unit.stand.name }
             : null,
+          boxLineId: unit.purchaseBoxLineId ?? null,
           orderNumber: line?.purchaseOrder?.orderNumber ?? null,
           // Con qué se rotula la caja al imprimir su etiqueta.
           pedidoNombre:
@@ -2119,6 +2122,7 @@ export class StockUnitsService {
     productId?: string;
     variantId?: string;
     parentId?: string;
+    saleId?: string;
   }) {
     for (const [label, value] of [
       ['desde', params.from],
@@ -2152,6 +2156,7 @@ export class StockUnitsService {
       ['Producto', params.productId],
       ['Talla', params.variantId],
       ['Caja', params.parentId],
+      ['Venta', params.saleId],
     ] as const) {
       if (value && !UUID_PATTERN.test(value)) {
         throw new BadRequestException(`${label} inválida.`);
@@ -2173,6 +2178,7 @@ export class StockUnitsService {
     status?: string;
     warehouseId?: string;
     parentId?: string;
+    saleId?: string;
     from?: string;
     to?: string;
     tenantId: string;
@@ -2226,6 +2232,40 @@ export class StockUnitsService {
       qb.andWhere('unit.variantId = :variantId', {
         variantId: params.variantId,
       });
+    }
+    // «Los códigos que se llevó esta factura». Se usa para reimprimir las
+    // etiquetas desde la venta: llega el cliente con la caja sin etiqueta —o
+    // rota— y hay que sacarla otra vez, sin ir a buscar código por código.
+    //
+    // Por `sale_items` y no por el estado del bulto: la venta puede estar
+    // anulada y el par de vuelta en la bodega, y sigue siendo el que salió en
+    // esa factura.
+    if (params.saleId) {
+      // Dos caminos porque hay dos formas de que un código salga en una venta:
+      // escaneado —queda en el renglón— o sacado por el ledger cuando se vendió
+      // sin pasar el lector, que lo anota en el movimiento. Buscar solo por el
+      // renglón dejaba sin etiquetas justo a la venta que se hizo de afán.
+      qb.andWhere(
+        `(EXISTS (SELECT 1 FROM sale_items si
+            WHERE si.stock_unit_id = unit.id
+              AND si.sale_id = :saleId
+              AND si.tenant_id = unit.tenant_id)
+          OR unit.barcode IN (
+            SELECT unnest(sm.unit_barcodes) FROM stock_movements sm
+             WHERE sm.reference_id = :saleIdTexto
+               AND sm.tenant_id = :tenantId
+               AND sm.unit_barcodes IS NOT NULL))`,
+        // El segundo va como lista y no como `EXISTS` correlacionado: pedir
+        // «¿está este código en el arreglo de algún movimiento?» por cada
+        // bulto recorría la tabla entera una vez por fila —3,3 s medidos—.
+        // Así los códigos de la venta se resuelven **una sola vez**.
+        //
+        // Y dos nombres para el mismo valor a propósito: `sale_items.sale_id`
+        // es `uuid` y `stock_movements.reference_id` es texto. Con un solo
+        // parámetro, Postgres le pone el tipo del primer uso y el segundo
+        // revienta con «operator does not exist: character varying = uuid».
+        { saleId: params.saleId, saleIdTexto: params.saleId },
+      );
     }
     // «Los pares de esta caja». Era la pregunta que quedaba sin respuesta al
     // abrirla: la caja decía «se abrió en 12 pares» y no había forma de verlos.

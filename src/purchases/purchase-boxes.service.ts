@@ -60,7 +60,15 @@ export class PurchaseBoxesService {
    * siempre: si una compra aún no se ha recibido, no hay unidades y la lista
    * viene vacía. Ordenados como salen del rollo (caja, luego par).
    */
-  async labelUnits(orderId: string, tenantId: string) {
+  /**
+   * Los códigos de una compra, para imprimir sus etiquetas.
+   *
+   * `boxLineId` acota a **un renglón**: es la caja suelta o el producto que se
+   * quiere reimprimir sin sacar otra vez las cuarenta de la importación. Va
+   * como filtro del mismo camino y no como endpoint aparte, para que la
+   * etiqueta salga igual pidiendo una o pidiéndolas todas.
+   */
+  async labelUnits(orderId: string, tenantId: string, boxLineId?: string) {
     const rows: {
       id: string;
       barcode: string;
@@ -89,8 +97,9 @@ export class PurchaseBoxesService {
          LEFT JOIN colors c ON c.id = v.color_id
          LEFT JOIN sizes sz ON sz.id = v.size_id
         WHERE bl.purchase_order_id = $1 AND su.tenant_id = $2
+          AND ($3::uuid IS NULL OR bl.id = $3::uuid)
         ORDER BY su.box_sequence NULLS FIRST, su.pair_sequence NULLS FIRST, su.created_at`,
-      [orderId, tenantId],
+      [orderId, tenantId, boxLineId ?? null],
     );
     // La misma forma que devuelve la búsqueda de bultos, para que el frontend
     // los imprima con el renderizador compartido sin traducciones aparte.
