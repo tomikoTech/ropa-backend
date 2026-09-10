@@ -111,7 +111,17 @@ export function parseStockBarcode(code: string): {
   orderSequence: number;
   lineConsecutive: number;
   unitSequence: number;
+  /** Número de par dentro de la caja, cuando el código lo lleva. */
+  pairSequence?: number;
 } | null {
+  // El código de un par lleva el de su caja entero y detrás su número: son
+  // 20 dígitos (17 + 2 + verificador). Ver `codigo-del-par.ts`.
+  if (code.length === 20 && /^\d{20}$/.test(code)) {
+    const deLaCaja = parseStockBarcode(code.slice(0, 17));
+    return deLaCaja
+      ? { ...deLaCaja, pairSequence: Number(code.slice(17, 19)) }
+      : null;
+  }
   const body = code.length === 17 ? code.slice(0, 16) : code;
   if (!/^\d{16}$/.test(body)) return null;
   return {

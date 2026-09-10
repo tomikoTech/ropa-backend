@@ -34,6 +34,7 @@ import {
   repartoDeLaApertura,
   type RenglonDeTalla,
 } from './apertura-parcial.js';
+import { codigosDerivados } from './codigo-del-par.js';
 import { AlcanceRecosteo } from './dto/recostear.dto.js';
 import {
   StockUnitEvent,
@@ -1027,46 +1028,6 @@ export class StockUnitsService {
 
         // La secuencia de las unidades continúa DESPUÉS de la de todas las
         // cajas y unidades ya emitidas del renglón. Si empezara en 1, la
-        // primera unidad tendría el mismo código que la primera caja.
-        const ultimaDelRenglon =
-          (await this.nextUnitSequence(base.slice(0, 13), tenantId, m)) - 1;
-        // De dónde salen los códigos: el renglón de la caja solo se continúa
-        // si es de una orden de compra. El espacio del día lo administra el
-        // ledger y numerar a mano ahí produce etiquetas repetidas. El renglón
-        // tiene además 999 puestos, y lo que pasaba de ahí armaba códigos de
-        // 18 dígitos sin avisar. Ver `reparto-de-pares.ts`.
-        const { enElRenglon, faltan } = paresDeLaCaja({
-          codigoDeLaCaja: box.barcode,
-          ultimaUnidadUsada: ultimaDelRenglon,
-          cantidad: curveQuantity,
-        });
-        // Lo que no cabe no bloquea la apertura: se le pide un tramo nuevo al
-        // reparto del día, el mismo del ledger.
-        let tramosDelDia: TramoDeEtiquetas[] = [];
-        const hoy = new Date();
-        if (faltan > 0) {
-          try {
-            tramosDelDia = await this.ledger.reservarEtiquetas(
-              m,
-              hoy,
-              tenantId,
-              faltan,
-            );
-          } catch (error) {
-            if (error instanceof ConsecutivoAgotadoError) {
-              throw new ConflictException(
-                explicarConsecutivoAgotado('STOCK_UNIT_INTAKE'),
-              );
-            }
-            throw error;
-          }
-        }
-        const codigos = codigosDeLaApertura({
-          cuerpoDelRenglon: base.slice(0, 13),
-          enElRenglon,
-          tramosDelDia,
-          fecha: hoy,
-        });
         // El número de par continúa después de los que ya salieron de esta
         // misma caja: en una apertura parcial la segunda tanda no puede volver
         // a llamarse 1, 2, 3 —dos pares distintos con el mismo puesto—.
@@ -1074,16 +1035,80 @@ export class StockUnitsService {
           where: { parentUnitId: box.id, tenantId },
         });
         let pairSequence = yaSalieron + 1;
+
+        // **El código del par lleva el de su caja adentro.** Ver
+        // `codigo-del-par.ts`: la caja entera, y detrás el número de par.
+        const derivados = codigosDerivados({
+          codigoDeLaCaja: box.barcode,
+          desdeElPar: pairSequence,
+          cuantos: curveQuantity,
+        });
+        // Lo que no se pudo derivar —una caja con código ajeno, o pares más
+        // allá del 99— se numera como antes. No bloquea la apertura: una caja
+        // que no se abre deja la mercancía sin vender.
+        const porNumerar = curveQuantity - derivados.length;
+        const hoy = new Date();
+        let viejos: string[] = [];
+        if (porNumerar > 0) {
+          const ultimaDelRenglon =
+            (await this.nextUnitSequence(base.slice(0, 13), tenantId, m)) - 1;
+          const { enElRenglon, faltan } = paresDeLaCaja({
+            codigoDeLaCaja: box.barcode,
+            ultimaUnidadUsada: ultimaDelRenglon,
+            cantidad: porNumerar,
+          });
+          let tramosDelDia: TramoDeEtiquetas[] = [];
+          if (faltan > 0) {
+            try {
+              tramosDelDia = await this.ledger.reservarEtiquetas(
+                m,
+                hoy,
+                tenantId,
+                faltan,
+              );
+            } catch (error) {
+              if (error instanceof ConsecutivoAgotadoError) {
+                throw new ConflictException(
+                  explicarConsecutivoAgotado('STOCK_UNIT_INTAKE'),
+                );
+              }
+              throw error;
+            }
+          }
+          viejos = codigosDeLaApertura({
+            cuerpoDelRenglon: base.slice(0, 13),
+            enElRenglon,
+            tramosDelDia,
+            fecha: hoy,
+          }).map((cuerpo) => withCheckDigit(cuerpo));
+        }
+        const codigos = [...derivados, ...viejos];
         let indiceDelCodigo = 0;
 
-        for (const item of queSale) {
+        // **Los pares se numeran en orden de talla.** El 01 y el 02 son de la
+        // 40, el 03 de la 41. Sin esto salían en el orden en que estuvieran
+        // guardadas las tallas de la caja, y el código —que ahora se lee para
+        // rastrear— no decía nada de lo que uno tiene en la mano. El orden es
+        // el del catálogo, que ya es numérico de verdad.
+        const enOrdenDeTalla = [...queSale].sort((a, b) => {
+          const va = variantBySize.get(a.sizeId);
+          const vb = variantBySize.get(b.sizeId);
+          const oa = va?.sizeRef?.sortOrder ?? Number.MAX_SAFE_INTEGER;
+          const ob = vb?.sizeRef?.sortOrder ?? Number.MAX_SAFE_INTEGER;
+          if (oa !== ob) return oa - ob;
+          return (va?.sizeRef?.name ?? '').localeCompare(vb?.sizeRef?.name ?? '');
+        });
+
+        for (const item of enOrdenDeTalla) {
           const variant = variantBySize.get(item.sizeId)!;
           for (let i = 0; i < item.quantity; i++) {
-            const body = codigos[indiceDelCodigo];
+            // Ya viene con su verificador: los derivados lo traen y a los
+            // numerados a la antigua se les puso arriba.
+            const codigo = codigos[indiceDelCodigo];
             indiceDelCodigo++;
             units.push(
               unitRepo.create({
-                barcode: withCheckDigit(body),
+                barcode: codigo,
                 kind: StockUnitKind.UNIT,
                 status: StockUnitStatus.IN_STOCK,
                 productId: box.productId,
