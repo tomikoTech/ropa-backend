@@ -41,6 +41,8 @@ import {
 } from './entities/stock-unit-event.entity.js';
 import { SaleItem } from '../pos/entities/sale-item.entity.js';
 import { Product } from '../products/entities/product.entity.js';
+import { ProductsService } from '../products/products.service.js';
+import { Size } from '../catalogs/entities/size.entity.js';
 import { Color } from '../catalogs/entities/color.entity.js';
 import { Warehouse } from './entities/warehouse.entity.js';
 import { Stand } from './entities/stand.entity.js';
@@ -104,6 +106,10 @@ export class StockUnitsService {
     // Para el costo puesto en bodega al recibir la orden entera: el mismo
     // reparto de fletes que usa el recibo de a uno, no una copia.
     private readonly boxes: PurchaseBoxesService,
+    // Para crear la variante de una talla que aparece al abrir la caja. Es el
+    // único punto que sabe crear variantes (SKU y código libres, catálogo de
+    // talla y color); duplicarlo acá era volver a tener dos.
+    private readonly products: ProductsService,
   ) {}
 
   /**
@@ -1310,6 +1316,19 @@ export class StockUnitsService {
         (orderBySize.get(b.sizeId) ?? Number.MAX_SAFE_INTEGER),
     );
 
+    // Y el catálogo entero de la tienda, no solo lo que el producto ya tiene.
+    //
+    // Las tallas de una caja **no se saben hasta que se abre**: llega rotulada
+    // «x24» y adentro viene el surtido que el proveedor quiso mandar. Ofrecer
+    // únicamente las tallas que ya existen como variante dejaba el trabajo en
+    // un callejón —«créalas primero desde Productos»— justo en el momento en
+    // que se están descubriendo. La talla que se elija de acá crea su variante
+    // al guardar; del catálogo, no como texto libre.
+    const catalogo = await this.dataSource.getRepository(Size).find({
+      where: { tenantId },
+      order: { sortOrder: 'ASC', name: 'ASC' },
+    });
+
     return {
       box: {
         id: box.id,
@@ -1319,7 +1338,87 @@ export class StockUnitsService {
       },
       items: contents,
       availableSizes,
+      catalogoDeTallas: catalogo.map((talla) => ({
+        sizeId: talla.id,
+        name: talla.name,
+        sortOrder: talla.sortOrder,
+        /** Si el producto ya la tiene: las demás se crean al guardar. */
+        yaEnElProducto: availableSizes.some((s) => s.sizeId === talla.id),
+      })),
     };
+  }
+
+  /**
+   * Crea las variantes que falten para las tallas que se están registrando.
+   *
+   * La talla viene del **catálogo de la tienda** (la pantalla la ofrece de
+   * ahí), así que lo que se crea es la variante que faltaba, no una talla
+   * inventada. El color lo hereda de la caja: es el mismo par.
+   */
+  private async asegurarLasTallas(
+    boxId: string,
+    items: { sizeId: string; quantity: number }[],
+    tenantId: string,
+  ): Promise<void> {
+    const conCantidad = items.filter((item) => item.quantity > 0);
+    if (conCantidad.length === 0) return;
+
+    const box = await this.unitRepo.findOne({
+      where: { id: boxId, tenantId },
+    });
+    if (!box?.productId) return;
+
+    // El color de la caja o, si no lo tiene, el de la variante donde vive su
+    // inventario. **La misma regla que usa abrir la caja**: si acá se usara
+    // otro, las variantes creadas no serían las que después se buscan y la
+    // apertura volvería a fallar por «falta una variante activa».
+    const boxVariant = box.variantId
+      ? await this.dataSource
+          .getRepository(ProductVariant)
+          .findOne({ where: { id: box.variantId, tenantId } })
+      : null;
+    const colorId = box.colorId ?? boxVariant?.colorId ?? null;
+
+    const existentes = await this.dataSource
+      .getRepository(ProductVariant)
+      .find({
+        where: {
+          productId: box.productId,
+          tenantId,
+          isActive: true,
+          sizeId: In(conCantidad.map((item) => item.sizeId)),
+          ...(colorId ? { colorId } : {}),
+        },
+      });
+    const yaEstan = new Set(existentes.map((v) => v.sizeId));
+    const faltan = conCantidad.filter((item) => !yaEstan.has(item.sizeId));
+    if (faltan.length === 0) return;
+
+    const [tallas, color] = await Promise.all([
+      this.dataSource.getRepository(Size).find({
+        where: { id: In(faltan.map((item) => item.sizeId)), tenantId },
+      }),
+      colorId
+        ? this.dataSource
+            .getRepository(Color)
+            .findOne({ where: { id: colorId, tenantId } })
+        : Promise.resolve(null),
+    ]);
+    const nombrePorId = new Map(tallas.map((t) => [t.id, t.name]));
+
+    for (const item of faltan) {
+      const nombre = nombrePorId.get(item.sizeId);
+      if (!nombre) {
+        throw new BadRequestException(
+          'Una de las tallas elegidas ya no existe en el catálogo.',
+        );
+      }
+      await this.products.asegurarVariante(
+        box.productId,
+        { size: nombre, color: color?.name ?? null },
+        tenantId,
+      );
+    }
   }
 
   /**
@@ -1342,6 +1441,22 @@ export class StockUnitsService {
         'Una caja debe contener al menos una unidad.',
       );
     }
+
+    // Las tallas que el producto todavía no tiene se crean **antes** de la
+    // transacción, y a propósito.
+    //
+    // Las tallas de una caja no se saben hasta abrirla: llega rotulada «x24» y
+    // adentro viene lo que el proveedor mandó. Antes, decir «vinieron 6 de la
+    // 38» exigía que la 38 ya existiera como variante del producto, y si no
+    // existía el trabajo se acababa ahí —«créalas primero desde Productos»—
+    // justo en el momento de descubrirlas.
+    //
+    // Fuera de la transacción porque las crea el único punto que sabe crear
+    // variantes (SKU y código de barras libres, catálogo de talla y color). Si
+    // la transacción de abajo fallara, la variante creada no sobra: esa talla
+    // de ese producto **existe**, lo acaba de decir quien tiene la caja
+    // enfrente.
+    await this.asegurarLasTallas(boxId, items, tenantId);
 
     await this.dataSource.transaction(async (m) => {
       const unitRepo = m.getRepository(StockUnit);
@@ -1380,10 +1495,15 @@ export class StockUnitsService {
           variantBySize.set(variant.sizeId, variant);
         }
       }
-      const missing = items.find((item) => !variantBySize.has(item.sizeId));
+      // Las que faltaban se acaban de crear arriba. Si alguna sigue sin
+      // aparecer es que su creación falló, y decirlo así —en vez de «no tiene
+      // variante activa»— es lo único que le sirve a quien está con la caja.
+      const missing = items.find(
+        (item) => item.quantity > 0 && !variantBySize.has(item.sizeId),
+      );
       if (missing) {
         throw new BadRequestException(
-          'Una talla seleccionada no tiene variante activa para el producto y color de la caja.',
+          'No se pudo preparar una de las tallas para este producto. Vuelve a intentarlo.',
         );
       }
 

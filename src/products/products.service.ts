@@ -6,7 +6,7 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository, In } from 'typeorm';
+import { DataSource, Repository, In, IsNull } from 'typeorm';
 import { RecipeService } from './services/recipe.service.js';
 import { BrandsService } from '../brands/brands.service.js';
 import { SizesService } from '../catalogs/sizes.service.js';
@@ -314,6 +314,59 @@ export class ProductsService {
     let counter = 2;
     while (taken.has(`${baseSku}-${counter}`)) counter++;
     return `${baseSku}-${counter}`;
+  }
+
+  /**
+   * La variante de un producto para esa talla y color, **creándola si falta**.
+   *
+   * Existe por una razón concreta del mostrador: las tallas de una caja no se
+   * saben hasta que se abre. La caja llega rotulada «x24» y adentro puede venir
+   * cualquier surtido; el dueño lo dice con la caja enfrente. Exigir que las
+   * tallas ya existieran en el catálogo del producto dejaba el trabajo en un
+   * callejón —«créalas primero desde Productos»— justo en el momento en que se
+   * está descubriendo cuáles son.
+   *
+   * La talla llega **del catálogo de la tienda**, no como texto libre: lo que
+   * se crea es la variante que faltaba, no una talla inventada.
+   */
+  async asegurarVariante(
+    productId: string,
+    datos: { size?: string | null; color?: string | null },
+    tenantId: string,
+  ): Promise<ProductVariant> {
+    const product = await this.productRepository.findOne({
+      where: { id: productId, tenantId },
+    });
+    if (!product) throw new NotFoundException('Producto no encontrado');
+
+    const [sizeEntity, colorEntity] = await Promise.all([
+      this.sizesService.ensure(datos.size ?? undefined, tenantId),
+      this.colorsService.ensure(datos.color ?? undefined, tenantId),
+    ]);
+
+    const existente = await this.variantRepository.findOne({
+      where: {
+        productId,
+        tenantId,
+        sizeId: sizeEntity?.id ?? IsNull(),
+        colorId: colorEntity?.id ?? IsNull(),
+      },
+      order: { createdAt: 'ASC' },
+    });
+    if (existente) {
+      // Una variante desactivada vuelve: la mercancía llegó, existe.
+      if (!existente.isActive) {
+        existente.isActive = true;
+        await this.variantRepository.save(existente);
+      }
+      return existente;
+    }
+
+    return this.createVariantFor(
+      product,
+      { size: sizeEntity?.name, color: colorEntity?.name },
+      tenantId,
+    );
   }
 
   // El código de barras se genera con timestamp + aleatorio: dos variantes
