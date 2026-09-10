@@ -207,4 +207,50 @@ describe('Detallar una caja crea las tallas que aparecen (e2e)', () => {
       })
       .expect(400);
   });
+
+  it('manda TODAS las tallas del catálogo, con las que no vinieron en cero', async () => {
+    // Es lo que hace la pantalla desde que las tallas salen fijas: se teclea
+    // de corrido y las que no vinieron viajan en cero. Se cayó en producción
+    // con la caja ya contada —«error interno del servidor»— porque para una
+    // talla en cero no hay variante que poner en su fila.
+    const otra = await request(app.getHttpServer())
+      .post('/api/stock-units/intake')
+      .set(auth())
+      .send({ productId, boxes: 1, unitsPerBox: 4, warehouseId, unitCost: 40000 })
+      .expect(201);
+    const cajaId2 = otra.body[0].id;
+
+    const { catalogoDeTallas } = await (async () => {
+      const r = await request(app.getHttpServer())
+        .get(`/api/stock-units/${cajaId2}/contents`)
+        .set(auth())
+        .expect(200);
+      return r.body as {
+        catalogoDeTallas: { sizeId: string; name: string }[];
+      };
+    })();
+    expect(catalogoDeTallas.length).toBeGreaterThan(2);
+
+    await request(app.getHttpServer())
+      .post(`/api/stock-units/${cajaId2}/contents`)
+      .set(auth())
+      .send({
+        items: catalogoDeTallas.map((t) => ({
+          sizeId: t.sizeId,
+          // Solo la 38 vino; el resto del catálogo va en cero.
+          quantity: t.sizeId === talla38 ? 4 : 0,
+        })),
+      })
+      .expect(201);
+
+    const r = await request(app.getHttpServer())
+      .get(`/api/stock-units/${cajaId2}/contents`)
+      .set(auth())
+      .expect(200);
+    const conAlgo = (r.body.items as { sizeId: string; actualQuantity: number }[])
+      .filter((i) => i.actualQuantity > 0);
+    expect(conAlgo).toHaveLength(1);
+    expect(conAlgo[0].sizeId).toBe(talla38);
+    expect(r.body.box.quantity).toBe(4);
+  });
 });

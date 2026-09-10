@@ -1579,11 +1579,23 @@ export class StockUnitsService {
       }
       for (const item of items) {
         if (existingBySize.has(item.sizeId)) continue;
+        const variante = variantBySize.get(item.sizeId);
+        // **Una talla en cero que la caja no tenía no es una fila.** De esa
+        // talla no vino nada, y de las que no vinieron tampoco se crea la
+        // variante, así que no habría con qué llenarla.
+        //
+        // Antes esto asumía que la variante existía siempre, y era verdad
+        // mientras la pantalla mandaba solo las tallas del producto. Desde que
+        // manda **todas las del catálogo** —para poder teclear de corrido— las
+        // que van en cero llegaban sin variante y el guardado moría con
+        // «Cannot read properties of undefined». Se cayó en producción con la
+        // caja ya contada.
+        if (item.quantity <= 0 || !variante) continue;
         existing.push(
           contentRepo.create({
             boxUnitId: box.id,
             sizeId: item.sizeId,
-            variantId: variantBySize.get(item.sizeId)!.id,
+            variantId: variante.id,
             expectedQuantity: 0,
             actualQuantity: item.quantity,
             tenantId,
