@@ -72,6 +72,7 @@ import {
   bultosRepetidos,
   porQueNoSePuedeGuardar,
 } from './bultos-repetidos.js';
+import { emparejarRenglones } from './emparejar-renglones.js';
 
 @Injectable()
 export class PosService {
@@ -591,22 +592,10 @@ export class PosService {
           // 36-39 quedaba facturada como «talla 36». El detalle se lee de la
           // propia caja, no de la curva del renglón: la curva puede cambiar
           // después y lo que se entrega es lo que la caja trae.
-          let boxContents: { size: string; quantity: number }[] | null = null;
-          if (soldUnit?.kind === StockUnitKind.BOX) {
-            const filas = await manager.getRepository(StockUnitContent).find({
-              where: { boxUnitId: soldUnit.id, tenantId },
-              relations: { size: true },
-            });
-            const detalle = sortSizes(
-              filas
-                .filter((fila) => Number(fila.actualQuantity) > 0)
-                .map((fila) => ({
-                  size: fila.size?.name ?? '',
-                  quantity: Number(fila.actualQuantity),
-                })),
-            );
-            boxContents = detalle.length > 0 ? detalle : null;
-          }
+          const boxContents =
+            soldUnit?.kind === StockUnitKind.BOX
+              ? await this.contenidoDeLaCaja(manager, soldUnit, tenantId)
+              : null;
           const variantSize =
             soldUnit?.kind === StockUnitKind.BOX
               ? describeBoxSizes(boxContents ?? [])
@@ -1518,6 +1507,32 @@ export class PosService {
 
   // Edita una venta y mantiene alineados sus snapshots monetarios, pagos y
   // cartera. El precio de una línea es histórico: nunca modifica el catálogo.
+  /**
+   * Qué trae la caja, tal como se entrega.
+   *
+   * Se copia en la línea de la venta y no se lee de la curva del producto: la
+   * curva puede cambiar mañana y lo que el cliente se llevó ya no cambia.
+   */
+  private async contenidoDeLaCaja(
+    manager: EntityManager,
+    caja: StockUnit,
+    tenantId: string,
+  ): Promise<{ size: string; quantity: number }[] | null> {
+    const filas = await manager.getRepository(StockUnitContent).find({
+      where: { boxUnitId: caja.id, tenantId },
+      relations: { size: true },
+    });
+    const detalle = sortSizes(
+      filas
+        .filter((fila) => Number(fila.actualQuantity) > 0)
+        .map((fila) => ({
+          size: fila.size?.name ?? '',
+          quantity: Number(fila.actualQuantity),
+        })),
+    );
+    return detalle.length > 0 ? detalle : null;
+  }
+
   async updateSale(
     id: string,
     dto: UpdateSaleDto,
@@ -1629,29 +1644,27 @@ export class PosService {
         const saleItemRepo = manager.getRepository(SaleItem);
         const variantRepo = manager.getRepository(ProductVariant);
         /**
-         * Las líneas que tenía la venta, para heredar de ellas.
+         * Qué línea vieja le toca a cada línea nueva, para heredar de ella.
          *
-         * Era un `Map` por variante, y eso **perdía líneas**: una venta con
-         * cuatro cajas de la misma referencia entra al mapa como una sola —la
-         * última—, así que tres se quedaban sin su `previous` y perdían el
-         * vínculo con su caja física. La caja dejaba de marcarse como vendida y
-         * el detalle la mostraba «sin código».
-         *
-         * Una lista que se va consumiendo sí distingue las cuatro.
+         * Emparejar por variante y cantidad no alcanza: cincuenta y tres cajas
+         * de la misma referencia son cincuenta y tres líneas idénticas, y el
+         * emparejamiento quedaba a merced del orden entregándole a una el
+         * código de otra. La regla —y el caso real que la obligó— vive en
+         * `emparejar-renglones.ts` y se prueba sin base de datos.
          */
         const anteriores = [...sale.items];
-        /** Toma la línea anterior que le corresponde a esta, y la consume. */
-        const tomarAnterior = (variantId: string, cantidad: number) => {
-          // Primero la que coincide en variante Y cantidad: es la que puede
-          // conservar su código físico.
-          let i = anteriores.findIndex(
-            (a) => a.variantId === variantId && Number(a.quantity) === cantidad,
-          );
-          // Si no, cualquiera de esa variante: sirve para heredar el IVA y el
-          // nombre, aunque el código ya no aplique.
-          if (i < 0) i = anteriores.findIndex((a) => a.variantId === variantId);
-          return i < 0 ? undefined : anteriores.splice(i, 1)[0];
-        };
+        const emparejadas = emparejarRenglones(
+          requestedItems.map((item) => ({
+            variantId: item.variantId,
+            quantity: item.quantity,
+            stockUnitIds: item.stockUnitIds,
+          })),
+          anteriores.map((a) => ({
+            variantId: a.variantId,
+            quantity: Number(a.quantity),
+            stockUnitId: a.stockUnitId,
+          })),
+        );
         const settings = await manager
           .getRepository(StoreSettings)
           .findOne({ where: { tenantId } });
@@ -1797,7 +1810,7 @@ export class PosService {
           await saleItemRepo.delete({ saleId: sale.id, tenantId });
 
           // 2) Aplicar los ítems nuevos (mismo patrón que createSale).
-          for (const item of requestedItems) {
+          for (const [indice, item] of requestedItems.entries()) {
             const variant = await variantRepo.findOne({
               where: { id: item.variantId },
               relations: ['product'],
@@ -1839,19 +1852,22 @@ export class PosService {
               precioFijo: !!variant.product.fixedPrice,
             });
 
-            // Se consume el snapshot: cada línea hereda **el suyo**, y dos
-            // líneas de la misma variante no se quedan con el mismo código.
-            const previous = tomarAnterior(variant.id, item.quantity);
+            // Cada línea hereda **el suyo**, y dos líneas de la misma
+            // variante no se quedan con el mismo código.
+            const emparejada = emparejadas[indice];
+            const previous =
+              emparejada.anterior === null
+                ? undefined
+                : anteriores[emparejada.anterior];
             const taxRate = previous
               ? Number(previous.taxRate)
               : fallbackTaxRate;
             // El código físico sigue siendo el mismo par o la misma caja: sin
             // esto la venta pierde el vínculo y ese código ya no se puede
             // devolver escaneándolo.
-            const keptStockUnitId =
-              previous && Number(previous.quantity) === item.quantity
-                ? previous.stockUnitId
-                : null;
+            const keptStockUnitId = emparejada.conservaElCodigo
+              ? (previous?.stockUnitId ?? null)
+              : null;
             // El bulto conservado vuelve a salir del inventario, y **de su
             // bodega**: la cascada de abajo ordena por bodega de la venta y
             // podía descontar en otra, dejando el código vendido en un sitio y
@@ -1861,6 +1877,37 @@ export class PosService {
                   where: { id: keptStockUnitId, tenantId },
                 })
               : null;
+
+            // Los bultos que esta línea señaló por su código. Se resuelven
+            // **antes** de guardarla porque la línea tiene que nacer sabiendo
+            // qué caja es: una caja anexada al editar se descontaba bien pero
+            // se guardaba sin código, sin `unitKind` y sin su contenido, y
+            // entonces la factura ya no sabía qué se llevó el cliente, la
+            // devolución por escáner dejaba de encontrarla, y la siguiente
+            // edición la aplanaba en veinticuatro pares sueltos.
+            const pedidos =
+              !keptUnit && item.stockUnitIds?.length
+                ? await manager.getRepository(StockUnit).find({
+                    where: {
+                      id: In(item.stockUnitIds),
+                      tenantId,
+                      variantId: variant.id,
+                      status: StockUnitStatus.IN_STOCK,
+                    },
+                  })
+                : [];
+            // Un solo bulto que cubre la línea entera es **el** bulto de la
+            // línea. Varios pares sueltos no caben en una columna sola, y esa
+            // línea sigue guardándose sin código como siempre.
+            const bultoDeLaLinea =
+              pedidos.length === 1 && Number(pedidos[0].quantity) === item.quantity
+                ? pedidos[0]
+                : null;
+            const contenidoDelBulto =
+              bultoDeLaLinea?.kind === StockUnitKind.BOX
+                ? await this.contenidoDeLaCaja(manager, bultoDeLaLinea, tenantId)
+                : null;
+            const unidadDeLaLinea = keptUnit ?? bultoDeLaLinea;
 
             const editedItem = await saleItemRepo.save(
               saleItemRepo.create({
@@ -1872,7 +1919,11 @@ export class PosService {
                   previous?.productCode ?? variant.product.skuPrefix ?? null,
                 variantBarcode:
                   previous?.variantBarcode ?? variant.barcode ?? null,
-                variantSize: previous?.variantSize ?? variant.sizeName,
+                // Lo que se entregó de verdad. Una caja no tiene talla:
+                // trae un surtido, y su descripción sale de su contenido.
+                variantSize: contenidoDelBulto
+                  ? describeBoxSizes(contenidoDelBulto)
+                  : (previous?.variantSize ?? variant.sizeName),
                 variantColor: previous?.variantColor ?? variant.colorName,
                 quantity: item.quantity,
                 unitPrice,
@@ -1890,14 +1941,16 @@ export class PosService {
                     : variant.priceOverride != null
                       ? Number(variant.priceOverride)
                       : Number(variant.product.basePrice) || null,
-                stockUnitId: keptStockUnitId,
+                stockUnitId: unidadDeLaLinea?.id ?? null,
                 // Qué era esa línea —caja o par— y con qué surtido: se
                 // conserva junto al código físico. Si se perdiera, editar el
                 // precio de una factura le borraría a la caja su contenido.
-                unitKind: keptStockUnitId ? (previous?.unitKind ?? null) : null,
+                unitKind: keptStockUnitId
+                  ? (previous?.unitKind ?? null)
+                  : (bultoDeLaLinea?.kind ?? null),
                 boxContents: keptStockUnitId
                   ? (previous?.boxContents ?? null)
-                  : null,
+                  : contenidoDelBulto,
                 promoterId: previous?.promoterId ?? null,
                 promoterName: previous?.promoterName ?? null,
                 discountPercent:
@@ -1927,23 +1980,14 @@ export class PosService {
                 tenantId,
               });
             } else {
-              // Los pares que la edición señaló por su código, si los hay.
+              // Los pares que la edición señaló por su código, si los hay
+              // —ya resueltos arriba, junto con el snapshot de la línea.
               //
               // Sin esto el inventario elige por antigüedad, y el par que queda
               // registrado como vendido no es el que el cliente se llevó: el
               // código impreso en la caja que sigue en su casa figura como
               // devuelto. La regla del reparto vive en
               // `reparto-de-unidades.ts` y se prueba sin base de datos.
-              const pedidos = item.stockUnitIds?.length
-                ? await manager.getRepository(StockUnit).find({
-                    where: {
-                      id: In(item.stockUnitIds),
-                      tenantId,
-                      variantId: variant.id,
-                      status: StockUnitStatus.IN_STOCK,
-                    },
-                  })
-                : [];
               const reparto = repartirPorBodega(
                 // Cuánto trae cada bulto: una caja de 24 cubre 24 de la línea,
                 // no una. Contarla como una dejaba «faltando 23», que salían
