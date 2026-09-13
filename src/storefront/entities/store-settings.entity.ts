@@ -400,8 +400,17 @@ export class StoreSettings extends TenantAwareEntity {
   @Column({ name: 'credit_default_days', type: 'int', nullable: true })
   creditDefaultDays: number | null;
 
-  // Cartera: MANUAL conserva el abono por factura. FIFO permite registrar un
-  // abono al saldo total del cliente y lo reparte desde la factura más antigua.
+  /**
+   * @deprecated Ya no lo lee nadie.
+   *
+   * Fue el interruptor que había que encender para poder abonar al saldo del
+   * cliente. Estaba apagado en los diez tenants, así que escondía una función
+   * que funcionaba. Elegir al cliente y darle a «abonar al saldo» ya es la
+   * instrucción; un ajuste previo para autorizar lo que se acaba de pedir no
+   * protege de nada.
+   *
+   * La columna se deja para no tumbar un despliegue viejo a media migración.
+   */
   @Column({
     name: 'ar_payment_allocation_mode',
     type: 'varchar',

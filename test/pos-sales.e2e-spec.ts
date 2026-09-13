@@ -465,7 +465,7 @@ describe('POS Sales & Accounts Receivable (e2e)', () => {
     expect(summary.activeAccounts).toBe(0);
   });
 
-  it('aplica un abono FIFO configurable desde la factura más antigua', async () => {
+  it('aplica un abono al saldo desde la factura más antigua', async () => {
     const sales: { id: string; total: number }[] = [];
     for (let index = 0; index < 3; index++) {
       const sale = await request(app.getHttpServer())
@@ -483,24 +483,11 @@ describe('POS Sales & Accounts Receivable (e2e)', () => {
       sales.push({ id: sale.body.id, total: Number(sale.body.total) });
     }
 
-    await request(app.getHttpServer())
-      .patch('/api/store-settings')
-      .set('Authorization', `Bearer ${token}`)
-      .send({ arPaymentAllocationMode: 'MANUAL' })
-      .expect(200);
-    await request(app.getHttpServer())
-      .post(`/api/pos/accounts-receivable/clients/${clientId}/balance-payment`)
-      .set('Authorization', `Bearer ${token}`)
-      .send({ amount: 100, method: 'EFECTIVO' })
-      .expect(400);
-
-    try {
-      await request(app.getHttpServer())
-        .patch('/api/store-settings')
-        .set('Authorization', `Bearer ${token}`)
-        .send({ arPaymentAllocationMode: 'FIFO' })
-        .expect(200);
-
+    // Sin encender nada: el interruptor `arPaymentAllocationMode` que había
+    // que prender para esto estaba apagado en los diez tenants, así que la
+    // función existía y no la tenía nadie. Elegir al cliente y abonarle a su
+    // saldo ya es la instrucción.
+    {
       const partialThird = Math.round((sales[2].total / 2) * 100) / 100;
       const paymentAmount = sales[0].total + sales[1].total + partialThird;
       const result = await request(app.getHttpServer())
@@ -542,11 +529,6 @@ describe('POS Sales & Accounts Receivable (e2e)', () => {
       expect(bySale.get(sales[0].id)?.isFullyPaid).toBe(true);
       expect(bySale.get(sales[1].id)?.isFullyPaid).toBe(true);
       expect(bySale.get(sales[2].id)?.isFullyPaid).toBe(false);
-    } finally {
-      await request(app.getHttpServer())
-        .patch('/api/store-settings')
-        .set('Authorization', `Bearer ${token}`)
-        .send({ arPaymentAllocationMode: 'MANUAL' });
     }
   });
 

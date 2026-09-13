@@ -3291,14 +3291,16 @@ export class PosService {
   }> {
     await this.caja.exigirComprobante(tenantId, [dto]);
     return this.dataSource.transaction(async (manager) => {
-      const settings = await manager.getRepository(StoreSettings).findOne({
-        where: { tenantId },
-      });
-      if (settings?.arPaymentAllocationMode !== 'FIFO') {
-        throw new BadRequestException(
-          'La aplicación automática FIFO no está habilitada para esta tienda.',
-        );
-      }
+      // Acá había un interruptor (`arPaymentAllocationMode`) que había que
+      // encender para poder abonar al saldo del cliente. **Estaba apagado en
+      // los diez tenants**, así que la función existía y no la tenía nadie: el
+      // botón salía escondido y, si alguien llegaba por la API, recibía «la
+      // aplicación automática FIFO no está habilitada para esta tienda».
+      //
+      // Se quitó por lo mismo que el cobro por selección nunca lo pidió:
+      // **elegir al cliente y darle a «abonar al saldo» ya es la
+      // instrucción**. Un ajuste previo para autorizar lo que se acaba de
+      // pedir no protege de nada.
 
       const client = await manager.getRepository(Client).findOne({
         where: { id: clientId, tenantId },
