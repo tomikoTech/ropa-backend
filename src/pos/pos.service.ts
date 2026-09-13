@@ -36,6 +36,7 @@ import { StockLedgerService } from '../inventory/ledger/stock-ledger.service.js'
 import { CajaService } from '../caja/caja.service.js';
 import { ReposicionAutomaticaService } from '../inventory/reposicion-automatica.service.js';
 import { pendienteTotal, repartirAbono } from './ar-allocation.js';
+import { cubreElTotal, sePasaDe } from './el-pago-cubre-el-total.js';
 import { precioDeLinea, type ReglaDePrecio } from './precio-de-linea.js';
 import { ordenarParaDescuento } from '../inventory/exhibicion.js';
 import { TaxService, LineCalculation } from './services/tax.service.js';
@@ -453,7 +454,12 @@ export class PosService {
           ? (regularPayments[0]?.method ?? null)
           : null;
 
-        if (!isPending && totalRegular + totalCredit < saleTotals.total) {
+        // En **centavos enteros**, no en pesos con decimales. El carrito y
+        // este cálculo llegan al mismo total por caminos distintos, y con un
+        // 33% de descuento el del carrito daba cuatro billonésimas de peso
+        // menos: la venta se caía con «Pago insuficiente. Total: $30753,
+        // Pagado: $30752.999999999996». Ver `el-pago-cubre-el-total.ts`.
+        if (!isPending && !cubreElTotal(totalRegular + totalCredit, saleTotals.total)) {
           throw new BadRequestException(
             `Pago insuficiente. Total: $${saleTotals.total}, Pagado: $${totalRegular + totalCredit}`,
           );
@@ -2096,12 +2102,16 @@ export class PosService {
             ).lineTotal,
           0,
         );
-        if (dto.total !== undefined && dto.total > naturalTotal + 0.01) {
+        // El `+ 0.01` que había aquí era la misma tolerancia, escrita de otra
+        // forma. En centavos enteros no hace falta inventarse un margen: el
+        // redondeo a centavos ya absorbe el ruido, y un centavo de verdad sí
+        // debe frenar. Ver `el-pago-cubre-el-total.ts`.
+        if (dto.total !== undefined && sePasaDe(dto.total, naturalTotal)) {
           throw new BadRequestException(
             'El total no puede superar la suma de los productos. Ajusta sus precios unitarios.',
           );
         }
-        if (dto.total === undefined && discount > newSubtotal + 0.01) {
+        if (dto.total === undefined && sePasaDe(discount, newSubtotal)) {
           throw new BadRequestException(
             'El descuento no puede superar el subtotal de la venta',
           );
@@ -2189,7 +2199,7 @@ export class PosService {
       } else if (dto.discountAmount !== undefined) {
         const subtotal = Number(sale.subtotal);
         const tax = Number(sale.taxAmount);
-        if (dto.discountAmount > subtotal + 0.01) {
+        if (sePasaDe(dto.discountAmount, subtotal)) {
           throw new BadRequestException(
             'El descuento no puede superar el subtotal de la venta',
           );
