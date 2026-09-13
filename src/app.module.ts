@@ -39,6 +39,7 @@ import { ReservationsModule } from './reservations/reservations.module.js';
 import { CommonModule } from './common/common.module.js';
 import { UploadsModule } from './uploads/uploads.module.js';
 import { StreetModule } from './street/street.module.js';
+import { DocumentosModule } from './documentos/documentos.module.js';
 import { PromotersModule } from './promoters/promoters.module.js';
 import { InternalRequestsModule } from './internal-requests/internal-requests.module.js';
 import { AssistantModule } from './assistant/assistant.module.js';
@@ -123,6 +124,7 @@ import { QzModule } from './qz/qz.module.js';
     UploadsModule,
     AccessModule,
     StreetModule,
+    DocumentosModule,
     PromotersModule,
     InternalRequestsModule,
     AssistantModule,
