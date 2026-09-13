@@ -190,7 +190,14 @@ export class DocumentosService {
     }
     const tenant = await this.tenantRepo.findOne({ where: { id: tenantId } });
     const slug = (tenant?.slug ?? tenantId).replace(/[^a-z0-9-]/gi, '');
-    return this.r2.uploadConNombre(`documentos/${slug}/${nombre}`, pdf, 'application/pdf');
+    const url = await this.r2.uploadConNombre(`documentos/${slug}/${nombre}`, pdf, 'application/pdf');
+    // El nombre es fijo pero el enlace no: `?v=` cambia con cada generación.
+    // Pasó en AMAWAD: abonaron, mandaron el estado de cuenta otra vez y el
+    // celular abrió el PDF que ya tenía guardado —el de antes del abono— y
+    // «el abono no se hizo». R2 ignora la cola para buscar el archivo, así
+    // que sigue siendo un solo objeto; lo que se evita es la caché del
+    // teléfono, de WhatsApp y del borde de Cloudflare.
+    return `${url}?v=${Date.now()}`;
   }
 
   /** El encabezado de la tienda, con el logo ya descargado. */
