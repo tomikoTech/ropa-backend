@@ -387,6 +387,19 @@ export class StoreSettings extends TenantAwareEntity {
   @Column({ name: 'pos_mark_paid_default', default: true })
   posMarkPaidDefault: boolean;
 
+  /**
+   * A cuántos días vence una venta a crédito si el vendedor no elige plazo.
+   *
+   * `null` = sin plazo por defecto: el campo de fecha nace vacío, que es lo
+   * que había. Quien vende siempre a 90 días lo configura una vez y deja de
+   * escribir la misma fecha en cada factura.
+   *
+   * Es solo el valor inicial: el vendedor puede cambiar la fecha por venta, y
+   * al cambiarla el botón del plazo se desmarca solo.
+   */
+  @Column({ name: 'credit_default_days', type: 'int', nullable: true })
+  creditDefaultDays: number | null;
+
   // Cartera: MANUAL conserva el abono por factura. FIFO permite registrar un
   // abono al saldo total del cliente y lo reparte desde la factura más antigua.
   @Column({

@@ -121,6 +121,11 @@ export class StoreSettingsService {
       settings.quickLoanEnabled = dto.quickLoanEnabled;
     if (dto.posMarkPaidDefault !== undefined)
       settings.posMarkPaidDefault = dto.posMarkPaidDefault;
+    if (dto.creditDefaultDays !== undefined)
+      // Un 0 que llega del formulario significa «sin plazo por defecto», no
+      // «vence hoy»: se guarda como nulo para que sea una sola cosa en la
+      // base de datos y no dos formas de decir lo mismo.
+      settings.creditDefaultDays = dto.creditDefaultDays || null;
     if (dto.arPaymentAllocationMode !== undefined)
       settings.arPaymentAllocationMode = dto.arPaymentAllocationMode;
     if (dto.unitTrackingEnabled !== undefined)

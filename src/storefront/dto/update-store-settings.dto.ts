@@ -225,6 +225,18 @@ export class UpdateStoreSettingsDto {
   posMarkPaidDefault?: boolean;
 
   @ApiPropertyOptional({
+    example: 90,
+    description:
+      'Días de plazo con los que nace una venta a crédito. Vacío o 0 = sin ' +
+      'plazo por defecto (el vendedor escribe la fecha).',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(365)
+  creditDefaultDays?: number | null;
+
+  @ApiPropertyOptional({
     enum: ['MANUAL', 'FIFO'],
     description:
       'MANUAL abona una factura elegida; FIFO distribuye el abono al saldo desde la factura más antigua',
