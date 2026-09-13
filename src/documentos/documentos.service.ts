@@ -123,7 +123,7 @@ export class DocumentosService {
    * cliente que guardó el enlace de ayer ve la factura de hoy—.
    *
    * Lo que sí queda pendiente es **cuánto tiempo viven**: eso lo decide una
-   * regla de ciclo de vida del bucket (`documentos/` → borrar a los N días),
+   * regla de ciclo de vida del bucket (`documentos/` → borrar a los 60 días),
    * que se configura en el panel de R2 y no en código. Ver `R2-CICLO-DE-VIDA`
    * en la documentación.
    */
