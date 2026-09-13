@@ -20,6 +20,8 @@
  *
  * Ensayo:   CORREO=demo@ejemplo.co node dist/seeds/reiniciar-revendedor-demo.js
  * Aplicar:  MODE=apply CONFIRM_TENANT=<slug> CORREO=demo@ejemplo.co node dist/seeds/reiniciar-revendedor-demo.js
+ * Vacía:    ... VACIA=1 → borra y no siembra nada: la cuenta queda en cero,
+ *           para una demostración que empieza desde la primera venta.
  */
 import 'dotenv/config';
 import { AppDataSource } from '../config/data-source.js';
@@ -125,11 +127,14 @@ async function main() {
           );
         }
       }
+      if (process.env.VACIA === '1') return null;
       return sembrarDatosDeDemo(m, cuenta.tenant_id, cuenta.id);
     });
 
     console.log(
-      `\nListo: cuenta como nueva, con ${sembrado.ventas} ventas y ${sembrado.gastos} gastos de ejemplo.`,
+      sembrado
+        ? `\nListo: cuenta como nueva, con ${sembrado.ventas} ventas y ${sembrado.gastos} gastos de ejemplo.`
+        : '\nListo: cuenta vacía, en cero.',
     );
   } finally {
     await AppDataSource.destroy();
