@@ -62,6 +62,8 @@ export interface ScanResult {
    * una sola, la de `warehouseId`.
    */
   warehousesWithStock?: string[];
+  /** Y cuántas hay en cada una, para que el selector lo muestre. */
+  stockByWarehouse?: { warehouseId: string; quantity: number }[];
   /** Precio mínimo por unidad; null = sin restricción. */
   minimumSalePrice: number | null;
   /**
@@ -413,6 +415,12 @@ export class ScanService {
       warehousesWithStock: looseStocks
         .filter((stock) => stock.quantity > 0)
         .map((stock) => stock.warehouseId),
+      stockByWarehouse: looseStocks
+        .filter((stock) => stock.quantity > 0)
+        .map((stock) => ({
+          warehouseId: stock.warehouseId,
+          quantity: stock.quantity,
+        })),
       minimumSalePrice: variant.product?.minimumSalePrice
         ? Number(variant.product.minimumSalePrice)
         : null,
