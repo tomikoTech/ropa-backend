@@ -255,6 +255,9 @@ const ROUTE_MODULES: Record<string, string> = {
   // teléfono del cliente. Quien cobra cartera ya tiene permiso de ventas.
   documentos: 'sales',
   'documentos/clientes': 'accounts-receivable',
+  // El comprobante del revendedor: quien registra ventas de terceros es quien
+  // lo manda, y no tiene permiso de Ventas (ni lo necesita).
+  'documentos/terceros': 'consignments',
   'stock-units': 'inventory',
   labels: 'inventory',
 

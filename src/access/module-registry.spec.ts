@@ -138,6 +138,17 @@ describe('ruta → módulo', () => {
     expect(moduleForPath('/api/pos')).toBe('sales');
   });
 
+  it('el comprobante de terceros es de Ventas de terceros, no de Ventas', () => {
+    // Quien revende no tiene permiso de Ventas —ni lo necesita— y aun así
+    // manda su comprobante por WhatsApp. Si este prefijo cayera en `sales`,
+    // el revendedor recibiría un 403 justo al terminar de vender.
+    expect(moduleForPath('/api/documentos/terceros/factura')).toBe('consignments');
+    expect(moduleForPath('/api/documentos/ventas/abc/factura')).toBe('sales');
+    expect(moduleForPath('/api/documentos/clientes/abc/estado-de-cuenta')).toBe(
+      'accounts-receivable',
+    );
+  });
+
   it('la búsqueda del catálogo pertenece a Ventas, no a Productos', () => {
     // Es la que usa el POS para saber qué vender: si dependiera de Productos, un
     // cajero no podría vender. El costo lo quita el controlador.

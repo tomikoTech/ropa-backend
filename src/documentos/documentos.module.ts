@@ -4,6 +4,7 @@ import { DocumentosService } from './documentos.service.js';
 import { DocumentosController } from './documentos.controller.js';
 import { PosModule } from '../pos/pos.module.js';
 import { UploadsModule } from '../uploads/uploads.module.js';
+import { ConsignmentsModule } from '../consignments/consignments.module.js';
 import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
 import { Tenant } from '../tenants/entities/tenant.entity.js';
 
@@ -12,7 +13,7 @@ import { Tenant } from '../tenants/entities/tenant.entity.js';
  * `documentos.service.ts` para el porqué del enlace.
  */
 @Module({
-  imports: [PosModule, UploadsModule, TypeOrmModule.forFeature([StoreSettings, Tenant])],
+  imports: [PosModule, ConsignmentsModule, UploadsModule, TypeOrmModule.forFeature([StoreSettings, Tenant])],
   controllers: [DocumentosController],
   providers: [DocumentosService],
 })

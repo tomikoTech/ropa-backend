@@ -16,16 +16,19 @@ import { Injectable, NotFoundException, ServiceUnavailableException } from '@nes
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { PosService } from '../pos/pos.service.js';
+import { ConsignmentsService } from '../consignments/consignments.service.js';
 import { R2Service } from '../uploads/r2.service.js';
 import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
 import { Tenant } from '../tenants/entities/tenant.entity.js';
-import { pdfDeFactura, type DatosDeLaTienda } from './factura-pdf.js';
+import { pdfDeFactura, type DatosDeFactura, type DatosDeLaTienda } from './factura-pdf.js';
 import { pdfDeEstadoDeCuenta } from './estado-de-cuenta-pdf.js';
+import { facturaDeTerceros, nombreDelArchivo } from './factura-de-terceros.js';
 
 @Injectable()
 export class DocumentosService {
   constructor(
     private readonly pos: PosService,
+    private readonly terceros: ConsignmentsService,
     private readonly r2: R2Service,
     @InjectRepository(StoreSettings)
     private readonly settingsRepo: Repository<StoreSettings>,
@@ -33,10 +36,27 @@ export class DocumentosService {
     private readonly tenantRepo: Repository<Tenant>,
   ) {}
 
-  /** La factura de una venta, como enlace a un PDF. */
-  async enlaceDeFactura(saleId: string, tenantId: string): Promise<{ url: string }> {
+  /**
+   * La factura de una venta, como enlace a un PDF.
+   *
+   * `terceros`: las filas de `consignments` que salieron en el **mismo
+   * ticket**. Una tienda puede vender un par propio y otro de un colega en la
+   * misma cuenta; el cliente pagó una sola y la factura que recibe tiene que
+   * decir las dos cosas. Se suman al final, sin descuento ni IVA, igual que
+   * en el papel del punto de venta.
+   */
+  async enlaceDeFactura(
+    saleId: string,
+    tenantId: string,
+    terceros: string[] = [],
+  ): Promise<{ url: string; total: number; saldo: number }> {
     const venta = await this.pos.findOne(saleId, tenantId);
     const tienda = await this.datosDeLaTienda(tenantId);
+    let deTerceros: DatosDeFactura | null = null;
+    if (terceros.length) {
+      const { filas, abonos } = await this.terceros.paraFactura(terceros, tenantId);
+      deTerceros = facturaDeTerceros(filas, abonos);
+    }
 
     const pagado = (venta.payments ?? []).reduce((s, p) => s + Number(p.amount), 0);
     const total = Number(venta.total);
@@ -49,6 +69,8 @@ export class DocumentosService {
         ? 0
         : Math.max(0, total - pagado);
 
+    const totalConTerceros = total + (deTerceros?.total ?? 0);
+    const saldoConTerceros = saldo + (deTerceros?.saldo ?? 0);
     const pdf = await pdfDeFactura(tienda, {
       numero: venta.invoiceNumber || venta.saleNumber,
       fecha: venta.createdAt.toISOString(),
@@ -61,24 +83,55 @@ export class DocumentosService {
       documento: venta.client && !venta.client.isGeneric ? venta.client.documentNumber : null,
       telefono: venta.client?.phone ?? null,
       direccion: venta.client?.address ?? null,
-      renglones: (venta.items ?? []).map((it) => ({
-        nombre: it.productName,
-        detalle: [it.variantSize, it.variantColor].filter(Boolean).join(' / ') || null,
-        codigo: it.variant?.barcode ?? null,
-        cantidad: it.quantity,
-        precioUnitario: Number(it.unitPrice),
-        total: Number(it.lineTotal),
-      })),
-      subtotal: Number(venta.subtotal),
+      renglones: [
+        ...(venta.items ?? []).map((it) => ({
+          nombre: it.productName,
+          detalle: [it.variantSize, it.variantColor].filter(Boolean).join(' / ') || null,
+          codigo: it.variant?.barcode ?? null,
+          cantidad: it.quantity,
+          precioUnitario: Number(it.unitPrice),
+          total: Number(it.lineTotal),
+        })),
+        ...(deTerceros?.renglones ?? []),
+      ],
+      subtotal: Number(venta.subtotal) + (deTerceros?.subtotal ?? 0),
       descuento: Number(venta.discountAmount),
       iva: Number(venta.taxAmount),
-      total,
-      pagado: total - saldo,
-      saldo,
+      total: totalConTerceros,
+      pagado: totalConTerceros - saldoConTerceros,
+      saldo: saldoConTerceros,
       notas: venta.notes ?? null,
     });
 
-    return { url: await this.subir(tenantId, `facturas/${venta.id}.pdf`, pdf) };
+    return {
+      url: await this.subir(tenantId, `facturas/${venta.id}.pdf`, pdf),
+      total: totalConTerceros,
+      saldo: saldoConTerceros,
+    };
+  }
+
+  /**
+   * El comprobante de una venta de terceros, como enlace a un PDF.
+   *
+   * Recibe **varios** ids porque un ticket del punto de venta con tres
+   * productos de tercero son tres filas, y el cliente quiere una sola factura.
+   * Devuelve también el número y los totales: el mensaje de WhatsApp los
+   * necesita y en el frontend no existen —las filas no tienen consecutivo—.
+   */
+  async enlaceDeFacturaDeTerceros(
+    ids: string[],
+    tenantId: string,
+  ): Promise<{ url: string; numero: string; total: number; saldo: number }> {
+    const { filas, abonos } = await this.terceros.paraFactura(ids, tenantId);
+    const tienda = await this.datosDeLaTienda(tenantId);
+    const datos = facturaDeTerceros(filas, abonos);
+    const pdf = await pdfDeFactura(tienda, datos);
+    return {
+      url: await this.subir(tenantId, nombreDelArchivo(ids), pdf),
+      numero: datos.numero,
+      total: datos.total,
+      saldo: datos.saldo,
+    };
   }
 
   /** El estado de cuenta de un cliente, como enlace a un PDF. */

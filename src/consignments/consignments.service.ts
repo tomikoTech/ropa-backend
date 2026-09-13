@@ -293,6 +293,25 @@ export class ConsignmentsService {
     return item;
   }
 
+  /**
+   * Las filas de un ticket, con sus abonos, para armar el comprobante.
+   *
+   * Todas tienen que ser de la tienda: si falta una, no se arma un
+   * comprobante a medias con las que sí se encontraron. Alguien podría estar
+   * mandando ids ajenos, y la respuesta es la misma que para uno solo.
+   */
+  async paraFactura(
+    ids: string[],
+    tenantId: string,
+  ): Promise<{ filas: Consignment[]; abonos: Map<string, ConsignmentPayment[]> }> {
+    const unicos = [...new Set(ids)];
+    const filas = await this.repo.find({ where: { id: In(unicos), tenantId } });
+    if (filas.length !== unicos.length) {
+      throw new NotFoundException('Venta de tercero no encontrada');
+    }
+    return { filas, abonos: await this.abonosPorVenta(unicos, tenantId) };
+  }
+
   // ── Abonos ────────────────────────────────────────────────────────────────
 
   /** Los abonos de una venta, del más nuevo al más viejo. */
