@@ -97,6 +97,38 @@ export class R2Service {
   }
 
   /**
+   * Sube un archivo con **nombre fijo**: subirlo otra vez lo reemplaza.
+   *
+   * Para los documentos que se regeneran —la factura de una venta, el estado
+   * de cuenta de un cliente—. Con nombre aleatorio (`upload`), mandar la misma
+   * factura cinco veces por WhatsApp eran cinco PDF en el bucket para siempre.
+   * Con nombre fijo son uno, y el enlace es el mismo aunque se regenere.
+   *
+   * Por eso la caché es **corta** y no `immutable`: el contenido de esta llave
+   * sí cambia. Un estado de cuenta regenerado con un `max-age` de un año
+   * seguiría mostrando la deuda vieja desde la CDN.
+   *
+   * No optimiza nada: es para PDF y similares, no para fotos.
+   */
+  async uploadConNombre(
+    key: string,
+    buffer: Buffer,
+    contentType: string,
+  ): Promise<string> {
+    if (!this.client) throw new Error('R2 no está configurado');
+    await this.client.send(
+      new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+        Body: buffer,
+        ContentType: contentType,
+        CacheControl: 'public, max-age=60',
+      }),
+    );
+    return `${this.publicUrl}/${key}`;
+  }
+
+  /**
    * Sube una imagen codificada en base64 y devuelve su URL pública.
    *
    * Acepta base64 puro o data URL (`data:image/png;base64,...`). Lo usa el

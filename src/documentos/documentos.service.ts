@@ -78,7 +78,7 @@ export class DocumentosService {
       notas: venta.notes ?? null,
     });
 
-    return { url: await this.subir(tenantId, 'facturas', pdf) };
+    return { url: await this.subir(tenantId, `facturas/${venta.id}.pdf`, pdf) };
   }
 
   /** El estado de cuenta de un cliente, como enlace a un PDF. */
@@ -112,10 +112,22 @@ export class DocumentosService {
       deuda: estado.totals.totalDebt,
     });
 
-    return { url: await this.subir(tenantId, 'estados-de-cuenta', pdf) };
+    return { url: await this.subir(tenantId, `estados-de-cuenta/${clientId}.pdf`, pdf) };
   }
 
-  private async subir(tenantId: string, carpeta: string, pdf: Buffer): Promise<string> {
+  /**
+   * Sube el PDF con **nombre fijo**: regenerarlo reemplaza al anterior.
+   *
+   * Mandar la misma factura cinco veces por WhatsApp eran cinco archivos para
+   * siempre. Ahora son uno, y el enlace no cambia aunque se regenere —así el
+   * cliente que guardó el enlace de ayer ve la factura de hoy—.
+   *
+   * Lo que sí queda pendiente es **cuánto tiempo viven**: eso lo decide una
+   * regla de ciclo de vida del bucket (`documentos/` → borrar a los N días),
+   * que se configura en el panel de R2 y no en código. Ver `R2-CICLO-DE-VIDA`
+   * en la documentación.
+   */
+  private async subir(tenantId: string, nombre: string, pdf: Buffer): Promise<string> {
     if (!this.r2.isConfigured()) {
       // Sin dónde alojarlo no hay enlace que mandar. Se dice claro en vez de
       // devolver una URL rota que el cliente abre y no encuentra nada.
@@ -125,7 +137,7 @@ export class DocumentosService {
     }
     const tenant = await this.tenantRepo.findOne({ where: { id: tenantId } });
     const slug = (tenant?.slug ?? tenantId).replace(/[^a-z0-9-]/gi, '');
-    return this.r2.upload(`documentos/${slug}/${carpeta}`, pdf, 'application/pdf', 'pdf');
+    return this.r2.uploadConNombre(`documentos/${slug}/${nombre}`, pdf, 'application/pdf');
   }
 
   /** El encabezado de la tienda, con el logo ya descargado. */
