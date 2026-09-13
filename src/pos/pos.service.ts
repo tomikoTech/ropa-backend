@@ -35,7 +35,10 @@ import {
 import { StockLedgerService } from '../inventory/ledger/stock-ledger.service.js';
 import { CajaService } from '../caja/caja.service.js';
 import { ReposicionAutomaticaService } from '../inventory/reposicion-automatica.service.js';
-import { pendienteTotal, repartirAbono } from './ar-allocation.js';
+import {
+  pendienteTotal,
+  repartirAbono,
+} from '../common/cartera/repartir-abono.js';
 import { cubreElTotal, sePasaDe } from './el-pago-cubre-el-total.js';
 import { precioDeLinea, type ReglaDePrecio } from './precio-de-linea.js';
 import { ordenarParaDescuento } from '../inventory/exhibicion.js';

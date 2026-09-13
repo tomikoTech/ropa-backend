@@ -5,6 +5,11 @@
  * había, y era lento: había que entrar día por día y registrar venta por
  * venta. Aquí se juntan y se cobra una sola vez.
  *
+ * Sirve para las dos carteras. **Repartir lo que te deben y repartir lo que
+ * debes es la misma aritmética**: por eso vive en `common` y no en `pos`. Lo
+ * único que cambia es quién ordena las cuentas antes de pasarlas, y eso lo
+ * decide quien llama.
+ *
  * Vive aparte del servicio a propósito. Es aritmética de plata —la parte donde
  * un centavo mal puesto deja una deuda que nunca cierra— y así se puede probar
  * hasta el último caso raro sin levantar una base de datos.
@@ -14,11 +19,18 @@
  * qué el cliente sigue debiendo.
  */
 
-export interface CuentaPorCobrar {
+/** Una deuda cualquiera: da igual si es a favor o en contra. */
+export interface CuentaDeCartera {
   id: string;
   totalCents: number;
   paidCents: number;
 }
+
+/**
+ * El nombre viejo, para lo que ya lo importaba así.
+ * @deprecated Usa `CuentaDeCartera`: esto también reparte lo que se paga.
+ */
+export type CuentaPorCobrar = CuentaDeCartera;
 
 export interface AplicacionDeAbono {
   cuentaId: string;
@@ -35,7 +47,7 @@ export interface AplicacionDeAbono {
  * repartir cuando no queda a quién.
  */
 export function repartirAbono(
-  cuentas: CuentaPorCobrar[],
+  cuentas: CuentaDeCartera[],
   abonoCents: number,
 ): AplicacionDeAbono[] {
   let porRepartir = Math.trunc(abonoCents);
@@ -66,7 +78,7 @@ export function repartirAbono(
 }
 
 /** Lo que falta por cobrar de un grupo de cuentas, en centavos. */
-export function pendienteTotal(cuentas: CuentaPorCobrar[]): number {
+export function pendienteTotal(cuentas: CuentaDeCartera[]): number {
   return cuentas.reduce(
     (suma, cuenta) => suma + Math.max(0, cuenta.totalCents - cuenta.paidCents),
     0,

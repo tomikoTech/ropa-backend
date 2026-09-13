@@ -4,7 +4,13 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource, SelectQueryBuilder, In } from 'typeorm';
+import {
+  Repository,
+  DataSource,
+  SelectQueryBuilder,
+  EntityManager,
+  In,
+} from 'typeorm';
 import { PurchaseOrder } from './entities/purchase-order.entity.js';
 import { Paginated } from '../common/types/paginated.js';
 import { resolverPagina, armarPaginado } from '../common/utils/paginacion.js';
@@ -23,6 +29,33 @@ import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
 import { StockLedgerService } from '../inventory/ledger/stock-ledger.service.js';
 import { StockUnitStatus } from '../inventory/entities/stock-unit.entity.js';
 import { diaDeCalendario } from '../common/utils/dia-de-calendario.util.js';
+import {
+  pendienteTotal,
+  repartirAbono,
+} from '../common/cartera/repartir-abono.js';
+import { sePasaDe } from '../pos/el-pago-cubre-el-total.js';
+import { randomUUID } from 'node:crypto';
+import { PaySupplierDto } from './dto/pay-supplier.dto.js';
+
+/**
+ * Un pago repartido entre varias facturas del proveedor.
+ *
+ * `batchId` es lo que las ata: sin él, un pago de un millón partido en cuatro
+ * facturas se ve como cuatro pagos sin relación.
+ */
+export interface PagoRepartido {
+  batchId: string;
+  amount: number;
+  allocations: {
+    accountsPayableId: string;
+    purchaseOrderId: string;
+    orderNumber: string | null;
+    invoiceNumber: string | null;
+    amount: number;
+    remainingBalance: number;
+    isFullyPaid: boolean;
+  }[];
+}
 
 /**
  * Cuándo vence una compra a la que nadie le puso plazo.
@@ -1090,7 +1123,10 @@ export class PurchasesService {
       throw new BadRequestException('Esta cuenta ya fue pagada completamente');
 
     const remaining = Number(ap.amount) - Number(ap.paidAmount);
-    if (dto.amount > remaining) {
+    // En centavos enteros: pagar el saldo exacto de una factura con decimales
+    // se caía por ruido de punto flotante, igual que se caían las ventas con
+    // descuento. Ver `el-pago-cubre-el-total.ts`.
+    if (sePasaDe(dto.amount, remaining)) {
       throw new BadRequestException(
         `El monto excede el saldo pendiente de ${remaining}`,
       );
@@ -1122,5 +1158,195 @@ export class PurchasesService {
       where: { id: apId, tenantId },
       relations: ['payments', 'purchaseOrder', 'purchaseOrder.supplier'],
     }) as Promise<AccountsPayable>;
+  }
+
+  /**
+   * Aplica un pago sobre un grupo de cuentas ya elegidas y bloqueadas.
+   *
+   * Gemelo de `aplicarAbono` en el POS, y a propósito: **repartir lo que te
+   * deben y repartir lo que debes es la misma aritmética**. Por eso las dos
+   * llaman a `repartirAbono`, que vive en `common/cartera` y se prueba sola.
+   * Acá queda solo lo que necesita base de datos: validar que no se pague de
+   * más, escribir cada renglón y atarlos por un mismo lote.
+   */
+  private async aplicarPago(
+    manager: EntityManager,
+    cuentas: AccountsPayable[],
+    dto: PaySupplierDto,
+    tenantId: string,
+    pagadoPor?: string,
+    descartadas = 0,
+  ): Promise<PagoRepartido> {
+    const aCentavos = (valor: number) => Math.round(Number(valor) * 100);
+    const enCentavos = cuentas.map((cuenta) => ({
+      id: cuenta.id,
+      totalCents: aCentavos(cuenta.amount),
+      paidCents: aCentavos(cuenta.paidAmount),
+    }));
+    const pagoCents = aCentavos(dto.amount);
+    const pendienteCents = pendienteTotal(enCentavos);
+
+    if (pagoCents <= 0) {
+      throw new BadRequestException('El monto a pagar debe ser mayor a cero.');
+    }
+    if (pendienteCents <= 0) {
+      throw new BadRequestException('No hay saldo pendiente que pagar.');
+    }
+    if (pagoCents > pendienteCents) {
+      throw new BadRequestException(
+        `El monto ($${dto.amount}) excede el saldo pendiente ` +
+          `($${(pendienteCents / 100).toFixed(2)})` +
+          (descartadas > 0
+            ? `. Se descartaron ${descartadas} cuenta(s) ya pagadas.`
+            : '.'),
+      );
+    }
+
+    const batchId = randomUUID();
+    const porId = new Map(cuentas.map((cuenta) => [cuenta.id, cuenta]));
+    const apRepo = manager.getRepository(AccountsPayable);
+    const pagoRepo = manager.getRepository(AccountsPayablePayment);
+    const allocations: PagoRepartido['allocations'] = [];
+
+    for (const aplicacion of repartirAbono(enCentavos, pagoCents)) {
+      const cuenta = porId.get(aplicacion.cuentaId)!;
+      const pagadoCents = aCentavos(cuenta.paidAmount) + aplicacion.centavos;
+      const totalCents = aCentavos(cuenta.amount);
+
+      await pagoRepo.save(
+        pagoRepo.create({
+          accountsPayableId: cuenta.id,
+          amount: aplicacion.centavos / 100,
+          method: dto.method ?? 'EFECTIVO',
+          reference: dto.reference,
+          bankId: dto.bankId ?? null,
+          receiptImageUrl: dto.receiptImageUrl,
+          notes: dto.notes,
+          allocationBatchId: batchId,
+          userId: pagadoPor ?? null,
+          tenantId,
+        }),
+      );
+      await apRepo.update(
+        { id: cuenta.id, tenantId },
+        {
+          paidAmount: pagadoCents / 100,
+          // Solo se marca al saldarse. Un pago parcial no puede «despagar»
+          // nada: `isPaid` va de falso a verdadero y nunca al revés.
+          ...(aplicacion.quedaSaldada ? { isPaid: true, paidAt: new Date() } : {}),
+        },
+      );
+
+      allocations.push({
+        accountsPayableId: cuenta.id,
+        purchaseOrderId: cuenta.purchaseOrderId,
+        orderNumber: cuenta.purchaseOrder?.orderNumber ?? null,
+        invoiceNumber: cuenta.purchaseOrder?.supplierInvoiceNumber ?? null,
+        amount: aplicacion.centavos / 100,
+        remainingBalance: Math.max(0, totalCents - pagadoCents) / 100,
+        isFullyPaid: aplicacion.quedaSaldada,
+      });
+    }
+
+    return { batchId, amount: pagoCents / 100, allocations };
+  }
+
+  /** Las cuentas abiertas que se van a pagar, bloqueadas y en orden. */
+  private cuentasAbiertas(manager: EntityManager, tenantId: string) {
+    return (
+      manager
+        .getRepository(AccountsPayable)
+        .createQueryBuilder('ap')
+        .innerJoinAndSelect('ap.purchaseOrder', 'po')
+        .leftJoinAndSelect('po.supplier', 'supplier')
+        // Solo `ap`: bloquear también el join tumba la consulta en Postgres
+        // (no se puede `FOR UPDATE` sobre el lado nulo de un outer join).
+        .setLock('pessimistic_write', undefined, ['ap'])
+        .where('ap.tenantId = :tenantId', { tenantId })
+        .andWhere('ap.isPaid = false')
+        // De la más vieja a la más nueva. Es como se paga: la factura que
+        // lleva más tiempo esperando es la que el proveedor reclama.
+        .orderBy('po.createdAt', 'ASC')
+        .addOrderBy('ap.dueDate', 'ASC')
+        .addOrderBy('ap.createdAt', 'ASC')
+        // Desempate estable: sin esto, dos facturas del mismo día se reparten
+        // en el orden que le dé la gana a la base y el pago no es reproducible.
+        .addOrderBy('ap.id', 'ASC')
+    );
+  }
+
+  /**
+   * Paga **varias facturas elegidas a mano** en un solo movimiento.
+   *
+   * Se diferencia del pago por saldo del proveedor en que quien paga elige qué
+   * facturas entran: puede estar saldando tres de las diez. Escoger las
+   * cuentas ya es la instrucción, así que no hace falta ningún ajuste previo.
+   */
+  async payAccountsPayable(
+    accountIds: string[],
+    dto: PaySupplierDto,
+    tenantId: string,
+    pagadoPor?: string,
+  ): Promise<PagoRepartido> {
+    const ids = [...new Set(accountIds)];
+    if (!ids.length) {
+      throw new BadRequestException('No se eligió ninguna cuenta por pagar.');
+    }
+    return this.dataSource.transaction(async (manager) => {
+      const abiertas = await this.cuentasAbiertas(manager, tenantId)
+        .andWhere('ap.id IN (:...ids)', { ids })
+        .getMany();
+
+      if (!abiertas.length) {
+        throw new BadRequestException(
+          'Ninguna de las cuentas elegidas tiene saldo por pagar. ' +
+            'Puede que ya las hayan pagado.',
+        );
+      }
+      // Se dice cuántas se cayeron en vez de pagar en silencio de menos: quien
+      // paga tiene el dinero en la mano y necesita saber a qué se aplicó.
+      return this.aplicarPago(
+        manager,
+        abiertas,
+        dto,
+        tenantId,
+        pagadoPor,
+        ids.length - abiertas.length,
+      );
+    });
+  }
+
+  /**
+   * Paga al **saldo del proveedor** y reparte desde la factura más vieja.
+   *
+   * Es el caso de «le abono un millón a Fulano»: nadie quiere ir factura por
+   * factura decidiendo cuánto le toca a cada una. Si sobra después de saldar
+   * la primera, sigue con la segunda, y así.
+   */
+  async paySupplierBalance(
+    supplierId: string,
+    dto: PaySupplierDto,
+    tenantId: string,
+    pagadoPor?: string,
+  ): Promise<PagoRepartido> {
+    return this.dataSource.transaction(async (manager) => {
+      const proveedor = await manager
+        .getRepository(Supplier)
+        .findOne({ where: { id: supplierId, tenantId } });
+      if (!proveedor) throw new NotFoundException('Proveedor no encontrado');
+
+      const abiertas = await this.cuentasAbiertas(manager, tenantId)
+        .andWhere('po.supplierId = :supplierId', { supplierId })
+        .getMany();
+
+      if (!abiertas.length) {
+        throw new BadRequestException(
+          'Este proveedor no tiene saldo pendiente.',
+        );
+      }
+      // El mismo reparto que usa el pago por selección: una sola aritmética,
+      // para que un arreglo en una no deje la otra atrás.
+      return this.aplicarPago(manager, abiertas, dto, tenantId, pagadoPor);
+    });
   }
 }

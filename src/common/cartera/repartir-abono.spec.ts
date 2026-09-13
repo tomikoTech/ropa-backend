@@ -1,4 +1,4 @@
-import { repartirAbono, type CuentaPorCobrar } from './ar-allocation.js';
+import { repartirAbono, type CuentaDeCartera } from './repartir-abono.js';
 
 /**
  * Repartir un abono entre varias deudas.
@@ -12,7 +12,7 @@ import { repartirAbono, type CuentaPorCobrar } from './ar-allocation.js';
  * un peso colgando y la deuda nunca cierra.
  */
 
-const cuenta = (id: string, total: number, pagado = 0): CuentaPorCobrar => ({
+const cuenta = (id: string, total: number, pagado = 0): CuentaDeCartera => ({
   id,
   totalCents: total,
   paidCents: pagado,

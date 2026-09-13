@@ -16,6 +16,10 @@ import { buildStatementWorkbook } from '../common/utils/statement-excel.util.js'
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto.js';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto.js';
 import { ReceiveItemsDto } from './dto/receive-items.dto.js';
+import {
+  PaySupplierDto,
+  PayAccountsPayableDto,
+} from './dto/pay-supplier.dto.js';
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
 import { TenantId } from '../common/decorators/tenant-id.decorator.js';
 import { Roles } from '../common/decorators/roles.decorator.js';
@@ -262,5 +266,50 @@ export class PurchasesController {
     @TenantId() tenantId: string,
   ) {
     return this.purchasesService.addApPayment(id, body, tenantId);
+  }
+
+  @Post('accounts-payable/pay-batch')
+  @Roles(Role.ADMIN)
+  @ApiOperation({
+    summary: 'Pagar varias facturas del proveedor en un solo movimiento',
+    description:
+      'El pago se reparte entre las facturas elegidas, de la más vieja a la ' +
+      'más nueva. Escoger las cuentas ya es la instrucción: no hace falta ' +
+      'ningún ajuste previo.',
+  })
+  payAccountsPayable(
+    @Body() dto: PayAccountsPayableDto,
+    @CurrentUser() user: { id: string },
+    @TenantId() tenantId: string,
+  ) {
+    const { accountIds, ...pago } = dto;
+    return this.purchasesService.payAccountsPayable(
+      accountIds,
+      pago,
+      tenantId,
+      user.id,
+    );
+  }
+
+  @Post('accounts-payable/suppliers/:supplierId/balance-payment')
+  @Roles(Role.ADMIN)
+  @ApiOperation({
+    summary: 'Abonar al saldo del proveedor, desde la factura más vieja',
+    description:
+      'El caso de «le abono un millón a Fulano»: si sobra después de saldar ' +
+      'la primera factura, sigue con la segunda, y así.',
+  })
+  paySupplierBalance(
+    @Param('supplierId', ParseUUIDPipe) supplierId: string,
+    @Body() dto: PaySupplierDto,
+    @CurrentUser() user: { id: string },
+    @TenantId() tenantId: string,
+  ) {
+    return this.purchasesService.paySupplierBalance(
+      supplierId,
+      dto,
+      tenantId,
+      user.id,
+    );
   }
 }
