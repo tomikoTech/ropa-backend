@@ -2,6 +2,7 @@ import {
   IsArray,
   IsBoolean,
   IsEnum,
+  IsIn,
   IsInt,
   IsNumber,
   IsOptional,
@@ -85,9 +86,26 @@ export class DispatchItemDto {
 }
 
 export class CreateDispatchDto {
-  @IsUUID()
-  streetSellerId: string;
+  /**
+   * A quién se le cede: `PERSONA` (un patinador) o `BODEGA` (otro local).
+   *
+   * Opcional para no romper a quien ya manda solo `streetSellerId`: si no
+   * viene, se asume `PERSONA`, que es lo único que existía antes.
+   */
+  @IsIn(['PERSONA', 'BODEGA'])
+  @IsOptional()
+  destinoTipo?: 'PERSONA' | 'BODEGA';
 
+  @IsUUID()
+  @IsOptional()
+  streetSellerId?: string;
+
+  /** La bodega o local que recibe, cuando el destino es una bodega. */
+  @IsUUID()
+  @IsOptional()
+  destinoWarehouseId?: string;
+
+  /** De dónde sale la mercancía. */
   @IsUUID()
   warehouseId: string;
 

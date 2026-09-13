@@ -7,6 +7,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, Repository } from 'typeorm';
 import { StreetSeller } from './entities/street-seller.entity.js';
+import { Warehouse } from '../inventory/entities/warehouse.entity.js';
 import {
   StreetDispatch,
   StreetDispatchStatus,
@@ -48,6 +49,10 @@ import {
   resumenPorPatinador,
   type DespachoDeReporte,
 } from './street-reporte.js';
+import {
+  nombreDelDestino,
+  resolverDestino,
+} from './destino-de-la-cesion.js';
 import type {
   CreateDispatchDto,
   CreateStreetSellerDto,
@@ -255,14 +260,44 @@ export class StreetService {
       );
     }
 
-    const seller = await this.sellerRepo.findOne({
-      where: { id: dto.streetSellerId, tenantId },
+    // A quién se le cede. La regla —exactamente un destino, y una bodega que no
+    // se presta a sí misma— vive en `destino-de-la-cesion.ts` y se prueba sola.
+    // Sin `destinoTipo` se asume `PERSONA`: es lo único que existía antes y así
+    // lo que ya llamaba a esto sigue funcionando igual.
+    const destino = resolverDestino({
+      tipo: dto.destinoTipo ?? 'PERSONA',
+      personaId: dto.streetSellerId,
+      bodegaId: dto.destinoWarehouseId,
+      bodegaOrigenId: dto.warehouseId,
     });
-    if (!seller) throw new NotFoundException('El patinador no existe');
-    if (!seller.isActive) {
-      throw new BadRequestException(
-        `${seller.name} está desactivado: no se le puede despachar mercancía.`,
-      );
+    if (destino.error) throw new BadRequestException(destino.error);
+
+    let seller: StreetSeller | null = null;
+    if (destino.tipo === 'PERSONA') {
+      seller = await this.sellerRepo.findOne({
+        where: { id: destino.personaId!, tenantId },
+      });
+      if (!seller) throw new NotFoundException('El patinador no existe');
+      if (!seller.isActive) {
+        throw new BadRequestException(
+          `${seller.name} está desactivado: no se le puede despachar mercancía.`,
+        );
+      }
+    }
+
+    let bodegaDestino: Warehouse | null = null;
+    if (destino.tipo === 'BODEGA') {
+      bodegaDestino = await this.dataSource
+        .getRepository(Warehouse)
+        .findOne({ where: { id: destino.bodegaId!, tenantId } });
+      if (!bodegaDestino) {
+        throw new NotFoundException('La bodega de destino no existe');
+      }
+      if (!bodegaDestino.isActive) {
+        throw new BadRequestException(
+          `«${bodegaDestino.name}» está desactivada: no se le puede ceder mercancía.`,
+        );
+      }
     }
 
     const dispatchId = await retryOnUniqueViolation(async () =>
@@ -270,7 +305,9 @@ export class StreetService {
         const dispatch = await manager.getRepository(StreetDispatch).save(
           manager.getRepository(StreetDispatch).create({
             dispatchNumber: await this.nextDispatchNumber(manager, tenantId),
-            streetSellerId: seller.id,
+            destinoTipo: destino.tipo,
+            streetSellerId: destino.personaId ?? null,
+            destinoWarehouseId: destino.bodegaId ?? null,
             warehouseId: dto.warehouseId,
             createdById: userId,
             notes: dto.notes?.trim() || null,
@@ -337,7 +374,11 @@ export class StreetService {
             cantidad: -line.quantity,
             motivo: 'STREET',
             referenciaId: dispatch.id,
-            notas: `Remisión rápida ${dispatch.dispatchNumber} a ${seller.name}`,
+            notas: `Cesión ${dispatch.dispatchNumber} a ${nombreDelDestino({
+              destinoTipo: destino.tipo,
+              persona: seller,
+              bodegaDestino,
+            })}`,
             usuarioId: userId,
             unidades: line.stockUnitId ? [line.stockUnitId] : undefined,
             tenantId,
@@ -409,10 +450,15 @@ export class StreetService {
   }
 
   /**
-   * Reporte por patinador: cuánto sacó, vendió, devolvió, tiene en la calle y
-   * recaudó cada uno en el periodo. El corte del día es en la zona del negocio
-   * (ver `timestampRangeSql`) y la aritmética la hace una función pura y
-   * probada aparte (`resumenPorPatinador`), en centavos enteros.
+   * Reporte **por destino**: cuánto salió, se vendió, se devolvió, sigue afuera
+   * y cuánto se recaudó de cada uno en el periodo.
+   *
+   * El destino puede ser una persona o una bodega, y por eso se agrupa por
+   * destino y no por patinador: la pregunta que responde es «qué me deben», y
+   * da igual si quien debe es alguien o un local.
+   *
+   * El corte del día es en la zona del negocio (ver `timestampRangeSql`) y la
+   * aritmética la hace una función pura y probada aparte, en centavos enteros.
    */
   async reportePorPatinador(
     filters: { from?: string; to?: string; warehouseId?: string },
@@ -422,6 +468,9 @@ export class StreetService {
     const qb = this.dispatchRepo
       .createQueryBuilder('d')
       .leftJoinAndSelect('d.seller', 'seller')
+      // El destino también puede ser una bodega: sin este join el reporte la
+      // nombraba «Bodega» a secas y no se sabía cuál.
+      .leftJoinAndSelect('d.bodegaDestino', 'bodegaDestino')
       .leftJoinAndSelect('d.items', 'items')
       .where('d.tenant_id = :tenantId', { tenantId })
       .andWhere(timestampRangeSql('d.created_at'), {
@@ -436,8 +485,12 @@ export class StreetService {
     const toCents = (v: number | string | null | undefined) =>
       Math.round(Number(v ?? 0) * 100);
     const entrada: DespachoDeReporte[] = dispatches.map((d) => ({
-      sellerId: d.streetSellerId,
-      sellerName: d.seller?.name ?? 'Patinador',
+      // El destino puede ser una persona o una bodega. `?? d.id` y no una
+      // cadena fija: agrupar todas las que no tengan destino bajo la misma
+      // clave las sumaría como si fueran del mismo, y el reporte diría que
+      // alguien debe lo que deben varios.
+      destinoId: d.destinoWarehouseId ?? d.streetSellerId ?? d.id,
+      destinoNombre: nombreDelDestino(d),
       status: d.status,
       collectedAmountCents:
         d.collectedAmount != null ? toCents(d.collectedAmount) : null,
@@ -611,7 +664,7 @@ export class StreetService {
               referenciaId: dispatch.id,
               notas:
                 `Devolución de ${dispatch.dispatchNumber} ` +
-                `(${dispatch.seller.name})` +
+                `(${nombreDelDestino(dispatch)})` +
                 (seRompio
                   ? ' · el bulto volvió partido: se repone la existencia sin código'
                   : ''),
@@ -741,8 +794,8 @@ export class StreetService {
         saleChannel: SaleChannel.CALLE,
         isPaid: pendiente <= 0.01,
         notes:
-          `Venta de calle — remisión ${dispatch.dispatchNumber} ` +
-          `(${dispatch.seller.name})` +
+          `Venta de cesión — ${dispatch.dispatchNumber} ` +
+          `(${nombreDelDestino(dispatch)})` +
           (pendiente > 0.01
             ? ` · Pendiente de cobro: $${pendiente.toLocaleString('es-CO')}`
             : ''),

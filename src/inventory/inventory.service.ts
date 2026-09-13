@@ -310,7 +310,33 @@ export class InventoryService {
       tenantId,
     );
 
+    if (dto.isMain !== undefined) {
+      warehouse.isMain = dto.isMain;
+      if (dto.isMain) {
+        // Marcar una principal libera a la anterior, **en la misma
+        // transacción**. Hay un índice que impide dos, así que hacerlo en dos
+        // pasos sueltos fallaría a la mitad y dejaría a la tienda sin ninguna.
+        return this.dataSource.transaction(async (manager) => {
+          const repo = manager.getRepository(Warehouse);
+          await repo.update({ tenantId, isMain: true }, { isMain: false });
+          return repo.save(warehouse);
+        });
+      }
+    }
+
     return this.warehouseRepository.save(warehouse);
+  }
+
+  /**
+   * La bodega principal de la tienda, si hay una marcada.
+   *
+   * Devuelve `null` en vez de inventarse una: proponer la primera que aparezca
+   * haría que una cesión saliera de una bodega que nadie eligió.
+   */
+  async bodegaPrincipal(tenantId: string): Promise<Warehouse | null> {
+    return this.warehouseRepository.findOne({
+      where: { tenantId, isMain: true, isActive: true },
+    });
   }
 
   /**

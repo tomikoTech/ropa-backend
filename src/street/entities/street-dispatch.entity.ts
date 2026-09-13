@@ -49,12 +49,31 @@ export class StreetDispatch extends TenantAwareEntity {
   @Column({ name: 'dispatch_number' })
   dispatchNumber: string;
 
+  /**
+   * A quién se le cedió: una persona o una bodega.
+   *
+   * Empezó existiendo solo para patinadores, así que siempre era una persona.
+   * Las cesiones anteriores quedan marcadas `PERSONA`, que es lo único que
+   * podían ser. La regla de que haya **exactamente uno** vive en
+   * `destino-de-la-cesion.ts`, y la base lo comprueba con un CHECK.
+   */
+  @Column({ name: 'destino_tipo', type: 'varchar', length: 10, nullable: true })
+  destinoTipo: 'PERSONA' | 'BODEGA' | null;
+
   @ManyToOne(() => StreetSeller, { eager: true, onDelete: 'RESTRICT' })
   @JoinColumn({ name: 'street_seller_id' })
-  seller: StreetSeller;
+  seller: StreetSeller | null;
 
-  @Column({ name: 'street_seller_id' })
-  streetSellerId: string;
+  @Column({ name: 'street_seller_id', type: 'uuid', nullable: true })
+  streetSellerId: string | null;
+
+  /** La bodega o local que recibió la mercancía, si el destino es una bodega. */
+  @ManyToOne(() => Warehouse, { eager: true, onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'destino_warehouse_id' })
+  bodegaDestino: Warehouse | null;
+
+  @Column({ name: 'destino_warehouse_id', type: 'uuid', nullable: true })
+  destinoWarehouseId: string | null;
 
   /** Bodega de la que salió la mercancía. */
   @ManyToOne(() => Warehouse, { eager: true, onDelete: 'RESTRICT' })

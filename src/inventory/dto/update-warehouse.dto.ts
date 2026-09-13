@@ -27,6 +27,14 @@ export class UpdateWarehouseDto {
   @IsBoolean()
   isActive?: boolean;
 
+  @ApiPropertyOptional({
+    description:
+      'La bodega principal de la tienda. Solo una: marcar otra libera a la anterior.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  isMain?: boolean;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsBoolean()

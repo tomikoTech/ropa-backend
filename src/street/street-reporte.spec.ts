@@ -16,8 +16,8 @@ describe('resumenPorPatinador', () => {
   it('suma lo sacado, vendido, devuelto y lo que queda en calle por persona', () => {
     const despachos: DespachoDeReporte[] = [
       {
-        sellerId: 'a',
-        sellerName: 'Ana',
+        destinoId: 'a',
+        destinoNombre: 'Ana',
         status: 'OPEN',
         collectedAmountCents: null,
         items: [
@@ -25,8 +25,8 @@ describe('resumenPorPatinador', () => {
         ],
       },
       {
-        sellerId: 'a',
-        sellerName: 'Ana',
+        destinoId: 'a',
+        destinoNombre: 'Ana',
         status: 'SETTLED',
         collectedAmountCents: 20000,
         items: [
@@ -53,8 +53,8 @@ describe('resumenPorPatinador', () => {
   it('ignora los despachos cancelados', () => {
     const { filas, totales } = resumenPorPatinador([
       {
-        sellerId: 'a',
-        sellerName: 'Ana',
+        destinoId: 'a',
+        destinoNombre: 'Ana',
         status: 'CANCELLED',
         collectedAmountCents: null,
         items: [item({ quantity: 9, unitPriceCents: 100 })],
@@ -67,8 +67,8 @@ describe('resumenPorPatinador', () => {
   it('marca sinCosto cuando una venta no tiene costo registrado', () => {
     const { filas } = resumenPorPatinador([
       {
-        sellerId: 'b',
-        sellerName: 'Beto',
+        destinoId: 'b',
+        destinoNombre: 'Beto',
         status: 'SETTLED',
         collectedAmountCents: 5000,
         items: [item({ quantity: 2, quantitySold: 1, unitPriceCents: 5000, unitCostCents: 0 })],
@@ -81,28 +81,28 @@ describe('resumenPorPatinador', () => {
   it('ordena de mayor a menor por lo vendido', () => {
     const { filas } = resumenPorPatinador([
       {
-        sellerId: 'a',
-        sellerName: 'Ana',
+        destinoId: 'a',
+        destinoNombre: 'Ana',
         status: 'SETTLED',
         collectedAmountCents: 0,
         items: [item({ quantity: 2, quantitySold: 1, unitPriceCents: 100 })],
       },
       {
-        sellerId: 'b',
-        sellerName: 'Beto',
+        destinoId: 'b',
+        destinoNombre: 'Beto',
         status: 'SETTLED',
         collectedAmountCents: 0,
         items: [item({ quantity: 9, quantitySold: 9, unitPriceCents: 100 })],
       },
     ]);
-    expect(filas.map((f) => f.sellerName)).toEqual(['Beto', 'Ana']);
+    expect(filas.map((f) => f.destinoNombre)).toEqual(['Beto', 'Ana']);
   });
 
   it('el saldo sin vender de un despacho liquidado NO cuenta como en calle', () => {
     const { filas } = resumenPorPatinador([
       {
-        sellerId: 'a',
-        sellerName: 'Ana',
+        destinoId: 'a',
+        destinoNombre: 'Ana',
         status: 'SETTLED',
         collectedAmountCents: 0,
         items: [item({ quantity: 10, quantitySold: 4, quantityReturned: 4, unitPriceCents: 100 })],

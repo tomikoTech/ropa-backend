@@ -1,6 +1,11 @@
 /**
- * Reporte de calle **por patinador**: cuánto sacó, vendió, devolvió, todavía
- * tiene en la calle y cuánto recaudó cada uno, en un periodo.
+ * Reporte de cesión **por destino**: cuánto salió, se vendió, se devolvió,
+ * sigue afuera y cuánto se recaudó de cada uno, en un periodo.
+ *
+ * El destino puede ser una persona (un patinador) o una bodega —«que la bodega
+ * principal le preste a otra bodega u otro local»—. Se agrupa por destino y no
+ * por patinador justamente por eso: la pregunta que responde es «qué me deben»,
+ * y da igual si quien debe es alguien o un local.
  *
  * El sistema anterior tenía un corte dedicado por impulsador; MiPinta ya
  * registraba cada despacho, pero el dato estaba repartido despacho por
@@ -32,17 +37,17 @@ export interface ItemDeReporte {
 }
 
 export interface DespachoDeReporte {
-  sellerId: string;
-  sellerName: string;
+  destinoId: string;
+  destinoNombre: string;
   status: EstadoDespacho;
   /** Lo efectivamente cobrado al liquidar, en centavos (null si no aplica). */
   collectedAmountCents: number | null;
   items: ItemDeReporte[];
 }
 
-export interface FilaPorPatinador {
-  sellerId: string;
-  sellerName: string;
+export interface FilaPorDestino {
+  destinoId: string;
+  destinoNombre: string;
   /** Cuántos despachos (sin contar los cancelados). */
   despachos: number;
   /** Pares que sacó. */
@@ -65,15 +70,15 @@ export interface FilaPorPatinador {
   sinCosto: boolean;
 }
 
-export interface ResumenPorPatinador {
-  filas: FilaPorPatinador[];
-  totales: Omit<FilaPorPatinador, 'sellerId' | 'sellerName'>;
+export interface ResumenPorDestino {
+  filas: FilaPorDestino[];
+  totales: Omit<FilaPorDestino, 'destinoId' | 'destinoNombre'>;
 }
 
-function filaVacia(sellerId: string, sellerName: string): FilaPorPatinador {
+function filaVacia(destinoId: string, destinoNombre: string): FilaPorDestino {
   return {
-    sellerId,
-    sellerName,
+    destinoId,
+    destinoNombre,
     despachos: 0,
     despachadas: 0,
     valorDespachadoCents: 0,
@@ -94,13 +99,13 @@ function filaVacia(sellerId: string, sellerName: string): FilaPorPatinador {
  */
 export function resumenPorPatinador(
   despachos: DespachoDeReporte[],
-): ResumenPorPatinador {
-  const porPatinador = new Map<string, FilaPorPatinador>();
+): ResumenPorDestino {
+  const porDestino = new Map<string, FilaPorDestino>();
 
   for (const d of despachos) {
     if (d.status === 'CANCELLED') continue;
     const fila =
-      porPatinador.get(d.sellerId) ?? filaVacia(d.sellerId, d.sellerName);
+      porDestino.get(d.destinoId) ?? filaVacia(d.destinoId, d.destinoNombre);
     fila.despachos += 1;
     fila.recaudadoCents += d.collectedAmountCents ?? 0;
 
@@ -129,11 +134,11 @@ export function resumenPorPatinador(
       }
     }
 
-    porPatinador.set(d.sellerId, fila);
+    porDestino.set(d.destinoId, fila);
   }
 
-  const filas = [...porPatinador.values()].sort(
-    (a, b) => b.vendidas - a.vendidas || a.sellerName.localeCompare(b.sellerName),
+  const filas = [...porDestino.values()].sort(
+    (a, b) => b.vendidas - a.vendidas || a.destinoNombre.localeCompare(b.destinoNombre),
   );
 
   const totales = filas.reduce(
@@ -150,10 +155,10 @@ export function resumenPorPatinador(
       acc.sinCosto = acc.sinCosto || f.sinCosto;
       return acc;
     },
-    filaVacia('', '') as FilaPorPatinador,
+    filaVacia('', '') as FilaPorDestino,
   );
   // Quita las dos llaves de identidad que no aplican al total.
-  const { sellerId: _id, sellerName: _n, ...totalesSinId } = totales;
+  const { destinoId: _id, destinoNombre: _n, ...totalesSinId } = totales;
 
   return { filas, totales: totalesSinId };
 }

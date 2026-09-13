@@ -35,6 +35,15 @@ export class CreateWarehouseDto {
 
   @ApiPropertyOptional({
     example: false,
+    description:
+      'La bodega principal de la tienda. Solo una: marcar otra libera a la anterior.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  isMain?: boolean;
+
+  @ApiPropertyOptional({
+    example: false,
     description: 'Esta bodega es la vitrina: lo que está a la vista',
   })
   @IsOptional()

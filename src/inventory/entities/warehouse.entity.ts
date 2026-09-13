@@ -52,6 +52,16 @@ export class Warehouse extends TenantAwareEntity {
   @Column({ name: 'exhibition_of_warehouse_id', type: 'uuid', nullable: true })
   exhibitionOfWarehouseId: string | null;
 
+  /**
+   * La bodega **principal** de la tienda: de donde sale casi todo.
+   *
+   * Una sola por tienda, garantizado por un índice parcial y no por convención
+   * (ver la migración). Dos principales dejarían el préstamo entre locales sin
+   * centro, y nadie sabría contra quién se cuadra.
+   */
+  @Column({ name: 'is_main', default: false })
+  isMain: boolean;
+
   @Column({ name: 'is_active', default: true })
   isActive: boolean;
 
