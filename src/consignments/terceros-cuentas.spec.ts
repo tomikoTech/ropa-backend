@@ -115,6 +115,31 @@ describe('resumenPorMetodo', () => {
     expect(r.creditoCents).toBe(aCentavos(70000));
   });
 
+  it('la venta marcada como pagada sin abono entra por el método con que se anotó', () => {
+    // Las filas viejas y las de los seeds: `client_paid` en true y ni un
+    // abono. Las cuentas ya las daban por cobradas; las tarjetas por método
+    // no, y la suma de los métodos no cuadraba con las ventas.
+    const r = resumenPorMetodo([
+      {
+        venta: { salePrice: 150000, costPrice: 0, quantity: 1, clientPaid: true, paymentMethod: 'Efectivo' },
+        abonos: [],
+      },
+      {
+        venta: { salePrice: 120000, costPrice: 0, quantity: 1, clientPaid: true, paymentMethod: 'TRANSFERENCIA' },
+        abonos: [],
+      },
+      // Con abono, manda el abono: no se cuenta dos veces.
+      {
+        venta: { salePrice: 100000, costPrice: 0, quantity: 1, clientPaid: true, paymentMethod: 'EFECTIVO' },
+        abonos: [{ lado: 'CLIENT', amount: 100000, method: 'EFECTIVO' }],
+      },
+    ]);
+    expect(r.porMetodo.find((m) => m.metodo === 'EFECTIVO')?.cobradoCents).toBe(aCentavos(250000));
+    expect(r.porMetodo.find((m) => m.metodo === 'TRANSFERENCIA')?.cobradoCents).toBe(aCentavos(120000));
+    expect(r.totalCobradoCents).toBe(aCentavos(370000));
+    expect(r.creditoCents).toBe(0);
+  });
+
   it('los abonos del tercero (SUPPLIER) no cuentan como cobro al cliente', () => {
     const r = resumenPorMetodo([
       {

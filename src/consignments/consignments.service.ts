@@ -15,6 +15,7 @@ import { CreateConsignmentPaymentDto } from './dto/create-consignment-payment.dt
 import {
   cuentasDeVenta,
   resumenPorMetodo,
+  normalizarMetodo,
   saldoDelLado,
   aPesos,
   type AbonoLike,
@@ -23,24 +24,6 @@ import {
 import { Paginated } from '../common/types/paginated.js';
 import { resolverPagina, armarPaginado } from '../common/utils/paginacion.js';
 
-/**
- * Las tres formas de pago del sistema, entendiendo lo que se escribió a mano.
- * "Crédito" no es un cobro: es que aún no se ha pagado, así que no genera abono.
- */
-export function normalizarMetodo(escrito: string | null | undefined): string {
-  const limpio = (escrito ?? '')
-    .trim()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase();
-  if (!limpio) return '';
-  if (limpio.startsWith('efectivo')) return 'EFECTIVO';
-  if (limpio.startsWith('transferencia')) return 'TRANSFERENCIA';
-  if (limpio.startsWith('credito') || limpio.startsWith('fiado')) {
-    return 'CREDITO';
-  }
-  return escrito!.trim().toUpperCase();
-}
 
 export interface ConsignmentFilters {
   thirdParty?: string;

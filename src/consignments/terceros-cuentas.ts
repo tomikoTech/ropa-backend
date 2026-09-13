@@ -42,6 +42,13 @@ export interface VentaLike {
    */
   clientPaid?: boolean;
   supplierPaid?: boolean;
+  /**
+   * Con qué se cobró la venta, tal como se escribió. Solo se mira cuando el
+   * lado del cliente no tiene abonos y la venta está marcada como pagada
+   * (ver arriba): esa venta se cobró, y el desglose por método tiene que
+   * decir por dónde entró la plata.
+   */
+  paymentMethod?: string | null;
 }
 
 export interface CuentasDeVenta {
@@ -55,6 +62,25 @@ export interface CuentasDeVenta {
   saldoTerceroCents: number;
   clientPaid: boolean;
   supplierPaid: boolean;
+}
+
+/**
+ * Las tres formas de pago del sistema, entendiendo lo que se escribió a mano.
+ * "Crédito" no es un cobro: es que aún no se ha pagado, así que no genera abono.
+ */
+export function normalizarMetodo(escrito: string | null | undefined): string {
+  const limpio = (escrito ?? '')
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+  if (!limpio) return '';
+  if (limpio.startsWith('efectivo')) return 'EFECTIVO';
+  if (limpio.startsWith('transferencia')) return 'TRANSFERENCIA';
+  if (limpio.startsWith('credito') || limpio.startsWith('fiado')) {
+    return 'CREDITO';
+  }
+  return escrito!.trim().toUpperCase();
 }
 
 export function aCentavos(pesos: number): number {
@@ -149,14 +175,25 @@ export function resumenPorMetodo(
   let totalCobradoCents = 0;
 
   for (const { venta, abonos } of ventas) {
-    for (const a of abonos) {
-      if (a.lado !== 'CLIENT') continue;
+    const cuentas = cuentasDeVenta(venta, abonos);
+    const delCliente = abonos.filter((a) => a.lado === 'CLIENT');
+    if (delCliente.length === 0 && venta.clientPaid) {
+      // La venta marcada como pagada sin abono detrás: las filas viejas y las
+      // de los seeds. `cuentasDeVenta` ya la cuenta como cobrada; si acá no
+      // entrara, las tarjetas dirían «cobrado en efectivo $440.000» con
+      // quince ventas por $2.113.000 y nada a crédito que lo explicara. Se
+      // suma bajo el método con que se anotó la venta.
+      const metodo = normalizarMetodo(venta.paymentMethod) || 'OTRO';
+      porMetodo.set(metodo, (porMetodo.get(metodo) ?? 0) + cuentas.totalVentaCents);
+      totalCobradoCents += cuentas.totalVentaCents;
+    }
+    for (const a of delCliente) {
       const c = aCentavos(a.amount);
       const metodo = (a.method || 'OTRO').toUpperCase();
       porMetodo.set(metodo, (porMetodo.get(metodo) ?? 0) + c);
       totalCobradoCents += c;
     }
-    creditoCents += cuentasDeVenta(venta, abonos).saldoClienteCents;
+    creditoCents += cuentas.saldoClienteCents;
   }
 
   return {
