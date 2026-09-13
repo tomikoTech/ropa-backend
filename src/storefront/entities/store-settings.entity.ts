@@ -390,14 +390,20 @@ export class StoreSettings extends TenantAwareEntity {
   /**
    * A cuántos días vence una venta a crédito si el vendedor no elige plazo.
    *
-   * `null` = sin plazo por defecto: el campo de fecha nace vacío, que es lo
-   * que había. Quien vende siempre a 90 días lo configura una vez y deja de
-   * escribir la misma fecha en cada factura.
+   * Treinta días por defecto —el plazo corriente, el mismo supuesto que usan
+   * las compras—; AMAWAD vende a noventa y lo tiene configurado así. `null` o
+   * `0` significan «sin plazo»: el campo de fecha nace vacío y se escribe a
+   * mano, que es como funcionaba antes.
    *
    * Es solo el valor inicial: el vendedor puede cambiar la fecha por venta, y
    * al cambiarla el botón del plazo se desmarca solo.
    */
-  @Column({ name: 'credit_default_days', type: 'int', nullable: true })
+  @Column({
+    name: 'credit_default_days',
+    type: 'int',
+    nullable: true,
+    default: 30,
+  })
   creditDefaultDays: number | null;
 
   /**

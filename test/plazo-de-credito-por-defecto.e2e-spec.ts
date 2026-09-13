@@ -44,10 +44,16 @@ describe('Plazo de crédito por defecto (e2e)', () => {
     await teardownTestApp();
   });
 
-  it('nace sin plazo: el campo de fecha sigue naciendo vacío', async () => {
+  it('nace en treinta días: el plazo corriente', async () => {
+    // Es el mismo supuesto que ya usan las compras para la deuda con el
+    // proveedor. AMAWAD vende a noventa y lo tiene configurado aparte.
+    expect(original).toBe(30);
+  }, 60000);
+
+  it('un cero sigue significando «sin plazo»', async () => {
+    // Para quien no quiera ninguno: el campo de fecha vuelve a nacer vacío.
     await guardar(0).expect(200);
     const r = await leer();
-    // Cero y nulo son la misma cosa —«sin plazo»— y se guarda una sola.
     expect(r.body.creditDefaultDays ?? null).toBeNull();
   }, 60000);
 
@@ -69,8 +75,8 @@ describe('Plazo de crédito por defecto (e2e)', () => {
     expect((await leer()).body.creditDefaultDays).toBe(45);
   }, 60000);
 
-  it('apagarlo lo deja como estaba', async () => {
-    await guardar(0).expect(200);
-    expect((await leer()).body.creditDefaultDays ?? null).toBeNull();
+  it('y se puede devolver al plazo de la casa', async () => {
+    await guardar(30).expect(200);
+    expect((await leer()).body.creditDefaultDays).toBe(30);
   }, 60000);
 });
