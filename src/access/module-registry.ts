@@ -249,6 +249,12 @@ const ROUTE_MODULES: Record<string, string> = {
   'inventory-counts': 'inventory-counts',
   'internal-requests': 'internal-requests',
   street: 'street',
+  // Los PDF que se le mandan al cliente. La factura es de Ventas y el estado
+  // de cuenta es de Cartera, pero un prefijo mapea a un solo módulo: van a
+  // Ventas, que es quien manda facturas por WhatsApp y quien tiene a mano el
+  // teléfono del cliente. Quien cobra cartera ya tiene permiso de ventas.
+  documentos: 'sales',
+  'documentos/clientes': 'accounts-receivable',
   'stock-units': 'inventory',
   labels: 'inventory',
 
