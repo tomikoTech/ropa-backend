@@ -162,8 +162,10 @@ export class ConsignmentsService {
       });
     }
     if (filtros.q) {
+      // También por talla y color: en el mostrador se busca «42» o «blanco»
+      // tanto como «nike».
       qb.andWhere(
-        '(p.product_description ILIKE :q OR p.third_party_name ILIKE :q)',
+        '(p.product_description ILIKE :q OR p.third_party_name ILIKE :q OR p.size ILIKE :q OR p.color ILIKE :q)',
         { q: `%${filtros.q}%` },
       );
     }
