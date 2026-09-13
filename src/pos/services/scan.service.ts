@@ -57,6 +57,11 @@ export interface ScanResult {
   /** Existencias disponibles (para productos sueltos). */
   available: number | null;
   warehouseId: string | null;
+  /**
+   * En qué bodegas hay existencia. Solo para códigos de modelo: el bulto tiene
+   * una sola, la de `warehouseId`.
+   */
+  warehousesWithStock?: string[];
   /** Precio mínimo por unidad; null = sin restricción. */
   minimumSalePrice: number | null;
   /**
@@ -401,6 +406,13 @@ export class ScanService {
         looseStocks.find((stock) => stock.quantity > 0)?.warehouseId ??
         stocks[0]?.warehouseId ??
         null,
+      // En qué bodegas hay de esta talla. El código del modelo es el mismo
+      // para todos sus pares, así que puede estar en varias; con esta lista
+      // el POS adopta la bodega solo cuando es una (o la principal) y
+      // pregunta solo cuando de verdad hay que elegir.
+      warehousesWithStock: looseStocks
+        .filter((stock) => stock.quantity > 0)
+        .map((stock) => stock.warehouseId),
       minimumSalePrice: variant.product?.minimumSalePrice
         ? Number(variant.product.minimumSalePrice)
         : null,
