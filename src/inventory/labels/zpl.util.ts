@@ -152,10 +152,12 @@ export function buildLabelZpl(
   // Los dígitos: si el símbolo se raya, el operario todavía puede teclearlos.
   put(data.barcode, 2.2, 20);
   if (abajo) put(abajo, data.isBox ? letraGrande : 2.7, 30);
-  const pie = [data.detail, data.desglose, data.price]
-    .filter(Boolean)
-    .join(' · ');
-  if (pie) put(pie, 2.2, 44);
+  // El pie en dos renglones, como en el PDF: el detalle (color, talla) arriba
+  // y más grande —es lo que se lee con el par en la mano—, y el desglose del
+  // código con el precio abajo. Juntos en uno no cabían y se recortaban.
+  if (data.detail) put(data.detail, 2.7, 30);
+  const desglose = [data.desglose, data.price].filter(Boolean).join(' · ');
+  if (desglose) put(desglose, 2, 44);
   if (data.extra) put(data.extra, 2, 42);
 
   if (o.copies > 1) lines.push(`^PQ${o.copies}`);

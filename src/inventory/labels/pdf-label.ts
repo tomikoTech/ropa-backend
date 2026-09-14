@@ -96,10 +96,14 @@ export function buildLabelsPdf(
       // «PROMO WI…» en la caja y un nombre de producto a la mitad: se lee mejor
       // entero y pequeño que la mitad grande. El mínimo es lo que una térmica
       // todavía imprime legible; por debajo de eso sí se corta.
+      //
+      // Con un 2 % de holgura: encogido a que quepa *justo*, pdfkit redondea
+      // y decide que no cabe, y el rótulo de la caja salía «PROMO WIMFLO ·…»
+      // aunque ya estaba del tamaño exacto.
       const ancho = doc.widthOfString(text);
       const size =
         ancho > disponible && ancho > 0
-          ? Math.max(fontPt(1.4), (pedido * disponible) / ancho)
+          ? Math.max(fontPt(1.4), (pedido * disponible * 0.98) / ancho)
           : pedido;
       const boxH = mm(caja.hMm);
       const yTop = mm(caja.yMm) + Math.max(0, (boxH - size) / 2);
@@ -156,10 +160,18 @@ export function buildLabelsPdf(
       escribir(talla, lay.destacado, { font: 'Helvetica-Bold', align: 'center' });
     }
 
-    const detalles = [label.detail, label.desglose, label.price]
-      .filter(Boolean)
-      .join('  ·  ');
-    escribir(detalles, lay.pie, { color: '#333', align: 'center' });
+    // El pie en dos renglones (ver `label-layout.ts`): arriba el detalle,
+    // abajo el desglose y el precio. Si solo hay uno, ocupa la fila entera.
+    // En negro y no en gris: la térmica no tiene grises, los tramaba con
+    // puntos y la línea salía más clara que el resto.
+    const arriba = label.detail ?? '';
+    const abajo = [label.desglose, label.price].filter(Boolean).join('  ·  ');
+    if (arriba && abajo) {
+      escribir(arriba, lay.pieArriba, { font: 'Helvetica-Bold', align: 'center' });
+      escribir(abajo, lay.pieAbajo, { align: 'center' });
+    } else {
+      escribir(arriba || abajo, lay.pie, { align: 'center' });
+    }
 
     doc.fillColor('#000');
   }

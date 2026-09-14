@@ -41,8 +41,14 @@ export interface LabelLayout {
   digitos: Caja;
   /** Zona destacada: talla grande (par) o "CAJA x24" (caja). */
   destacado: Caja;
-  /** Pie: detalle · desglose. */
+  /** Pie: detalle · desglose, cuando cabe en un solo renglón. */
   pie: Caja;
+  /**
+   * El pie partido en dos: arriba el detalle (color, talla), abajo el desglose
+   * del código y el precio. Ver el comentario de los pesos.
+   */
+  pieArriba: Caja;
+  pieAbajo: Caja;
 }
 
 const clamp = (v: number, min: number, max: number) =>
@@ -62,9 +68,17 @@ export function computeLabelLayout(input: LayoutInput): LabelLayout {
 
   // Pesos verticales de cada fila (suman 1). El par le da MUCHo a la talla;
   // la caja reparte más parejo y engorda el realce.
+  //
+  // **El pie va en dos renglones.** Color, talla, desglose del código y precio
+  // iban juntos en uno solo —«Negro · Talla 40 · 09/09/26 · Pedido 2 · N.º
+  // 36»—, y como el PDF encoge antes que cortar, en el sticker de 58×30 esa
+  // línea salía a 1.6 mm: la tienda pidió subirla. Con más tope de letra no
+  // pasaba nada, porque lo que mandaba era el ancho. Partida en dos, el
+  // detalle va arriba y más grande, y el desglose abajo. La fila del pie
+  // crece a costa del código de barras y de la talla, que tienen de sobra.
   const pesos = isBox
-    ? { header: 0.2, barcode: 0.3, digitos: 0.12, destacado: 0.22, pie: 0.16 }
-    : { header: 0.2, barcode: 0.28, digitos: 0.1, destacado: 0.28, pie: 0.14 };
+    ? { header: 0.2, barcode: 0.27, digitos: 0.11, destacado: 0.21, pie: 0.21 }
+    : { header: 0.2, barcode: 0.24, digitos: 0.1, destacado: 0.24, pie: 0.22 };
 
   const hHeader = innerH * pesos.header;
   const hBarcode = innerH * pesos.barcode;
@@ -135,7 +149,23 @@ export function computeLabelLayout(input: LayoutInput): LabelLayout {
     yMm: y,
     wMm: innerW,
     hMm: hPie,
-    fontMm: clamp(hPie * 0.7, 1.8, 2.8),
+    fontMm: clamp(hPie * 0.7, 1.8, 3.3),
+  };
+  // La letra de cada renglón: su alto en «em» es el alto del renglón (la
+  // mayúscula de Helvetica mide ~0.72 em), así los dos caben sin montarse.
+  const pieArriba: Caja = {
+    xMm: innerX,
+    yMm: y,
+    wMm: innerW,
+    hMm: hPie * 0.56,
+    fontMm: clamp(hPie * 0.56 * 0.72, 1.8, 3.3),
+  };
+  const pieAbajo: Caja = {
+    xMm: innerX,
+    yMm: y + hPie * 0.58,
+    wMm: innerW,
+    hMm: hPie * 0.42,
+    fontMm: clamp(hPie * 0.42 * 0.72, 1.4, 2.4),
   };
 
   // **En la caja, el pedido va arriba y el producto abajo.**
@@ -162,6 +192,8 @@ export function computeLabelLayout(input: LayoutInput): LabelLayout {
       digitos,
       destacado: { ...nombre, fontMm: letra },
       pie,
+      pieArriba,
+      pieAbajo,
     };
   }
 
@@ -175,5 +207,7 @@ export function computeLabelLayout(input: LayoutInput): LabelLayout {
     digitos,
     destacado,
     pie,
+    pieArriba,
+    pieAbajo,
   };
 }

@@ -143,3 +143,31 @@ describe('en la caja el pedido va arriba', () => {
     expect(zpl.indexOf('AMA MAYLU 41/42')).toBeLessThan(zpl.indexOf('^BCN'));
   });
 });
+
+describe('el pie en dos renglones (ZPL)', () => {
+  const par = {
+    barcode: '26090100000010023',
+    productName: 'AMA MAYLU 02 FORCE ONE AAA H',
+    detail: 'GRIS BLANCO · Talla 40',
+    desglose: '09/09/26 · Pedido 2 · N.º 36',
+    price: '$ 150.000',
+  };
+  const zpl = buildLabelZpl(par, { widthMm: 58, heightMm: 30 });
+  const altoDe = (texto: string) =>
+    Number(
+      zpl
+        .split('\n')
+        .find((l) => l.includes(texto) && l.includes('^A0N,'))
+        ?.match(/\^A0N,(\d+)/)?.[1],
+    );
+
+  it('el detalle va en su propio renglón, más grande que el desglose', () => {
+    expect(altoDe('GRIS BLANCO')).toBeGreaterThan(altoDe('Pedido 2'));
+  });
+
+  it('el desglose y el precio van juntos abajo', () => {
+    const linea = zpl.split('\n').find((l) => l.includes('Pedido 2')) ?? '';
+    expect(linea).toContain('$ 150.000');
+    expect(linea).not.toContain('GRIS BLANCO');
+  });
+});

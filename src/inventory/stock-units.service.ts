@@ -2285,6 +2285,9 @@ export class StockUnitsService {
             ? { id: unit.stand.id, name: unit.stand.name }
             : null,
           boxLineId: unit.purchaseBoxLineId ?? null,
+          // Para volver a la compra desde la caja: quien la detalla y abre
+          // llega desde el renglón de la compra y quiere seguir con la siguiente.
+          purchaseOrderId: line?.purchaseOrder?.id ?? null,
           orderNumber: line?.purchaseOrder?.orderNumber ?? null,
           // Con qué se rotula la caja al imprimir su etiqueta.
           pedidoNombre:

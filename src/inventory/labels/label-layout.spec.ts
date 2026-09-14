@@ -19,6 +19,8 @@ function todasLasCajas(l: LabelLayout): Caja[] {
     l.digitos,
     l.destacado,
     l.pie,
+    l.pieArriba,
+    l.pieAbajo,
     ...(l.logo ? [l.logo] : []),
   ];
 }
@@ -116,3 +118,37 @@ describe('en la caja el pedido va arriba y el producto abajo', () => {
   });
 });
 
+describe('el pie va en dos renglones', () => {
+  // Color, talla, desglose y precio juntos en un renglón se encogían a 1.6 mm
+  // en el sticker de 58×30 para caber a lo ancho. La tienda pidió leerlo.
+  const par = computeLabelLayout({ widthMm: 58, heightMm: 30, isBox: false, hasLogo: false });
+  const caja = computeLabelLayout({ widthMm: 50, heightMm: 40, isBox: true, hasLogo: false });
+
+  it('los dos renglones caben dentro de la fila del pie y no se montan', () => {
+    for (const l of [par, caja]) {
+      expect(l.pieArriba.yMm).toBeGreaterThanOrEqual(l.pie.yMm - EPS);
+      expect(l.pieArriba.yMm + l.pieArriba.hMm).toBeLessThanOrEqual(l.pieAbajo.yMm + EPS);
+      expect(l.pieAbajo.yMm + l.pieAbajo.hMm).toBeLessThanOrEqual(l.pie.yMm + l.pie.hMm + EPS);
+    }
+  });
+
+  it('el detalle (color, talla) va arriba y más grande que el desglose', () => {
+    for (const l of [par, caja]) {
+      expect(l.pieArriba.fontMm).toBeGreaterThan(l.pieAbajo.fontMm);
+    }
+    // Antes salía a 1.6 mm de alto; ahora pasa de 2.3 en el sticker del par.
+    expect(par.pieArriba.fontMm).toBeGreaterThanOrEqual(2.3);
+    expect(caja.pieArriba.fontMm).toBeGreaterThanOrEqual(2.8);
+  });
+
+  it('la letra de cada renglón cabe en su alto (una mayúscula mide ~0.72 em)', () => {
+    for (const l of [par, caja]) {
+      expect(l.pieArriba.fontMm / 0.72).toBeLessThanOrEqual(l.pieArriba.hMm + EPS);
+      expect(l.pieAbajo.fontMm / 0.72).toBeLessThanOrEqual(l.pieAbajo.hMm + EPS);
+    }
+  });
+
+  it('la talla del par sigue siendo lo más grande del sticker', () => {
+    expect(par.destacado.fontMm).toBeGreaterThan(par.pieArriba.fontMm * 2);
+  });
+});
