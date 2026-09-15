@@ -27,14 +27,12 @@ import {
 import { CreateProductDto } from './dto/create-product.dto.js';
 import { UpdateProductDto } from './dto/update-product.dto.js';
 import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
+import { type FiltrosDelMostrador } from './filtros-del-mostrador.js';
 import {
   bodegasDelMostrador,
   repartirVitrinaYBodega,
 } from '../inventory/exhibicion.js';
-import {
-  bodegaDelFrasco,
-  categoriaDelFrasco,
-} from './donde-va-el-frasco.js';
+import { bodegaDelFrasco, categoriaDelFrasco } from './donde-va-el-frasco.js';
 
 import {
   avisoDeVariantesConservadas,
@@ -128,7 +126,9 @@ export class ProductsService {
 
     // Stock 0 en la bodega de frascos, si la hay. Acá el nombre es todo lo
     // que existe: una bodega es un sitio y no tiene tipo.
-    const bodegas = await this.warehouseRepository.find({ where: { tenantId } });
+    const bodegas = await this.warehouseRepository.find({
+      where: { tenantId },
+    });
     const frascosWh = bodegaDelFrasco(bodegas);
     if (frascosWh) {
       const filaEnCero = this.stockRepository.create({
@@ -1068,6 +1068,8 @@ export class ProductsService {
       warehouseId?: string;
       /** Solo variantes con existencias (> 0) en cualquier bodega de la tienda. */
       inStock?: boolean;
+      /** Talla, marca y género: ver `filtros-del-mostrador.ts`. */
+      filtros?: FiltrosDelMostrador;
     },
   ): Promise<ProductVariant[]> {
     // Límite configurable (para el catálogo del POS con "ver más"), con tope.
@@ -1123,6 +1125,21 @@ export class ProductsService {
             WHERE s_in.variant_id = v.id AND s_in.tenant_id = :tenantId) > 0`,
       );
     }
+    // Los chips del mostrador filtran acá y no sobre la página cargada: ver
+    // `filtros-del-mostrador.ts`.
+    if (opts?.filtros?.tallas.length) {
+      qb.andWhere('sz.name IN (:...tallas)', { tallas: opts.filtros.tallas });
+    }
+    if (opts?.filtros?.marcas.length) {
+      qb.andWhere('TRIM(p.brand) IN (:...marcas)', {
+        marcas: opts.filtros.marcas,
+      });
+    }
+    if (opts?.filtros?.generos.length) {
+      qb.andWhere('p.gender IN (:...generos)', {
+        generos: opts.filtros.generos,
+      });
+    }
     qb.addSelect(stockQuantitySql, 'inventory_quantity');
     switch (opts?.sort) {
       case 'stock-asc':
@@ -1140,6 +1157,78 @@ export class ProductsService {
         break;
     }
     return qb.addOrderBy('v.id', 'ASC').limit(limit).offset(offset).getMany();
+  }
+
+  /**
+   * Las opciones de los chips del mostrador: **todas** las tallas, marcas y
+   * géneros que hay para vender, no las de la página cargada.
+   *
+   * Con «solo con stock», una talla cuenta si algún par de esa talla tiene
+   * existencias en las bodegas visibles; una marca, si alguna referencia
+   * suya las tiene. Las tallas salen en el orden del catálogo (36, 37, 38…).
+   */
+  async opcionesDeFiltroDelMostrador(
+    tenantId: string,
+    opts?: { warehouseId?: string; inStock?: boolean; type?: string },
+  ): Promise<{ tallas: string[]; marcas: string[]; generos: string[] }> {
+    let bodegasVisibles: string[] | undefined;
+    if (opts?.warehouseId) {
+      const bodegas = await this.warehouseRepository.find({
+        where: { tenantId },
+        select: ['id', 'isExhibition', 'exhibitionOfWarehouseId'],
+      });
+      bodegasVisibles = bodegasDelMostrador(opts.warehouseId, bodegas);
+    }
+    const conStock = opts?.inStock
+      ? `AND (SELECT COALESCE(SUM(sq.quantity), 0) FROM stock sq
+              WHERE sq.variant_id = v.id AND sq.tenant_id = :tenantId
+              ${bodegasVisibles ? 'AND sq.warehouse_id IN (:...bodegas)' : ''}) > 0`
+      : '';
+    const tipo =
+      opts?.type === 'STANDARD'
+        ? "AND (c.type = 'STANDARD' OR c.type IS NULL)"
+        : opts?.type
+          ? 'AND c.type = :tipo'
+          : '';
+    const base = this.variantRepository
+      .createQueryBuilder('v')
+      .innerJoin('v.product', 'p')
+      .leftJoin('p.category', 'c')
+      .where('p.tenant_id = :tenantId', { tenantId })
+      .andWhere("p.status = 'ACTIVE'")
+      .andWhere('v.is_active = true')
+      .andWhere(`1 = 1 ${conStock} ${tipo}`);
+    if (bodegasVisibles) base.setParameter('bodegas', bodegasVisibles);
+    if (opts?.type && opts.type !== 'STANDARD')
+      base.setParameter('tipo', opts.type);
+
+    const tallas = await base
+      .clone()
+      .innerJoin('v.sizeRef', 'sz')
+      .select('sz.name', 'name')
+      .addSelect('MIN(sz.sort_order)', 'orden')
+      .groupBy('sz.name')
+      .orderBy('orden', 'ASC')
+      .addOrderBy('sz.name', 'ASC')
+      .getRawMany<{ name: string }>();
+    const marcas = await base
+      .clone()
+      .select('TRIM(p.brand)', 'name')
+      .andWhere("TRIM(COALESCE(p.brand, '')) <> ''")
+      .groupBy('TRIM(p.brand)')
+      .orderBy('TRIM(p.brand)', 'ASC')
+      .getRawMany<{ name: string }>();
+    const generos = await base
+      .clone()
+      .select('p.gender', 'name')
+      .groupBy('p.gender')
+      .orderBy('p.gender', 'ASC')
+      .getRawMany<{ name: string }>();
+    return {
+      tallas: tallas.map((t) => t.name),
+      marcas: marcas.map((m) => m.name),
+      generos: generos.map((g) => g.name).filter(Boolean),
+    };
   }
 
   /**
@@ -1162,6 +1251,8 @@ export class ProductsService {
       warehouseId?: string;
       /** Solo productos con existencias (> 0) en las bodegas visibles. */
       inStock?: boolean;
+      /** Talla, marca y género: ver `filtros-del-mostrador.ts`. */
+      filtros?: FiltrosDelMostrador;
     },
   ): Promise<{
     data: {
@@ -1273,6 +1364,38 @@ export class ProductsService {
     // pudieran vender).
     if (opts?.inStock) {
       qb.andWhere(`${stockQuantitySql} > 0`);
+    }
+    // Los chips del mostrador filtran acá y no sobre la página cargada: ver
+    // `filtros-del-mostrador.ts`. La talla se busca entre las variantes de la
+    // referencia, y con «solo con stock» tiene que haber pares de **esa**
+    // talla: una referencia con la 37 en cero no es una referencia con 37.
+    if (opts?.filtros?.tallas.length) {
+      qb.andWhere(
+        `EXISTS (
+          SELECT 1 FROM product_variants vt
+          JOIN sizes st ON st.id = vt.size_id
+          WHERE vt.product_id = p.id AND vt.is_active = true
+            AND st.name IN (:...tallas)
+            ${
+              opts.inStock
+                ? `AND (SELECT COALESCE(SUM(sq.quantity), 0) FROM stock sq
+                       WHERE sq.variant_id = vt.id AND sq.tenant_id = :tenantId
+                       ${bodegasVisibles ? 'AND sq.warehouse_id IN (:...sortWarehouseIds)' : ''}) > 0`
+                : ''
+            }
+        )`,
+        { tallas: opts.filtros.tallas },
+      );
+    }
+    if (opts?.filtros?.marcas.length) {
+      qb.andWhere('TRIM(p.brand) IN (:...marcas)', {
+        marcas: opts.filtros.marcas,
+      });
+    }
+    if (opts?.filtros?.generos.length) {
+      qb.andWhere('p.gender IN (:...generos)', {
+        generos: opts.filtros.generos,
+      });
     }
     if (cleanQuery) {
       qb.andWhere(

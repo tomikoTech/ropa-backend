@@ -20,6 +20,7 @@ import {
   parsePositiveInt,
 } from '../common/utils/query-number.util.js';
 import { ProductsService } from './products.service.js';
+import { filtrosDeLaConsulta } from './filtros-del-mostrador.js';
 import { CreateProductDto } from './dto/create-product.dto.js';
 import { UpdateProductDto } from './dto/update-product.dto.js';
 import { TenantId } from '../common/decorators/tenant-id.decorator.js';
@@ -154,7 +155,26 @@ export class ProductsController {
   @ApiQuery({ name: 'type', required: false })
   @ApiQuery({ name: 'sort', required: false })
   @ApiQuery({ name: 'warehouseId', required: false })
-  @ApiQuery({ name: 'inStock', required: false, description: 'Solo con existencias' })
+  @ApiQuery({
+    name: 'inStock',
+    required: false,
+    description: 'Solo con existencias',
+  })
+  @ApiQuery({
+    name: 'talla',
+    required: false,
+    description: 'Tallas separadas por coma',
+  })
+  @ApiQuery({
+    name: 'marca',
+    required: false,
+    description: 'Marcas separadas por coma',
+  })
+  @ApiQuery({
+    name: 'genero',
+    required: false,
+    description: 'HOMBRE, MUJER, UNISEX',
+  })
   searchVariants(
     @Query('q') query: string,
     @TenantId() tenantId: string,
@@ -164,6 +184,9 @@ export class ProductsController {
     @Query('sort') sort?: string,
     @Query('warehouseId') warehouseId?: string,
     @Query('inStock') inStock?: string,
+    @Query('talla') talla?: string,
+    @Query('marca') marca?: string,
+    @Query('genero') genero?: string,
   ) {
     // Esta búsqueda es la que usa el POS para saber qué vender, así que la puede
     // llamar quien tenga permiso de Ventas (ver `module-registry.ts`). Trae el
@@ -177,6 +200,28 @@ export class ProductsController {
       sort,
       warehouseId,
       inStock: inStock === 'true' || inStock === '1',
+      filtros: filtrosDeLaConsulta({ talla, marca, genero }),
+    });
+  }
+
+  @Get('search/pos-catalog/filtros')
+  @ApiOperation({
+    summary:
+      'Tallas, marcas y géneros disponibles para los chips del mostrador (de todo el catálogo, no de la página cargada)',
+  })
+  @ApiQuery({ name: 'warehouseId', required: false })
+  @ApiQuery({ name: 'inStock', required: false })
+  @ApiQuery({ name: 'type', required: false })
+  opcionesDeFiltroDelMostrador(
+    @TenantId() tenantId: string,
+    @Query('warehouseId') warehouseId?: string,
+    @Query('inStock') inStock?: string,
+    @Query('type') type?: string,
+  ) {
+    return this.productsService.opcionesDeFiltroDelMostrador(tenantId, {
+      warehouseId: warehouseId || undefined,
+      inStock: inStock === 'true' || inStock === '1',
+      type: type || undefined,
     });
   }
 
@@ -191,7 +236,26 @@ export class ProductsController {
   @ApiQuery({ name: 'type', required: false })
   @ApiQuery({ name: 'sort', required: false })
   @ApiQuery({ name: 'warehouseId', required: false })
-  @ApiQuery({ name: 'inStock', required: false, description: 'Solo con existencias' })
+  @ApiQuery({
+    name: 'inStock',
+    required: false,
+    description: 'Solo con existencias',
+  })
+  @ApiQuery({
+    name: 'talla',
+    required: false,
+    description: 'Tallas separadas por coma',
+  })
+  @ApiQuery({
+    name: 'marca',
+    required: false,
+    description: 'Marcas separadas por coma',
+  })
+  @ApiQuery({
+    name: 'genero',
+    required: false,
+    description: 'HOMBRE, MUJER, UNISEX',
+  })
   searchPosCatalog(
     @TenantId() tenantId: string,
     @Query('q') query?: string,
@@ -201,6 +265,9 @@ export class ProductsController {
     @Query('sort') sort?: string,
     @Query('warehouseId') warehouseId?: string,
     @Query('inStock') inStock?: string,
+    @Query('talla') talla?: string,
+    @Query('marca') marca?: string,
+    @Query('genero') genero?: string,
   ) {
     return this.productsService.searchPosCatalog(query ?? '', tenantId, {
       limit: parsePositiveInt(limit, { max: MAX_PAGE_SIZE }),
@@ -209,6 +276,7 @@ export class ProductsController {
       sort,
       warehouseId,
       inStock: inStock === 'true' || inStock === '1',
+      filtros: filtrosDeLaConsulta({ talla, marca, genero }),
     });
   }
 
