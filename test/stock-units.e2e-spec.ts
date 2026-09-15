@@ -356,6 +356,56 @@ describe('Recepción por cajas y apertura de cajas (e2e)', () => {
     expect(parcial.body).toHaveLength(0);
   });
 
+  it('el total de una caja cerrada se corrige a mano y el agregado se mueve por la diferencia', async () => {
+    // «Dice 18 pero quiero editar el 18»: sin contar tallas. Aplica a la caja
+    // que llegó sin curva (ingreso directo); la que tiene tallas detalladas se
+    // corrige por las tallas, porque su total es la suma de ellas.
+    const ingreso = await request(app.getHttpServer())
+      .post('/api/stock-units/intake')
+      .set(auth())
+      .send({
+        productId,
+        boxes: 1,
+        unitsPerBox: 18,
+        warehouseId,
+        unitCost: 100,
+      })
+      .expect(201);
+    const caja = ingreso.body[0] as { id: string; variantId: string };
+    const stockDe = async () => {
+      const r = await request(app.getHttpServer())
+        .get(`/api/inventory/stock/variant/${caja.variantId}`)
+        .set(auth())
+        .expect(200);
+      return (r.body as { warehouseId: string; quantity: number }[])
+        .filter((f) => f.warehouseId === warehouseId)
+        .reduce((t, f) => t + Number(f.quantity), 0);
+    };
+    const antes = await stockDe();
+
+    const res = await request(app.getHttpServer())
+      .post(`/api/stock-units/${caja.id}/cantidad`)
+      .set(auth())
+      .send({ quantity: 17 })
+      .expect(201);
+    expect(res.body.quantity).toBe(17);
+    expect(await stockDe()).toBe(antes - 1);
+
+    await request(app.getHttpServer())
+      .post(`/api/stock-units/${caja.id}/cantidad`)
+      .set(auth())
+      .send({ quantity: 0 })
+      .expect(400);
+
+    // La caja con tallas detalladas (curva del pedido) no se corrige a ojo.
+    const conTallas = await request(app.getHttpServer())
+      .post(`/api/stock-units/${boxIds[1]}/cantidad`)
+      .set(auth())
+      .send({ quantity: 3 })
+      .expect(400);
+    expect(String(conTallas.body.message)).toMatch(/tallas detalladas/i);
+  });
+
   it('cada caja conserva su propio contenido esperado y permite detallar el real', async () => {
     const initial = await request(app.getHttpServer())
       .get(`/api/stock-units/${boxIds[0]}/contents`)

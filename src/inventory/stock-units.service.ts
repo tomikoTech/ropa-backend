@@ -1517,6 +1517,114 @@ export class StockUnitsService {
   }
 
   /**
+   * Cambiar cuántos pares trae una caja cerrada, **sin** contar tallas.
+   *
+   * «Dice 18 pero quiero editar el 18.» Una caja recién recibida no tiene
+   * tallas detalladas, y contar dieciocho pares por talla para corregir un
+   * total es demasiado pedir con la caja cerrada. El total es de la caja; el
+   * ledger mueve el agregado con la diferencia, igual que al detallar.
+   *
+   * Si la caja ya tiene tallas detalladas, el total es la suma de ellas y se
+   * cambia por las tallas: un total suelto las dejaría mintiendo.
+   */
+  async cambiarCantidadDeCaja(
+    id: string,
+    cantidad: number,
+    userId: string,
+    tenantId: string,
+  ): Promise<{ id: string; barcode: string; quantity: number }> {
+    if (!Number.isInteger(cantidad) || cantidad < 1) {
+      throw new BadRequestException('La caja tiene que traer al menos un par.');
+    }
+    return this.dataSource.transaction(async (m) => {
+      const unitRepo = m.getRepository(StockUnit);
+      const box = await unitRepo.findOne({
+        where: { id, tenantId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!box) throw new NotFoundException('Código no encontrado');
+      if (box.kind !== StockUnitKind.BOX) {
+        throw new BadRequestException(
+          'Un par es un par: no tiene cantidad que cambiar.',
+        );
+      }
+      if (box.status !== StockUnitStatus.IN_STOCK) {
+        throw new BadRequestException(
+          `Esta caja ${DESCRIPCION_DE_ESTADO[box.status]}: solo se cambia lo que está en inventario.`,
+        );
+      }
+      if (!box.variantId) {
+        throw new BadRequestException(
+          'Esta caja no tiene referencia asociada.',
+        );
+      }
+      const detalladas = await m
+        .getRepository(StockUnitContent)
+        .createQueryBuilder('c')
+        .select('COALESCE(SUM(c.actual_quantity), 0)', 'total')
+        .where('c.box_unit_id = :id AND c.tenant_id = :tenantId', {
+          id,
+          tenantId,
+        })
+        .getRawOne<{ total: string }>();
+      if (Number(detalladas?.total ?? 0) > 0) {
+        throw new BadRequestException(
+          'Esta caja ya tiene tallas detalladas: el total es la suma de ellas. Cambia las tallas.',
+        );
+      }
+      const delta = cantidad - box.quantity;
+      if (delta === 0) {
+        throw new BadRequestException(`La caja ya dice ${cantidad}.`);
+      }
+      const stock = await m.getRepository(Stock).findOne({
+        where: {
+          variantId: box.variantId,
+          warehouseId: box.warehouseId,
+          tenantId,
+        },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!stock || Number(stock.quantity) + delta < 0) {
+        throw new BadRequestException(
+          'El stock agregado no alcanza para registrar esta diferencia.',
+        );
+      }
+      await this.ledger.mover(m, {
+        variantId: box.variantId,
+        warehouseId: box.warehouseId,
+        cantidad: delta,
+        motivo: 'STOCK_UNIT',
+        referenciaId: box.id,
+        notas: `Cantidad de la caja ${box.barcode}: ${box.quantity} -> ${cantidad} (${delta > 0 ? '+' : ''}${delta})`,
+        usuarioId: userId,
+        bultosYaMovidos: true,
+        tenantId,
+      });
+      const anterior = box.quantity;
+      box.quantity = cantidad; // ledger-exento: es un bulto, no la existencia
+      await unitRepo.save(box);
+      await m.getRepository(StockUnitEvent).save(
+        m.getRepository(StockUnitEvent).create({
+          stockUnitId: box.id,
+          eventType: StockUnitEventType.CONTENT_UPDATED,
+          fromStatus: box.status,
+          toStatus: box.status,
+          referenceType: 'STOCK_UNIT',
+          referenceId: box.id,
+          userId,
+          metadata: {
+            previousQuantity: anterior,
+            quantity: cantidad,
+            sinTallas: true,
+          },
+          tenantId,
+        }),
+      );
+      return { id: box.id, barcode: box.barcode, quantity: cantidad };
+    });
+  }
+
+  /**
    * Registra lo que realmente llegó dentro de una caja. La lista recibida es
    * completa: una talla omitida queda en cero, sin borrar el esperado.
    */

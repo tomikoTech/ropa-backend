@@ -22,6 +22,7 @@ import { AbrirCajaDto } from './dto/abrir-caja.dto.js';
 import { DarDeBajaDto } from './dto/dar-de-baja.dto.js';
 import { AlcanceRecosteo, RecostearDto } from './dto/recostear.dto.js';
 import { ReasignarDto } from './dto/reasignar.dto.js';
+import { CantidadDeCajaDto } from './dto/cantidad-de-caja.dto.js';
 
 /**
  * Inventario por unidades etiquetadas: recibir cajas, abrirlas y buscarlas
@@ -241,6 +242,20 @@ export class StockUnitsController {
     @TenantId() tenantId: string,
   ) {
     return this.units.getBoxContents(id, tenantId);
+  }
+
+  @Post(':id/cantidad')
+  @ApiOperation({
+    summary:
+      'Cambiar cuántos pares trae una caja cerrada sin detallar tallas (mueve el agregado por la diferencia)',
+  })
+  cambiarCantidad(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CantidadDeCajaDto,
+    @UserId() userId: string,
+    @TenantId() tenantId: string,
+  ) {
+    return this.units.cambiarCantidadDeCaja(id, dto.quantity, userId, tenantId);
   }
 
   @Post(':id/contents')
