@@ -888,8 +888,9 @@ export class InventoryService {
         );
       }
       if (dto.quantity !== bulto.quantity) {
+        const pares = Number(bulto.quantity);
         throw new BadRequestException(
-          `${bulto.kind === StockUnitKind.BOX ? 'La caja' : 'El par'} ${bulto.barcode} se traslada entero: ${bulto.quantity} ${bulto.quantity === 1 ? 'par' : 'pares'}.`,
+          `${bulto.kind === StockUnitKind.BOX ? 'La caja' : 'El par'} ${bulto.barcode} se traslada entero: ${pares} ${pares > 1 ? 'pares' : 'par'}.`,
         );
       }
     }
