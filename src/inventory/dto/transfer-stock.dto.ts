@@ -32,6 +32,19 @@ export class TransferStockDto {
   notes?: string;
 
   /**
+   * El bulto escaneado —esa caja, ese par— que se traslada.
+   *
+   * Sin esto el traslado era «N unidades de la talla» y el ledger elegía qué
+   * bultos se iban por antigüedad: se escaneaba una caja para mandarla al
+   * otro local y se iba otra caja distinta (o la existencia sin la caja). Con
+   * el bulto puesto, se va ese, con su código, y la cantidad es la suya.
+   */
+  @ApiPropertyOptional({ example: 'uuid-del-bulto' })
+  @IsOptional()
+  @IsUUID()
+  stockUnitId?: string;
+
+  /**
    * ¿Este traslado necesita que el destino confirme la recepción?
    *
    * Si no se manda, decide el ajuste de la tienda (`transferConfirmationEnabled`),

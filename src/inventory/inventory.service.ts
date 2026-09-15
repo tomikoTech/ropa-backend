@@ -38,10 +38,7 @@ import {
 } from './movement-delta.js';
 import { RecipeService } from '../products/services/recipe.service.js';
 import { StockLedgerService } from './ledger/stock-ledger.service.js';
-import {
-  armarPaginado,
-  resolverPagina,
-} from '../common/utils/paginacion.js';
+import { armarPaginado, resolverPagina } from '../common/utils/paginacion.js';
 import { CajaService } from '../caja/caja.service.js';
 import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
 
@@ -464,9 +461,7 @@ export class InventoryService {
 
   async getAllStock(tenantId: string, productId?: string): Promise<Stock[]> {
     const rows = await this.stockRepository.find({
-      where: productId
-        ? { tenantId, variant: { productId } }
-        : { tenantId },
+      where: productId ? { tenantId, variant: { productId } } : { tenantId },
       relations: ['variant', 'variant.product', 'warehouse'],
       order: { warehouse: { name: 'ASC' } },
     });
@@ -599,7 +594,7 @@ export class InventoryService {
     // `find` con `In` no conserva el orden de los ids; se reordena según la
     // página ya ordenada en SQL.
     const posicion = new Map(ids.map((r, i) => [r.id, i]));
-    rows.sort((a, b) => (posicion.get(a.id)! - posicion.get(b.id)!));
+    rows.sort((a, b) => posicion.get(a.id)! - posicion.get(b.id)!);
 
     const data = await this.withBoxBreakdown(rows, tenantId);
 
@@ -870,6 +865,35 @@ export class InventoryService {
         'La bodega origen y destino deben ser diferentes',
       );
     }
+    // El bulto escaneado manda: tiene que estar disponible, en la bodega de
+    // origen, ser de esa talla, e irse entero.
+    if (dto.stockUnitId) {
+      const bulto = await this.dataSource
+        .getRepository(StockUnit)
+        .findOne({ where: { id: dto.stockUnitId, tenantId } });
+      if (!bulto) throw new NotFoundException('El código escaneado no existe');
+      if (bulto.status !== StockUnitStatus.IN_STOCK) {
+        throw new BadRequestException(
+          `${bulto.kind === StockUnitKind.BOX ? 'La caja' : 'El par'} ${bulto.barcode} ya no está disponible.`,
+        );
+      }
+      if (bulto.warehouseId !== dto.fromWarehouseId) {
+        throw new BadRequestException(
+          `${bulto.kind === StockUnitKind.BOX ? 'La caja' : 'El par'} ${bulto.barcode} no está en la bodega de origen elegida.`,
+        );
+      }
+      if (bulto.variantId !== dto.variantId) {
+        throw new BadRequestException(
+          'El código escaneado no es de esa talla.',
+        );
+      }
+      if (dto.quantity !== bulto.quantity) {
+        throw new BadRequestException(
+          `${bulto.kind === StockUnitKind.BOX ? 'La caja' : 'El par'} ${bulto.barcode} se traslada entero: ${bulto.quantity} ${bulto.quantity === 1 ? 'par' : 'pares'}.`,
+        );
+      }
+    }
+    const unidades = dto.stockUnitId ? [dto.stockUnitId] : undefined;
 
     // Remisiones (F3): con confirmación de recepción el traslado NO es inmediato,
     // se descuenta del origen y queda en tránsito (PENDING) hasta que el destino
@@ -937,6 +961,7 @@ export class InventoryService {
         referenciaId: transfer.id,
         notas: dto.notes ?? null,
         usuarioId: userId,
+        unidades,
         tenantId,
       });
 
@@ -1045,6 +1070,7 @@ export class InventoryService {
         referenciaId: transfer.id,
         notas: dto.notes || 'Remisión en tránsito',
         usuarioId: userId,
+        unidades: dto.stockUnitId ? [dto.stockUnitId] : undefined,
         tenantId,
       });
 
