@@ -102,7 +102,7 @@ describe('Trasladar el bulto escaneado (e2e)', () => {
   });
 
   afterAll(async () => {
-    await teardownTestApp(app);
+    await teardownTestApp();
   });
 
   it('se va la caja escaneada, entera, y la existencia baja en el origen y sube en el destino', async () => {
