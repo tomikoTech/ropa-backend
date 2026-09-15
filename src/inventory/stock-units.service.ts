@@ -206,8 +206,7 @@ export class StockUnitsService {
         fallos.push({
           consecutivo: linea.consecutive,
           producto: linea.productId,
-          motivo:
-            error instanceof Error ? error.message : 'No se pudo recibir',
+          motivo: error instanceof Error ? error.message : 'No se pudo recibir',
         });
       }
     }
@@ -789,7 +788,9 @@ export class StockUnitsService {
       .findOne({ where: { id: productId, tenantId } });
     if (!product) throw new NotFoundException('Producto no encontrado');
     const color = colorId
-      ? await m.getRepository(Color).findOne({ where: { id: colorId, tenantId } })
+      ? await m
+          .getRepository(Color)
+          .findOne({ where: { id: colorId, tenantId } })
       : null;
 
     const nueva = variantRepo.create({
@@ -850,7 +851,9 @@ export class StockUnitsService {
       });
       if (!choca) return candidate;
     }
-    throw new BadRequestException('No se pudo generar un SKU de variante único.');
+    throw new BadRequestException(
+      'No se pudo generar un SKU de variante único.',
+    );
   }
 
   /** Variantes del producto por talla, para poder detallar lo que trae la caja. */
@@ -1038,9 +1041,7 @@ export class StockUnitsService {
         /** La bodega de esa talla: la suya, la general, o la de la caja. */
         const bodegaDe = (renglon: RenglonDeTalla) =>
           renglon.warehouseId ?? destinoId ?? box.warehouseId;
-        const seMudaAlgo = queSale.some(
-          (r) => bodegaDe(r) !== box.warehouseId,
-        );
+        const seMudaAlgo = queSale.some((r) => bodegaDe(r) !== box.warehouseId);
 
         const units: StockUnit[] = [];
         const base = box.barcode.slice(0, 16);
@@ -1115,7 +1116,9 @@ export class StockUnitsService {
           const oa = va?.sizeRef?.sortOrder ?? Number.MAX_SAFE_INTEGER;
           const ob = vb?.sizeRef?.sortOrder ?? Number.MAX_SAFE_INTEGER;
           if (oa !== ob) return oa - ob;
-          return (va?.sizeRef?.name ?? '').localeCompare(vb?.sizeRef?.name ?? '');
+          return (va?.sizeRef?.name ?? '').localeCompare(
+            vb?.sizeRef?.name ?? '',
+          );
         });
 
         for (const item of enOrdenDeTalla) {
@@ -2000,7 +2003,9 @@ export class StockUnitsService {
     if (!unit) throw new NotFoundException('Código no encontrado');
     const productId = unit.productId;
     if (!productId) {
-      throw new BadRequestException('Este código no está asociado a un producto.');
+      throw new BadRequestException(
+        'Este código no está asociado a un producto.',
+      );
     }
 
     if (alcance === AlcanceRecosteo.UNIDAD) {
@@ -2034,7 +2039,12 @@ export class StockUnitsService {
           ${soloEnCero ? 'AND (cost IS NULL OR cost = 0)' : ''}`,
       [productId, tenantId],
     )) as { afectados: number }[];
-    return { alcance, afectados: fila?.afectados ?? 0, desde: null, hasta: null };
+    return {
+      alcance,
+      afectados: fila?.afectados ?? 0,
+      desde: null,
+      hasta: null,
+    };
   }
 
   /**
@@ -2045,6 +2055,41 @@ export class StockUnitsService {
    * código impreso, pero pasa a contar como la otra talla/color. El agregado se
    * mueve de una a otra por el ledger; el código no se reinventa.
    */
+  /**
+   * «Este par es 42, no 41»: la misma referencia, otra talla o color.
+   *
+   * La variante de esa talla y color se crea si no existe —y la talla o el
+   * color también, si no están en el catálogo—, con el mismo camino que usa
+   * abrir una caja (`asegurarVariante`). Después es un reasignar normal.
+   * Lo que no se manda se conserva: cambiar solo la talla deja el color.
+   */
+  async cambiarTallaOColor(
+    id: string,
+    cambio: { size: string | null; color: string | null },
+    userId: string,
+    tenantId: string,
+  ): Promise<{ id: string; barcode: string; variantId: string }> {
+    const unit = await this.unitRepo.findOne({
+      where: { id, tenantId },
+      relations: { size: true, color: true },
+    });
+    if (!unit) throw new NotFoundException('Código no encontrado');
+    const size = (cambio.size ?? unit.size?.name ?? '').trim() || null;
+    const color = (cambio.color ?? unit.color?.name ?? '').trim() || null;
+    if (!size && !color) {
+      throw new BadRequestException('Di la talla o el color al que pasa.');
+    }
+    const variante = await this.products.asegurarVariante(
+      unit.productId,
+      { size, color },
+      tenantId,
+    );
+    if (variante.id === unit.variantId) {
+      throw new BadRequestException('El bulto ya está en esa talla y color.');
+    }
+    return this.reasignar(id, variante.id, userId, tenantId);
+  }
+
   async reasignar(
     id: string,
     nuevaVariantId: string,

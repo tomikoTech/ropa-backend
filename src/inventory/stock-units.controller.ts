@@ -98,7 +98,8 @@ export class StockUnitsController {
 
   @Post('receive/:boxLineId')
   @ApiOperation({
-    summary: 'Recibir cajas de un renglón: las crea con su código y suma inventario',
+    summary:
+      'Recibir cajas de un renglón: las crea con su código y suma inventario',
   })
   receive(
     @Param('boxLineId', ParseUUIDPipe) boxLineId: string,
@@ -164,11 +165,19 @@ export class StockUnitsController {
     @UserId() userId: string,
     @TenantId() tenantId: string,
   ) {
-    return this.units.splitBox(id, userId, tenantId, dto?.items, dto?.warehouseId);
+    return this.units.splitBox(
+      id,
+      userId,
+      tenantId,
+      dto?.items,
+      dto?.warehouseId,
+    );
   }
 
   @Post(':id/baja')
-  @ApiOperation({ summary: 'Dar de baja un bulto por su código (sale del inventario)' })
+  @ApiOperation({
+    summary: 'Dar de baja un bulto por su código (sale del inventario)',
+  })
   darDeBaja(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: DarDeBajaDto,
@@ -191,7 +200,10 @@ export class StockUnitsController {
   }
 
   @Post(':id/recostear')
-  @ApiOperation({ summary: 'Cambiar el costo con alcance (este / vendidos / existencias / costo cero)' })
+  @ApiOperation({
+    summary:
+      'Cambiar el costo con alcance (este / vendidos / existencias / costo cero)',
+  })
   recostear(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: RecostearDto,
@@ -201,14 +213,25 @@ export class StockUnitsController {
   }
 
   @Post(':id/reasignar')
-  @ApiOperation({ summary: 'Reasignar un bulto a otra referencia (talla/color) existente' })
+  @ApiOperation({
+    summary:
+      'Reasignar un bulto: a otra variante existente, o a otra talla/color de su referencia (se crea si no existe)',
+  })
   reasignar(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: ReasignarDto,
     @UserId() userId: string,
     @TenantId() tenantId: string,
   ) {
-    return this.units.reasignar(id, dto.nuevaVariantId, userId, tenantId);
+    if (dto.nuevaVariantId) {
+      return this.units.reasignar(id, dto.nuevaVariantId, userId, tenantId);
+    }
+    return this.units.cambiarTallaOColor(
+      id,
+      { size: dto.size ?? null, color: dto.color ?? null },
+      userId,
+      tenantId,
+    );
   }
 
   @Get(':id/contents')

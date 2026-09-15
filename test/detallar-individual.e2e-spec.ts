@@ -125,9 +125,9 @@ describe('Detallar individual: costo, referencia y baja (e2e)', () => {
     // la **otra**, no la que ya tiene la caja. Sale de la respuesta del
     // ingreso: la búsqueda devuelve una forma resumida que no la trae.
     varianteA = cajas[0].variantId;
-    varianteB = (
-      prod.body.variants as { id: string }[]
-    ).find((v) => v.id !== varianteA)!.id;
+    varianteB = (prod.body.variants as { id: string }[]).find(
+      (v) => v.id !== varianteA,
+    )!.id;
     expect(varianteB).toBeTruthy();
   }, 120000);
 
@@ -216,14 +216,18 @@ describe('Detallar individual: costo, referencia y baja (e2e)', () => {
       // producto, sin límite de fecha. Se puede hacer —lo pidió el dueño— pero
       // hay que poder verlo antes de apretar el botón.
       const vendidos = await request(app.getHttpServer())
-        .get(`/api/stock-units/${cajas[1].id}/recostear/alcance?alcance=vendidos`)
+        .get(
+          `/api/stock-units/${cajas[1].id}/recostear/alcance?alcance=vendidos`,
+        )
         .set(auth())
         .expect(200);
       expect(vendidos.body.afectados).toBeGreaterThanOrEqual(1);
       expect(vendidos.body.desde).toBeTruthy();
 
       const existencias = await request(app.getHttpServer())
-        .get(`/api/stock-units/${cajas[0].id}/recostear/alcance?alcance=existencias`)
+        .get(
+          `/api/stock-units/${cajas[0].id}/recostear/alcance?alcance=existencias`,
+        )
         .set(auth())
         .expect(200);
       // Las tres que quedan en inventario; la vendida no.
@@ -274,6 +278,44 @@ describe('Detallar individual: costo, referencia y baja (e2e)', () => {
       expect(String(res.body.message)).toMatch(/ya está en esa referencia/i);
     });
 
+    it('a otra talla por su nombre: la variante se crea si no existe y la existencia se mueve', async () => {
+      // «Este par es 47, no 41»: la 47 no tiene variante en esta referencia,
+      // y aun así el cambio sale de una, sin ir a Productos a crearla.
+      const antesB = await existenciaDe(varianteB);
+      const res = await request(app.getHttpServer())
+        .post(`/api/stock-units/${cajas[0].id}/reasignar`)
+        .set(auth())
+        .send({ size: '47' })
+        .expect(201);
+      expect(res.body.barcode).toBe(cajas[0].barcode);
+      expect(res.body.variantId).not.toBe(varianteB);
+      expect(await existenciaDe(varianteB)).toBe(antesB - 10);
+      expect(await existenciaDe(res.body.variantId)).toBe(10);
+
+      const rastro = await request(app.getHttpServer())
+        .get(`/api/stock-units/trace/${cajas[0].barcode}`)
+        .set(auth())
+        .expect(200);
+      expect(rastro.body.unit.size?.name).toBe('47');
+    });
+
+    it('a la misma talla y color en la que ya está, no', async () => {
+      const res = await request(app.getHttpServer())
+        .post(`/api/stock-units/${cajas[0].id}/reasignar`)
+        .set(auth())
+        .send({ size: '47' })
+        .expect(400);
+      expect(String(res.body.message)).toMatch(/ya está en esa talla/i);
+    });
+
+    it('sin talla ni color, no hay a qué pasarlo', async () => {
+      await request(app.getHttpServer())
+        .post(`/api/stock-units/${cajas[0].id}/reasignar`)
+        .set(auth())
+        .send({})
+        .expect(400);
+    });
+
     it('no reasigna algo que ya se vendió', async () => {
       const res = await request(app.getHttpServer())
         .post(`/api/stock-units/${cajas[1].id}/reasignar`)
@@ -302,7 +344,10 @@ describe('Detallar individual: costo, referencia y baja (e2e)', () => {
         .expect(200);
       expect(rastro.body.unit.status).toBe('WRITTEN_OFF');
       const baja = (
-        rastro.body.events as { eventType: string; metadata?: { motivo?: string } }[]
+        rastro.body.events as {
+          eventType: string;
+          metadata?: { motivo?: string };
+        }[]
       ).find((e) => e.eventType === 'WRITTEN_OFF');
       expect(baja?.metadata?.motivo).toBe('Caja mojada en el transporte');
     });
