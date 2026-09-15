@@ -1093,9 +1093,18 @@ export class ProductsService {
       .where('v.is_active = true')
       .andWhere('p.status = :status', { status: 'ACTIVE' })
       .andWhere('p.tenant_id = :tenantId', { tenantId })
+      // También por el **código físico** de una caja o un par
+      // (`stock_units.barcode`): es el que está impreso en el sticker y el que
+      // la pistola manda. Sin esto, Cesión, traslados y cualquier pantalla con
+      // este buscador contestaban «no existe» al escanear una etiqueta: el
+      // buscador miraba `product_variants.barcode`, que es otro código. Exacto
+      // y no «contiene»: un código físico se escanea entero.
       .andWhere(
-        '(v.sku ILIKE :q OR v.barcode ILIKE :q OR p.name ILIKE :q OR p.brand ILIKE :q)',
-        { q: `%${query}%` },
+        `(v.sku ILIKE :q OR v.barcode ILIKE :q OR p.name ILIKE :q OR p.brand ILIKE :q
+          OR EXISTS (SELECT 1 FROM stock_units su
+                      WHERE su.tenant_id = :tenantId AND su.variant_id = v.id
+                        AND su.barcode = :codigoFisico))`,
+        { q: `%${query}%`, codigoFisico: query.trim() },
       );
 
     // Filtro por tipo de categoría (perfumería): STANDARD | ESSENCE | FRASCO.

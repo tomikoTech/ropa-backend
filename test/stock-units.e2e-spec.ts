@@ -331,6 +331,31 @@ describe('Recepción por cajas y apertura de cajas (e2e)', () => {
     expect(res.body.data[0].variants.length).toBeGreaterThan(0);
   });
 
+  it('el buscador de variantes (Cesión, traslados…) también encuentra por el código físico', async () => {
+    // AMAWAD escaneó el sticker de un par en Cesión y el sistema dijo «no
+    // existe»: ese buscador miraba solo el código de la talla.
+    const list = await request(app.getHttpServer())
+      .get(`/api/stock-units?boxLineId=${boxLineId}`)
+      .set(auth());
+    const unit = list.body[0];
+
+    const res = await request(app.getHttpServer())
+      .get('/api/products/search')
+      .query({ q: unit.barcode })
+      .set(auth())
+      .expect(200);
+    expect(res.body).toHaveLength(1);
+    expect(res.body[0].id).toBe(unit.variantId);
+
+    // Un pedazo del código no es el código: no se adivina.
+    const parcial = await request(app.getHttpServer())
+      .get('/api/products/search')
+      .query({ q: unit.barcode.slice(0, 10) })
+      .set(auth())
+      .expect(200);
+    expect(parcial.body).toHaveLength(0);
+  });
+
   it('cada caja conserva su propio contenido esperado y permite detallar el real', async () => {
     const initial = await request(app.getHttpServer())
       .get(`/api/stock-units/${boxIds[0]}/contents`)
@@ -1705,9 +1730,7 @@ describe('Recepción por cajas y apertura de cajas (e2e)', () => {
         .set(auth())
         .send({
           warehouseId,
-          items: [
-            { variantId: variante.id, quantity: 1, unitPrice: 100000 },
-          ],
+          items: [{ variantId: variante.id, quantity: 1, unitPrice: 100000 }],
           payments: [{ method: 'EFECTIVO', amount: 100000 }],
         })
         .expect(201);
