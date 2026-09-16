@@ -310,4 +310,119 @@ export class ExhibicionService {
       };
     });
   }
+
+  /**
+   * Subir a la vitrina **ese** par o esa caja, por su código.
+   *
+   * «Veo la referencia y la vitrina pero no de dónde sale, qué código es,
+   * cuál quiero»: el panel elige por antigüedad; acá manda el sticker. La
+   * vitrina es la que surte el local donde está el bulto; si ese local surte
+   * varias, hay que decir cuál.
+   */
+  async exhibirPorCodigo(
+    orden: { codigo: string; vitrinaId?: string },
+    usuarioId: string,
+    tenantId: string,
+  ): Promise<{
+    movidas: number;
+    barcode: string;
+    esCaja: boolean;
+    vitrina: string;
+    desde: string;
+  }> {
+    const codigo = orden.codigo.trim();
+    return this.dataSource.transaction(async (manager) => {
+      const [bulto] = await manager.query<
+        {
+          id: string;
+          barcode: string;
+          kind: string;
+          status: string;
+          quantity: number;
+          variant_id: string | null;
+          warehouse_id: string;
+          bodega: string;
+          bodega_es_vitrina: boolean;
+        }[]
+      >(
+        `SELECT su.id, su.barcode, su.kind, su.status, su.quantity, su.variant_id,
+                su.warehouse_id, w.name AS bodega, w.is_exhibition AS bodega_es_vitrina
+           FROM stock_units su
+           JOIN warehouses w ON w.id = su.warehouse_id
+          WHERE su.tenant_id = $1 AND su.barcode = $2`,
+        [tenantId, codigo],
+      );
+      if (!bulto) {
+        throw new NotFoundException(
+          'Ese código no es de ninguna caja ni par de la tienda.',
+        );
+      }
+      const que = bulto.kind === 'BOX' ? 'La caja' : 'El par';
+      if (bulto.bodega_es_vitrina) {
+        throw new BadRequestException(
+          `${que} ${bulto.barcode} ya está en la vitrina "${bulto.bodega}".`,
+        );
+      }
+      if (bulto.status !== 'IN_STOCK') {
+        throw new BadRequestException(
+          `${que} ${bulto.barcode} ya no está disponible en el local.`,
+        );
+      }
+      if (!bulto.variant_id) {
+        throw new BadRequestException(
+          `${que} ${bulto.barcode} no tiene talla asociada: no se puede exhibir.`,
+        );
+      }
+
+      const vitrinas = await manager.query<{ id: string; name: string }[]>(
+        `SELECT id, name FROM warehouses
+          WHERE tenant_id = $1 AND is_exhibition = true AND is_active = true
+            AND exhibition_of_warehouse_id = $2
+          ORDER BY name`,
+        [tenantId, bulto.warehouse_id],
+      );
+      if (vitrinas.length === 0) {
+        throw new BadRequestException(
+          `${que} está en "${bulto.bodega}" y ese local no tiene vitrina. ` +
+            'Créala en Exhibición diciendo que la surte ese local.',
+        );
+      }
+      const vitrina = orden.vitrinaId
+        ? vitrinas.find((v) => v.id === orden.vitrinaId)
+        : vitrinas.length === 1
+          ? vitrinas[0]
+          : undefined;
+      if (!vitrina) {
+        throw new BadRequestException(
+          orden.vitrinaId
+            ? `Esa vitrina no la surte "${bulto.bodega}".`
+            : `"${bulto.bodega}" surte ${vitrinas.length} vitrinas: di a cuál va.`,
+        );
+      }
+
+      const cantidad = Number(bulto.quantity) || 1;
+      await this.ledger.trasladar(manager, {
+        variantId: bulto.variant_id,
+        desdeWarehouseId: bulto.warehouse_id,
+        hastaWarehouseId: vitrina.id,
+        cantidad,
+        motivo: 'EXHIBICION_IN',
+        motivos: { salida: 'EXHIBICION_OUT', entrada: 'EXHIBICION_IN' },
+        notas: `Subido a la vitrina "${vitrina.name}" (${bulto.barcode})`,
+        usuarioId,
+        unidades: [bulto.id],
+        tenantId,
+      });
+      this.log.log(
+        `Exhibición: ${bulto.kind} ${bulto.barcode} subió a la vitrina ${vitrina.name}.`,
+      );
+      return {
+        movidas: cantidad,
+        barcode: bulto.barcode,
+        esCaja: bulto.kind === 'BOX',
+        vitrina: vitrina.name,
+        desde: bulto.bodega,
+      };
+    });
+  }
 }

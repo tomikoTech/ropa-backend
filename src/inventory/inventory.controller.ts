@@ -24,7 +24,7 @@ import { TransferStockDto } from './dto/transfer-stock.dto.js';
 import { TrasladoEnLoteDto } from './dto/traslado-en-lote.dto.js';
 import { StockIntegrityService } from './ledger/stock-integrity.service.js';
 import { ExhibicionService } from './exhibicion.service.js';
-import { ExhibirDto } from './dto/exhibir.dto.js';
+import { ExhibirDto, ExhibirPorCodigoDto } from './dto/exhibir.dto.js';
 import {
   CloseTransferDto,
   ReturnTransferDto,
@@ -281,6 +281,18 @@ export class InventoryController {
     @Query('localId') localId?: string,
   ) {
     return this.exhibicion.pendientes(tenantId, { vitrinaId, localId });
+  }
+
+  @Post('exhibicion/exhibir-codigo')
+  @ApiOperation({
+    summary: 'Subir a la vitrina ese par o esa caja, por su código',
+  })
+  exhibirPorCodigo(
+    @Body() dto: ExhibirPorCodigoDto,
+    @CurrentUser() user: User,
+    @TenantId() tenantId: string,
+  ) {
+    return this.exhibicion.exhibirPorCodigo(dto, user.id, tenantId);
   }
 
   @Post('exhibicion/exhibir')
