@@ -8,6 +8,11 @@ import { DataSource, EntityManager } from 'typeorm';
 import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
 import { StockLedgerService } from './ledger/stock-ledger.service.js';
 import { faltaPorExhibir, type ConfiguracionExhibicion } from './exhibicion.js';
+import {
+  huecosDeLaPlantilla,
+  type FilaDeLaPlantilla,
+  type HuecoDeVitrina,
+} from './plantilla-de-vitrina.js';
 
 /** Una talla del local que se puede subir a la vitrina. */
 export interface TallaDisponible {
@@ -300,6 +305,9 @@ export class ExhibicionService {
         tenantId,
       });
 
+      await this.anotarEnPlantilla(manager, tenantId, vitrina.id, {
+        variantId: orden.variantId,
+      });
       this.log.log(
         `Exhibición: ${orden.cantidad} de la variante ${orden.variantId} ` +
           `subieron a la vitrina ${vitrina.name}.`,
@@ -413,6 +421,9 @@ export class ExhibicionService {
         unidades: [bulto.id],
         tenantId,
       });
+      await this.anotarEnPlantilla(manager, tenantId, vitrina.id, {
+        variantId: bulto.variant_id,
+      });
       this.log.log(
         `Exhibición: ${bulto.kind} ${bulto.barcode} subió a la vitrina ${vitrina.name}.`,
       );
@@ -423,6 +434,207 @@ export class ExhibicionService {
         vitrina: vitrina.name,
         desde: bulto.bodega,
       };
+    });
+  }
+
+  /**
+   * La referencia gana su puesto en la vitrina la primera vez que se exhibe.
+   * Ver `plantilla-de-vitrina.ts`.
+   */
+  private async anotarEnPlantilla(
+    manager: EntityManager,
+    tenantId: string,
+    vitrinaId: string,
+    de: { variantId: string },
+  ): Promise<void> {
+    await manager.query(
+      `INSERT INTO vitrina_plantilla (tenant_id, vitrina_id, product_id)
+       SELECT $1, $2, pv.product_id FROM product_variants pv WHERE pv.id = $3
+       ON CONFLICT DO NOTHING`,
+      [tenantId, vitrinaId, de.variantId],
+    );
+  }
+
+  /** La plantilla con su estado: cuántos hay en la vitrina de cada puesto. */
+  private async filasDeLaPlantilla(
+    tenantId: string,
+    filtro?: { vitrinaId?: string | null },
+  ): Promise<FilaDeLaPlantilla[]> {
+    const filas = await this.dataSource.query<
+      {
+        vitrina_id: string;
+        vitrina_nombre: string;
+        local_id: string;
+        local_nombre: string;
+        product_id: string;
+        product_nombre: string;
+        referencia: string | null;
+        image_url: string | null;
+        en_vitrina: string;
+        en_local: string;
+        vendidas: string;
+        ultima_variant_id: string | null;
+        ultima_talla: string | null;
+        ultima_codigo: string | null;
+      }[]
+    >(
+      `SELECT v.id AS vitrina_id, v.name AS vitrina_nombre,
+              l.id AS local_id, l.name AS local_nombre,
+              p.id AS product_id, p.name AS product_nombre, p.sku_prefix AS referencia,
+              p.image_url,
+              COALESCE((SELECT SUM(s.quantity) FROM stock s JOIN product_variants pv ON pv.id = s.variant_id
+                         WHERE pv.product_id = p.id AND s.warehouse_id = v.id), 0) AS en_vitrina,
+              COALESCE((SELECT SUM(s.quantity) FROM stock s JOIN product_variants pv ON pv.id = s.variant_id
+                         WHERE pv.product_id = p.id AND s.warehouse_id = l.id), 0) AS en_local,
+              (SELECT COUNT(*) FROM stock_units su
+                WHERE su.product_id = p.id AND su.warehouse_id = v.id AND su.status = 'SOLD') AS vendidas,
+              u.variant_id AS ultima_variant_id,
+              COALESCE(sz.name, vsz.name) AS ultima_talla,
+              u.barcode AS ultima_codigo
+         FROM vitrina_plantilla t
+         JOIN warehouses v ON v.id = t.vitrina_id AND v.is_exhibition = true AND v.is_active = true
+         JOIN warehouses l ON l.id = v.exhibition_of_warehouse_id AND l.is_active = true
+         JOIN products p ON p.id = t.product_id AND p.status = 'ACTIVE'
+         LEFT JOIN LATERAL (
+           SELECT su.variant_id, su.size_id, su.barcode FROM stock_units su
+            WHERE su.product_id = p.id AND su.warehouse_id = v.id AND su.status = 'SOLD'
+            ORDER BY su.updated_at DESC LIMIT 1
+         ) u ON true
+         LEFT JOIN sizes sz ON sz.id = u.size_id
+         -- Una caja no trae talla propia: se toma la de su variante.
+         LEFT JOIN product_variants uv ON uv.id = u.variant_id
+         LEFT JOIN sizes vsz ON vsz.id = uv.size_id
+        WHERE t.tenant_id = $1
+          AND ($2::uuid IS NULL OR v.id = $2::uuid)
+        ORDER BY l.name, v.name, p.name`,
+      [tenantId, filtro?.vitrinaId ?? null],
+    );
+    if (!filas.length) return [];
+
+    // Lo que hay en las demás bodegas, por referencia, para saber a quién pedirle.
+    const productIds = [...new Set(filas.map((f) => f.product_id))];
+    const otras = await this.dataSource.query<
+      { product_id: string; warehouse_id: string; bodega: string; cantidad: string }[]
+    >(
+      `SELECT pv.product_id, s.warehouse_id, w.name AS bodega, SUM(s.quantity) AS cantidad
+         FROM stock s
+         JOIN product_variants pv ON pv.id = s.variant_id
+         JOIN warehouses w ON w.id = s.warehouse_id AND w.is_active = true AND w.is_exhibition = false
+        WHERE s.tenant_id = $1 AND pv.product_id = ANY($2::uuid[]) AND s.quantity > 0
+        GROUP BY pv.product_id, s.warehouse_id, w.name`,
+      [tenantId, productIds],
+    );
+
+    return filas.map((f) => ({
+      vitrinaId: f.vitrina_id,
+      vitrinaNombre: f.vitrina_nombre,
+      localId: f.local_id,
+      localNombre: f.local_nombre,
+      productId: f.product_id,
+      productNombre: f.product_nombre,
+      referencia: f.referencia,
+      imageUrl: f.image_url,
+      enVitrina: Number(f.en_vitrina),
+      enLocal: Number(f.en_local),
+      enOtras: otras
+        .filter((o) => o.product_id === f.product_id && o.warehouse_id !== f.local_id)
+        .map((o) => ({ bodegaId: o.warehouse_id, bodega: o.bodega, cantidad: Number(o.cantidad) })),
+      vendidasDeLaVitrina: Number(f.vendidas),
+      ultimaMuestra: f.ultima_variant_id
+        ? { variantId: f.ultima_variant_id, talla: f.ultima_talla ?? '', codigo: f.ultima_codigo }
+        : null,
+    }));
+  }
+
+  /** Los puestos vacíos de la vitrina y qué hacer con cada uno. */
+  async huecos(tenantId: string): Promise<HuecoDeVitrina[]> {
+    const config = await this.configuracion(this.dataSource.manager, tenantId);
+    if (!config.encendida) return [];
+    return huecosDeLaPlantilla(await this.filasDeLaPlantilla(tenantId));
+  }
+
+  /** La plantilla completa (llenos y huecos), para cambiar lo que se exhibe. */
+  async plantilla(
+    tenantId: string,
+    vitrinaId?: string | null,
+  ): Promise<(FilaDeLaPlantilla & { hueco: boolean })[]> {
+    const filas = await this.filasDeLaPlantilla(tenantId, { vitrinaId });
+    return filas.map((f) => ({ ...f, hueco: f.enVitrina <= 0 }));
+  }
+
+  /** La tienda decide que esa referencia ya no se muestra: pierde el puesto. */
+  async quitarDePlantilla(
+    tenantId: string,
+    vitrinaId: string,
+    productId: string,
+  ): Promise<{ quitado: boolean }> {
+    const r: unknown[] = await this.dataSource.query(
+      `DELETE FROM vitrina_plantilla WHERE tenant_id = $1 AND vitrina_id = $2 AND product_id = $3 RETURNING id`,
+      [tenantId, vitrinaId, productId],
+    );
+    return { quitado: r.length > 0 };
+  }
+
+  /**
+   * Bajar de la vitrina **ese** par o esa caja, por su código: vuelve al
+   * local que la surte. Es la mitad de «cambiar lo exhibido»: baja uno, sube
+   * otro. No toca la plantilla: el puesto sigue siendo de la referencia hasta
+   * que la tienda la quite.
+   */
+  async bajarPorCodigo(
+    orden: { codigo: string },
+    usuarioId: string,
+    tenantId: string,
+  ): Promise<{ movidas: number; barcode: string; esCaja: boolean; vitrina: string; local: string }> {
+    const codigo = orden.codigo.trim();
+    return this.dataSource.transaction(async (manager) => {
+      const [bulto] = await manager.query<
+        {
+          id: string;
+          barcode: string;
+          kind: string;
+          status: string;
+          quantity: number;
+          variant_id: string | null;
+          warehouse_id: string;
+          vitrina: string;
+          es_vitrina: boolean;
+          local_id: string | null;
+          local: string | null;
+        }[]
+      >(
+        `SELECT su.id, su.barcode, su.kind, su.status, su.quantity, su.variant_id, su.warehouse_id,
+                w.name AS vitrina, w.is_exhibition AS es_vitrina, l.id AS local_id, l.name AS local
+           FROM stock_units su
+           JOIN warehouses w ON w.id = su.warehouse_id
+           LEFT JOIN warehouses l ON l.id = w.exhibition_of_warehouse_id
+          WHERE su.tenant_id = $1 AND su.barcode = $2`,
+        [tenantId, codigo],
+      );
+      if (!bulto) throw new NotFoundException('Ese código no es de ninguna caja ni par de la tienda.');
+      const que = bulto.kind === 'BOX' ? 'La caja' : 'El par';
+      if (!bulto.es_vitrina) {
+        throw new BadRequestException(`${que} ${bulto.barcode} no está en una vitrina: está en "${bulto.vitrina}".`);
+      }
+      if (bulto.status !== 'IN_STOCK') {
+        throw new BadRequestException(`${que} ${bulto.barcode} ya no está disponible.`);
+      }
+      if (!bulto.local_id || !bulto.variant_id) {
+        throw new BadRequestException(`La vitrina "${bulto.vitrina}" no tiene local al que devolverlo.`);
+      }
+      const cantidad = Number(bulto.quantity) || 1;
+      await this.ledger.trasladar(manager, {
+        variantId: bulto.variant_id,
+        desdeWarehouseId: bulto.warehouse_id,
+        hastaWarehouseId: bulto.local_id,
+        cantidad,
+        motivo: 'TRANSFER_OUT',
+        notas: `Bajado de la vitrina "${bulto.vitrina}" (${bulto.barcode})`,
+        usuarioId,
+        unidades: [bulto.id],
+        tenantId,
+      });
+      return { movidas: cantidad, barcode: bulto.barcode, esCaja: bulto.kind === 'BOX', vitrina: bulto.vitrina, local: bulto.local! };
     });
   }
 }

@@ -29,6 +29,7 @@ import { Warehouse } from './entities/warehouse.entity.js';
 import { Stock } from './entities/stock.entity.js';
 import { StockMovement } from './entities/stock-movement.entity.js';
 import { StockTransfer } from './entities/stock-transfer.entity.js';
+import { VitrinaPlantilla } from './entities/vitrina-plantilla.entity.js';
 import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
 import { ProductsModule } from '../products/products.module.js';
 import { SaleItem } from '../pos/entities/sale-item.entity.js';
@@ -56,6 +57,7 @@ import { PurchasesModule } from '../purchases/purchases.module.js';
       StockMovement,
       StockTransfer,
       StoreSettings,
+      VitrinaPlantilla,
     ]),
     ProductsModule,
     StockLedgerModule,

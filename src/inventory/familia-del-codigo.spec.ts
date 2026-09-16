@@ -51,8 +51,8 @@ describe('la familia de un código', () => {
     ]);
     const t41 = familia.tallas.find((t) => t.talla === '41')!;
     expect(t41.porBodega).toEqual([
-      { bodegaId: 'W1', bodega: 'AMAWAD', cantidad: 2 },
-      { bodegaId: 'W2', bodega: 'LOCAL 214', cantidad: 1 },
+      { bodegaId: 'W1', bodega: 'AMAWAD', cantidad: 2, esVitrina: false },
+      { bodegaId: 'W2', bodega: 'LOCAL 214', cantidad: 1, esVitrina: false },
     ]);
     expect(t41.pares.map((p) => `${p.codigo}@${p.bodega}`)).toEqual([
       'PAR41A@AMAWAD',
@@ -91,8 +91,8 @@ describe('la familia de un código', () => {
     expect(familia.totales).toEqual({
       pares: 16,
       porBodega: [
-        { bodegaId: 'W2', bodega: 'LOCAL 214', cantidad: 13 },
-        { bodegaId: 'W1', bodega: 'AMAWAD', cantidad: 3 },
+        { bodegaId: 'W2', bodega: 'LOCAL 214', cantidad: 13, esVitrina: false },
+        { bodegaId: 'W1', bodega: 'AMAWAD', cantidad: 3, esVitrina: false },
       ],
     });
   });

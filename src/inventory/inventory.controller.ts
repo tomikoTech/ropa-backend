@@ -283,6 +283,45 @@ export class InventoryController {
     return this.exhibicion.pendientes(tenantId, { vitrinaId, localId });
   }
 
+  @Get('exhibicion/huecos')
+  @ApiOperation({
+    summary:
+      'Los puestos vacíos de la vitrina (se vendió la muestra) y qué hacer con cada uno: reponer del local o solicitar',
+  })
+  huecosDeVitrina(@TenantId() tenantId: string) {
+    return this.exhibicion.huecos(tenantId);
+  }
+
+  @Get('exhibicion/plantilla')
+  @ApiOperation({ summary: 'La plantilla de la vitrina: qué referencias tienen puesto, llenas o vacías' })
+  @ApiQuery({ name: 'vitrinaId', required: false })
+  plantillaDeVitrina(
+    @TenantId() tenantId: string,
+    @Query('vitrinaId') vitrinaId?: string,
+  ) {
+    return this.exhibicion.plantilla(tenantId, vitrinaId || null);
+  }
+
+  @Delete('exhibicion/plantilla/:vitrinaId/:productId')
+  @ApiOperation({ summary: 'Esa referencia ya no se exhibe: pierde su puesto en la vitrina' })
+  quitarDePlantilla(
+    @Param('vitrinaId', ParseUUIDPipe) vitrinaId: string,
+    @Param('productId', ParseUUIDPipe) productId: string,
+    @TenantId() tenantId: string,
+  ) {
+    return this.exhibicion.quitarDePlantilla(tenantId, vitrinaId, productId);
+  }
+
+  @Post('exhibicion/bajar-codigo')
+  @ApiOperation({ summary: 'Bajar de la vitrina ese par o esa caja, por su código (vuelve al local)' })
+  bajarPorCodigo(
+    @Body() dto: ExhibirPorCodigoDto,
+    @CurrentUser() user: User,
+    @TenantId() tenantId: string,
+  ) {
+    return this.exhibicion.bajarPorCodigo(dto, user.id, tenantId);
+  }
+
   @Post('exhibicion/exhibir-codigo')
   @ApiOperation({
     summary: 'Subir a la vitrina ese par o esa caja, por su código',

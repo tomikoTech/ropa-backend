@@ -61,6 +61,8 @@ export interface CantidadPorBodega {
   bodegaId: string;
   bodega: string;
   cantidad: number;
+  /** Es una vitrina: se muestra pegada a su local, no como bodega aparte. */
+  esVitrina?: boolean;
 }
 
 export interface ParDeLaFamilia {
@@ -167,8 +169,19 @@ export function armarFamilia(fuente: {
       acumulado.set(f.warehouseId, (acumulado.get(f.warehouseId) ?? 0) + n);
     }
     return [...acumulado.entries()]
-      .map(([bodegaId, cantidad]) => ({ bodegaId, bodega: bodega(bodegaId), cantidad }))
-      .sort((a, b) => b.cantidad - a.cantidad || a.bodega.localeCompare(b.bodega, 'es'));
+      .map(([bodegaId, cantidad]) => ({
+        bodegaId,
+        bodega: bodega(bodegaId),
+        cantidad,
+        esVitrina: vitrinas.has(bodegaId),
+      }))
+      // La vitrina va después de su local, no compite con él.
+      .sort(
+        (a, b) =>
+          Number(a.esVitrina) - Number(b.esVitrina) ||
+          b.cantidad - a.cantidad ||
+          a.bodega.localeCompare(b.bodega, 'es'),
+      );
   };
 
   const tallas: TallaDeLaFamilia[] = fuente.variantes
