@@ -46,6 +46,7 @@ import { ProductsService } from '../products/products.service.js';
 import { Size } from '../catalogs/entities/size.entity.js';
 import { Color } from '../catalogs/entities/color.entity.js';
 import { Warehouse } from './entities/warehouse.entity.js';
+import { armarFamilia, type Familia } from './familia-del-codigo.js';
 import { Stand } from './entities/stand.entity.js';
 import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
 import { Shelf } from './entities/shelf.entity.js';
@@ -1826,6 +1827,104 @@ export class StockUnitsService {
         'No existe ninguna caja ni par con ese código',
       );
     return unit;
+  }
+
+  /**
+   * La familia de un código: las demás tallas del modelo con su existencia
+   * por bodega, la caja de la que salió con sus hermanos, y las otras cajas.
+   * Acepta el código de un bulto, el de una talla, un SKU o la referencia.
+   * Ver `familia-del-codigo.ts`.
+   */
+  async familiaDelCodigo(codigo: string, tenantId: string): Promise<Familia> {
+    const texto = codigo.trim();
+    if (!texto) throw new NotFoundException('Código vacío');
+    const variantRepo = this.dataSource.getRepository(ProductVariant);
+
+    let productId: string | null = null;
+    let unidadId: string | null = null;
+    let variantId: string | null = null;
+
+    const unidad = await this.unitRepo.findOne({
+      where: { barcode: texto, tenantId },
+    });
+    if (unidad) {
+      productId = unidad.productId;
+      unidadId = unidad.id;
+    } else {
+      const variante = await variantRepo
+        .createQueryBuilder('v')
+        .innerJoin('v.product', 'p', 'p.tenant_id = :tenantId', { tenantId })
+        .where('v.barcode = :texto OR LOWER(v.sku) = LOWER(:texto)', { texto })
+        .getOne();
+      if (variante) {
+        productId = variante.productId;
+        variantId = variante.id;
+      } else {
+        const producto = await this.dataSource
+          .getRepository(Product)
+          .createQueryBuilder('p')
+          .where('p.tenant_id = :tenantId', { tenantId })
+          .andWhere('LOWER(p.sku_prefix) = LOWER(:texto)', { texto })
+          .getOne();
+        if (!producto) {
+          throw new NotFoundException('No hay ningún producto con ese código');
+        }
+        productId = producto.id;
+      }
+    }
+
+    const producto = await this.dataSource
+      .getRepository(Product)
+      .findOne({ where: { id: productId, tenantId } });
+    if (!producto) throw new NotFoundException('Producto no encontrado');
+
+    const variantes = await variantRepo.find({
+      where: { productId },
+      relations: ['sizeRef', 'colorRef'],
+    });
+    const variantIds = variantes.map((v) => v.id);
+    const [stocks, unidades, bodegas] = await Promise.all([
+      variantIds.length
+        ? this.dataSource
+            .getRepository(Stock)
+            .find({ where: { variantId: In(variantIds), tenantId } })
+        : Promise.resolve([]),
+      this.unitRepo.find({
+        where: { productId, tenantId },
+        relations: ['size'],
+        order: { createdAt: 'ASC' },
+        // Un modelo grande tiene cientos de pares vendidos: con esto basta
+        // para ver la familia; el historial completo vive en Cajas.
+        take: 600,
+      }),
+      this.dataSource.getRepository(Warehouse).find({ where: { tenantId } }),
+    ]);
+
+    return armarFamilia({
+      producto,
+      variantes: variantes.map((v) => ({
+        id: v.id,
+        sizeName: v.sizeName,
+        colorName: v.colorName,
+        barcode: v.barcode,
+        sku: v.sku,
+        isActive: v.isActive,
+      })),
+      stocks,
+      bodegas,
+      unidades: unidades.map((u) => ({
+        id: u.id,
+        barcode: u.barcode,
+        kind: u.kind,
+        status: u.status,
+        variantId: u.variantId,
+        sizeName: u.size?.name ?? null,
+        warehouseId: u.warehouseId,
+        quantity: u.quantity,
+        parentUnitId: u.parentUnitId,
+      })),
+      codigo: { unidadId, variantId },
+    });
   }
 
   async traceByBarcode(barcode: string, tenantId: string) {

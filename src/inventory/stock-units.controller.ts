@@ -43,6 +43,15 @@ export class StockUnitsController {
     return this.units.findByBarcode(barcode, tenantId);
   }
 
+  @Get('familia/:codigo')
+  @ApiOperation({
+    summary:
+      'La familia de un código: las demás tallas con existencia por bodega, la caja de origen con sus hermanos y las otras cajas del modelo',
+  })
+  familia(@Param('codigo') codigo: string, @TenantId() tenantId: string) {
+    return this.units.familiaDelCodigo(codigo, tenantId);
+  }
+
   @Get('trace/:barcode')
   @ApiOperation({
     summary: 'Consulta operativa e historial de un código físico',
