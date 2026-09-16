@@ -19,13 +19,12 @@ function formatCOP(value: number): string {
  * para códigos que no siguen el formato (importados, viejos), en cuyo caso la
  * etiqueta simplemente no lo muestra.
  */
+// Sin la fecha: en el sticker nadie la lee y quitaba espacio. La fecha sigue
+// dentro del código y en las pantallas.
 function desgloseDelCodigo(barcode: string): string | undefined {
   const p = parseStockBarcode(barcode);
   if (!p) return undefined;
-  const dd = String(p.day).padStart(2, '0');
-  const mm = String(p.month).padStart(2, '0');
-  const aa = String(p.year % 100).padStart(2, '0');
-  return `${dd}/${mm}/${aa} · Pedido ${p.orderSequence} · N.º ${p.unitSequence}`;
+  return `Pedido ${p.orderSequence} · N.º ${p.unitSequence}`;
 }
 
 @Injectable()

@@ -118,7 +118,8 @@ export function buildLabelZpl(
   lines.push(
     `^FO${textLeft},${dots(1.5)}^A0N,${dots(letraGrande)},${dots(letraGrande)}^FB${width - textLeft - margin},1,0,L^FD${truncate(enCabecera, 28)}^FS`,
   );
-  const head2 = [data.brand, data.reference && `Ref ${data.reference}`]
+  // Solo la marca: el «Ref XXX» se quitó del sticker a pedido de la tienda.
+  const head2 = [data.brand]
     .filter(Boolean)
     .join('  ');
   if (head2) {

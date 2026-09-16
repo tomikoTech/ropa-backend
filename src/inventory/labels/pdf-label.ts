@@ -138,7 +138,8 @@ export function buildLabelsPdf(
     }
 
     escribir(label.productName, lay.nombre, { font: 'Helvetica-Bold' });
-    const head2 = [label.brand, label.reference && `Ref ${label.reference}`]
+    // Solo la marca: el «Ref XXX» se quitó del sticker a pedido de la tienda.
+    const head2 = [label.brand]
       .filter(Boolean)
       .join('  ·  ');
     escribir(head2, lay.marca, { color: '#444' });
