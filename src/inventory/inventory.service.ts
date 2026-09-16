@@ -27,6 +27,12 @@ import { CreateWarehouseDto } from './dto/create-warehouse.dto.js';
 import { UpdateWarehouseDto } from './dto/update-warehouse.dto.js';
 import { AdjustStockDto } from './dto/adjust-stock.dto.js';
 import { TransferStockDto } from './dto/transfer-stock.dto.js';
+import { TrasladoEnLoteDto } from './dto/traslado-en-lote.dto.js';
+import {
+  bultosRepetidos,
+  numerosDeLosRenglones,
+} from './remision-en-lote.js';
+import { randomUUID } from 'node:crypto';
 import { MovementType } from '../common/enums/movement-type.enum.js';
 import { ProductVariant } from '../products/entities/product-variant.entity.js';
 import { Product } from '../products/entities/product.entity.js';
@@ -46,6 +52,8 @@ import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
 export interface TrasladoConContexto {
   id: string;
   transferNumber: string | null;
+  /** Con qué otros renglones viajó (una remisión de varias cajas y pares). */
+  loteId: string | null;
   type: string;
   status: string;
   quantity: number;
@@ -867,51 +875,15 @@ export class InventoryService {
     }
     // El bulto escaneado manda: tiene que estar disponible, en la bodega de
     // origen, ser de esa talla, e irse entero.
-    if (dto.stockUnitId) {
-      const bulto = await this.dataSource
-        .getRepository(StockUnit)
-        .findOne({ where: { id: dto.stockUnitId, tenantId } });
-      if (!bulto) throw new NotFoundException('El código escaneado no existe');
-      if (bulto.status !== StockUnitStatus.IN_STOCK) {
-        throw new BadRequestException(
-          `${bulto.kind === StockUnitKind.BOX ? 'La caja' : 'El par'} ${bulto.barcode} ya no está disponible.`,
-        );
-      }
-      if (bulto.warehouseId !== dto.fromWarehouseId) {
-        throw new BadRequestException(
-          `${bulto.kind === StockUnitKind.BOX ? 'La caja' : 'El par'} ${bulto.barcode} no está en la bodega de origen elegida.`,
-        );
-      }
-      if (bulto.variantId !== dto.variantId) {
-        throw new BadRequestException(
-          'El código escaneado no es de esa talla.',
-        );
-      }
-      if (dto.quantity !== bulto.quantity) {
-        const pares = Number(bulto.quantity);
-        throw new BadRequestException(
-          `${bulto.kind === StockUnitKind.BOX ? 'La caja' : 'El par'} ${bulto.barcode} se traslada entero: ${pares} ${pares > 1 ? 'pares' : 'par'}.`,
-        );
-      }
-    }
+    await this.validarBultoDelTraslado(
+      this.dataSource.manager,
+      dto,
+      dto.fromWarehouseId,
+      tenantId,
+    );
     const unidades = dto.stockUnitId ? [dto.stockUnitId] : undefined;
 
-    // Remisiones (F3): con confirmación de recepción el traslado NO es inmediato,
-    // se descuenta del origen y queda en tránsito (PENDING) hasta que el destino
-    // lo reciba.
-    //
-    // Lo decide la petición si lo dice (`requireConfirmation`) y, si no, el
-    // ajuste de la tienda — que es el comportamiento de siempre. Dejar que solo
-    // manda el ajuste global hacía que la misma petición hiciera dos cosas
-    // distintas según una configuración que quien llama no ve.
-    let requireConfirmation = dto.requireConfirmation;
-    if (requireConfirmation === undefined) {
-      const settings = await this.settingsRepository.findOne({
-        where: { tenantId },
-      });
-      requireConfirmation = !!settings?.transferConfirmationEnabled;
-    }
-    if (requireConfirmation) {
+    if (await this.debeConfirmarse(dto.requireConfirmation, tenantId)) {
       return this.createInTransitTransfer(dto, userId, tenantId);
     }
 
@@ -985,6 +957,209 @@ export class InventoryService {
 
       return { from: from!, to: to!, transfer };
     });
+  }
+
+  /**
+   * El bulto escaneado tiene que estar disponible, en la bodega de origen,
+   * ser de esa talla, e irse entero. Sin bulto no hay nada que validar.
+   */
+  private async validarBultoDelTraslado(
+    manager: import('typeorm').EntityManager,
+    renglon: { variantId: string; quantity: number; stockUnitId?: string | null },
+    fromWarehouseId: string,
+    tenantId: string,
+  ): Promise<void> {
+    if (!renglon.stockUnitId) return;
+    const bulto = await manager
+      .getRepository(StockUnit)
+      .findOne({ where: { id: renglon.stockUnitId, tenantId } });
+    if (!bulto) throw new NotFoundException('El código escaneado no existe');
+    const que = bulto.kind === StockUnitKind.BOX ? 'La caja' : 'El par';
+    if (bulto.status !== StockUnitStatus.IN_STOCK) {
+      throw new BadRequestException(
+        `${que} ${bulto.barcode} ya no está disponible.`,
+      );
+    }
+    if (bulto.warehouseId !== fromWarehouseId) {
+      throw new BadRequestException(
+        `${que} ${bulto.barcode} no está en la bodega de origen elegida.`,
+      );
+    }
+    if (bulto.variantId !== renglon.variantId) {
+      throw new BadRequestException('El código escaneado no es de esa talla.');
+    }
+    if (renglon.quantity !== bulto.quantity) {
+      const pares = Number(bulto.quantity);
+      throw new BadRequestException(
+        `${que} ${bulto.barcode} se traslada entero: ${pares} ${pares > 1 ? 'pares' : 'par'}.`,
+      );
+    }
+  }
+
+  /**
+   * Remisiones (F3): con confirmación de recepción el traslado NO es
+   * inmediato, se descuenta del origen y queda en tránsito (PENDING) hasta que
+   * el destino lo reciba.
+   *
+   * Lo decide la petición si lo dice (`requireConfirmation`) y, si no, el
+   * ajuste de la tienda — que es el comportamiento de siempre. Dejar que solo
+   * mande el ajuste global hacía que la misma petición hiciera dos cosas
+   * distintas según una configuración que quien llama no ve.
+   */
+  private async debeConfirmarse(
+    requireConfirmation: boolean | undefined,
+    tenantId: string,
+  ): Promise<boolean> {
+    if (requireConfirmation !== undefined) return requireConfirmation;
+    const settings = await this.settingsRepository.findOne({
+      where: { tenantId },
+    });
+    return !!settings?.transferConfirmationEnabled;
+  }
+
+  /**
+   * Una remisión con varios renglones: cajas y pares escaneados, o tallas con
+   * cantidad, de una bodega a otra, con un solo número y en una sola
+   * transacción —o van todos o no va ninguno—.
+   *
+   * Cada renglón es una fila de `stock_transfers` atada por `loteId`: recibir,
+   * rechazar y devolver siguen funcionando por renglón. Ver
+   * `remision-en-lote.ts`.
+   */
+  async trasladarEnLote(
+    dto: TrasladoEnLoteDto,
+    userId: string,
+    tenantId: string,
+  ): Promise<{
+    loteId: string;
+    transferNumber: string;
+    status: 'PENDING' | 'RECEIVED';
+    transfers: StockTransfer[];
+  }> {
+    if (dto.fromWarehouseId === dto.toWarehouseId) {
+      throw new BadRequestException(
+        'La bodega origen y destino deben ser diferentes',
+      );
+    }
+    const repetidos = bultosRepetidos(dto.items);
+    if (repetidos.length) {
+      const codigos = await this.dataSource
+        .getRepository(StockUnit)
+        .find({ where: { id: In(repetidos), tenantId } });
+      throw new BadRequestException(
+        `Hay un bulto repetido en la remisión: ${codigos.map((c) => c.barcode).join(', ') || repetidos.length}.`,
+      );
+    }
+    const enTransito = await this.debeConfirmarse(
+      dto.requireConfirmation,
+      tenantId,
+    );
+
+    const { loteId, base, ids } = await this.dataSource.transaction(
+      async (manager) => {
+        const transferRepo = manager.getRepository(StockTransfer);
+        for (const renglon of dto.items) {
+          await this.validarBultoDelTraslado(
+            manager,
+            renglon,
+            dto.fromWarehouseId,
+            tenantId,
+          );
+        }
+        const base = await this.siguienteNumeroDeTraslado(manager, tenantId);
+        const numeros = numerosDeLosRenglones(base, dto.items.length);
+        const loteId = randomUUID();
+        const ahora = new Date();
+        const ids: string[] = [];
+
+        for (const [i, renglon] of dto.items.entries()) {
+          const transfer = await transferRepo.save(
+            transferRepo.create({
+              transferNumber: numeros[i],
+              loteId,
+              type: 'TRANSFER',
+              status: enTransito ? 'PENDING' : 'RECEIVED',
+              variantId: renglon.variantId,
+              fromWarehouseId: dto.fromWarehouseId,
+              toWarehouseId: dto.toWarehouseId,
+              quantity: renglon.quantity,
+              notes: dto.notes ?? null,
+              createdById: userId,
+              receivedById: enTransito ? null : userId,
+              receivedAt: enTransito ? null : ahora,
+              tenantId,
+            }),
+          );
+          ids.push(transfer.id);
+          const unidades = renglon.stockUnitId ? [renglon.stockUnitId] : undefined;
+          if (enTransito) {
+            // Sale del origen y queda en tránsito; entra al destino al recibir.
+            await this.ledger.mover(manager, {
+              variantId: renglon.variantId,
+              warehouseId: dto.fromWarehouseId,
+              cantidad: -renglon.quantity,
+              motivo: 'TRANSFER_OUT',
+              referenciaId: transfer.id,
+              notas: dto.notes || 'Remisión en tránsito',
+              usuarioId: userId,
+              unidades,
+              tenantId,
+            });
+          } else {
+            await this.ledger.trasladar(manager, {
+              variantId: renglon.variantId,
+              desdeWarehouseId: dto.fromWarehouseId,
+              hastaWarehouseId: dto.toWarehouseId,
+              cantidad: renglon.quantity,
+              motivo: 'TRANSFER_OUT',
+              referenciaId: transfer.id,
+              notas: dto.notes ?? null,
+              usuarioId: userId,
+              unidades,
+              tenantId,
+            });
+          }
+        }
+        return { loteId, base, ids };
+      },
+    );
+
+    const transfers = await this.transferRepository.find({
+      where: { id: In(ids), tenantId },
+      relations: ['variant', 'variant.product', 'fromWarehouse', 'toWarehouse'],
+      order: { transferNumber: 'ASC' },
+    });
+    return {
+      loteId,
+      transferNumber: base,
+      status: enTransito ? 'PENDING' : 'RECEIVED',
+      transfers,
+    };
+  }
+
+  /**
+   * Recibir la remisión completa: todos sus renglones en tránsito, de una.
+   * Los que ya se recibieron o se cerraron no se tocan.
+   */
+  async recibirLote(
+    loteId: string,
+    userId: string,
+    tenantId: string,
+  ): Promise<{ recibidos: number; transfers: StockTransfer[] }> {
+    const pendientes = await this.transferRepository.find({
+      where: { loteId, tenantId, status: 'PENDING', type: 'TRANSFER' },
+      order: { transferNumber: 'ASC' },
+    });
+    if (!pendientes.length) {
+      throw new BadRequestException(
+        'Esa remisión no tiene renglones en tránsito por recibir.',
+      );
+    }
+    const transfers: StockTransfer[] = [];
+    for (const t of pendientes) {
+      transfers.push(await this.receiveTransfer(t.id, userId, tenantId));
+    }
+    return { recibidos: transfers.length, transfers };
   }
 
   // Stock total por producto (suma de todas sus variantes/bodegas). Para mostrar
@@ -1344,6 +1519,13 @@ export class InventoryService {
           `Stock insuficiente en bodega origen. Disponible: ${fromStock?.quantity ?? 0}`,
         );
       }
+      // Igual que en el traslado: si se escaneó una caja, se presta esa.
+      await this.validarBultoDelTraslado(
+        manager,
+        dto,
+        dto.fromWarehouseId,
+        tenantId,
+      );
 
       const loan = await transferRepo.save(
         transferRepo.create({
@@ -1374,6 +1556,7 @@ export class InventoryService {
         referenciaId: loan.id,
         notas: dto.notes || 'Préstamo',
         usuarioId: userId,
+        unidades: dto.stockUnitId ? [dto.stockUnitId] : undefined,
         tenantId,
       });
 
@@ -1612,6 +1795,7 @@ export class InventoryService {
     return {
       id: t.id,
       transferNumber: t.transferNumber ?? null,
+      loteId: t.loteId ?? null,
       type: t.type,
       status: t.status,
       quantity: t.quantity,
@@ -1672,7 +1856,10 @@ export class InventoryService {
       .getRepository(StockTransfer)
       .createQueryBuilder('t')
       .select(
-        "MAX(CAST(substring(t.transfer_number FROM '^TR-0*([0-9]+)$') AS integer))",
+        // Sin ancla final: «TR-00042-3» —un renglón de una remisión en lote—
+        // también cuenta para el máximo. Con el `$` esos números se ignoraban
+        // y el siguiente lote repetía uno ya usado.
+        "MAX(CAST(substring(t.transfer_number FROM '^TR-0*([0-9]+)') AS integer))",
         'max',
       )
       .where('t.tenant_id = :tenantId', { tenantId })

@@ -21,6 +21,7 @@ import { UpdateWarehouseDto } from './dto/update-warehouse.dto.js';
 import { AdjustStockDto } from './dto/adjust-stock.dto.js';
 import { parsePositiveInt } from '../common/utils/query-number.util.js';
 import { TransferStockDto } from './dto/transfer-stock.dto.js';
+import { TrasladoEnLoteDto } from './dto/traslado-en-lote.dto.js';
 import { StockIntegrityService } from './ledger/stock-integrity.service.js';
 import { ExhibicionService } from './exhibicion.service.js';
 import { ExhibirDto } from './dto/exhibir.dto.js';
@@ -306,7 +307,30 @@ export class InventoryController {
     return this.inventoryService.transferStock(dto, user.id, tenantId);
   }
 
+  @Post('transfer/lote')
+  @ApiOperation({
+    summary:
+      'Una remisión con varios renglones: cajas y pares escaneados o tallas con cantidad, con un solo número',
+  })
+  trasladarEnLote(
+    @Body() dto: TrasladoEnLoteDto,
+    @CurrentUser() user: User,
+    @TenantId() tenantId: string,
+  ) {
+    return this.inventoryService.trasladarEnLote(dto, user.id, tenantId);
+  }
+
   // ─── Remisiones (traslados con confirmación) y préstamos ───
+
+  @Post('transfers/lote/:loteId/receive')
+  @ApiOperation({ summary: 'Recibir todos los renglones en tránsito de una remisión' })
+  recibirLote(
+    @Param('loteId', ParseUUIDPipe) loteId: string,
+    @CurrentUser() user: User,
+    @TenantId() tenantId: string,
+  ) {
+    return this.inventoryService.recibirLote(loteId, user.id, tenantId);
+  }
 
   @Get('transfers')
   @ApiOperation({ summary: 'Historial de traslados, remisiones y préstamos' })

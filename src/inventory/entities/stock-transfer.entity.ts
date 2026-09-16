@@ -43,6 +43,15 @@ export class StockTransfer extends TenantAwareEntity {
   @Column({ name: 'transfer_number', type: 'varchar', nullable: true })
   transferNumber: string | null;
 
+  /**
+   * Con qué otros renglones viajó. Una remisión de varias cajas y pares es
+   * una fila por renglón —se reciben y se devuelven por separado— y este id
+   * dice que salieron juntas. Ver `remision-en-lote.ts`.
+   */
+  @Index()
+  @Column({ name: 'lote_id', type: 'uuid', nullable: true })
+  loteId: string | null;
+
   @Column({ type: 'varchar', default: 'TRANSFER' })
   type: StockTransferType;
 
