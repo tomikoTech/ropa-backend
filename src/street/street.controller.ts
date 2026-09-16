@@ -128,6 +128,20 @@ export class StreetController {
     return this.street.createDispatch(dto, userId, tenantId);
   }
 
+  @Post('dispatches/:id/recibir')
+  @ApiOperation({
+    summary:
+      'Recibir una cesión por partes: lo que volvió entra al inventario, lo vendido se vuelve venta; se cierra sola cuando no queda nada afuera',
+  })
+  recibir(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SettleDispatchDto,
+    @UserId() userId: string,
+    @TenantId() tenantId: string,
+  ) {
+    return this.street.recibir(id, dto, userId, tenantId);
+  }
+
   @Post('dispatches/:id/settle')
   @ApiOperation({
     summary: 'Cuadrar: qué vendió, qué devolvió y qué falta (genera la venta)',

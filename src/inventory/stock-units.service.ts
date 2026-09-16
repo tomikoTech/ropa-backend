@@ -1911,7 +1911,11 @@ export class StockUnitsService {
         isActive: v.isActive,
       })),
       stocks,
-      bodegas: bodegas.map((b) => ({ id: b.id, name: b.name, esVitrina: !!b.isExhibition })),
+      bodegas: bodegas.map((b) => ({
+        id: b.id,
+        name: b.name,
+        esVitrina: !!b.isExhibition,
+      })),
       unidades: unidades.map((u) => ({
         id: u.id,
         barcode: u.barcode,

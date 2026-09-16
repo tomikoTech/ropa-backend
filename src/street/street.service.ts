@@ -1,4 +1,11 @@
 import {
+  aplicarRecepcion,
+  deltasDesdeTotales,
+  todoRecibido,
+  validarRecepcion,
+  type LineaDeRecepcion,
+} from './recepcion-de-cesion.js';
+import {
   BadRequestException,
   ConflictException,
   Injectable,
@@ -38,7 +45,6 @@ import { StockLedgerService } from '../inventory/ledger/stock-ledger.service.js'
 import {
   buildSellerCode,
   settlementSummary,
-  validateSettlement,
   type SettlementLine,
 } from './street-settlement.js';
 import {
@@ -49,10 +55,7 @@ import {
   resumenPorPatinador,
   type DespachoDeReporte,
 } from './street-reporte.js';
-import {
-  nombreDelDestino,
-  resolverDestino,
-} from './destino-de-la-cesion.js';
+import { nombreDelDestino, resolverDestino } from './destino-de-la-cesion.js';
 import type {
   CreateDispatchDto,
   CreateStreetSellerDto,
@@ -558,18 +561,38 @@ export class StreetService {
   // ── Cuadrar ──────────────────────────────────────────────────────────────
 
   /**
-   * El patinador vuelve: se registra qué vendió, qué devolvió y qué falta.
-   *
-   * Lo devuelto entra otra vez al inventario. **Lo vendido se convierte en una
-   * venta de verdad**, así que entra a la caja, al cierre del día y a la
-   * utilidad sin que nadie la vuelva a digitar. Lo que falta no desaparece:
-   * queda registrado como faltante en la remisión y se ve en el reporte.
+   * Cuadrar de una vez: lo que se manda son **totales** (vendido y devuelto en
+   * total por renglón) y la cesión se cierra; lo que no volvió queda como
+   * faltante. Es la pantalla de siempre. Por dentro es una recepción más,
+   * con la diferencia contra lo ya recibido, y cierre forzado.
    */
   async settle(
     id: string,
     dto: SettleDispatchDto,
     userId: string,
     tenantId: string,
+  ) {
+    return this.recibir(id, dto, userId, tenantId, {
+      cerrar: true,
+      totales: true,
+    });
+  }
+
+  /**
+   * Recibir una cesión **por partes**: un par volvió, otro se vendió, la caja
+   * sigue prestada. Cada recepción suma sobre lo anterior; lo que vuelve entra
+   * al inventario ya, lo vendido se vuelve una venta ya, y la cesión se cierra
+   * sola cuando no queda nada afuera. Ver `recepcion-de-cesion.ts`.
+   *
+   * Con `cerrar`, lo que siga afuera después de esta recepción se da por
+   * faltante y la cesión queda cerrada.
+   */
+  async recibir(
+    id: string,
+    dto: SettleDispatchDto,
+    userId: string,
+    tenantId: string,
+    opciones: { cerrar?: boolean; totales?: boolean } = {},
   ) {
     const dispatch = await this.dispatchRepo.findOne({
       where: { id, tenantId },
@@ -578,8 +601,8 @@ export class StreetService {
     if (!dispatch) throw new NotFoundException('La remisión no existe');
     if (dispatch.status !== StreetDispatchStatus.OPEN) {
       throw new BadRequestException(
-        `La remisión ${dispatch.dispatchNumber} ya está ` +
-          `${dispatch.status === StreetDispatchStatus.SETTLED ? 'cuadrada' : 'anulada'}.`,
+        `La cesión ${dispatch.dispatchNumber} ya está ` +
+          `${dispatch.status === StreetDispatchStatus.SETTLED ? 'cerrada (cuadrada)' : 'anulada'}.`,
       );
     }
     if (dto.clientId) await this.assertClient(dto.clientId, tenantId);
@@ -587,74 +610,92 @@ export class StreetService {
       if (payment.bankId) await this.assertBank(payment.bankId, tenantId);
     }
 
-    const items = dispatch.items.map((i) => ({
+    const renglones = dispatch.items.map((i) => ({
       id: i.id,
       productName: i.productName,
       variantSize: i.variantSize,
       variantColor: i.variantColor,
       quantity: i.quantity,
-      unitPrice: Number(i.unitPrice),
-      unitCost: Number(i.unitCost),
+      quantitySold: i.quantitySold ?? 0,
+      quantityReturned: i.quantityReturned ?? 0,
     }));
-    const lines: SettlementLine[] = dto.items.map((l) => ({
+    const pedidas: LineaDeRecepcion[] = dto.items.map((l) => ({
       itemId: l.itemId,
       sold: l.sold,
       returned: l.returned,
     }));
+    const lineas = opciones.totales
+      ? deltasDesdeTotales(renglones, pedidas)
+      : pedidas;
 
-    const errores = validateSettlement(items, lines);
+    // Cerrar sin que llegue nada es válido: es dar por faltante lo que sigue
+    // afuera. Recibir sin que llegue nada, no.
+    const errores = validarRecepcion(renglones, lineas).filter(
+      (e) => !(opciones.cerrar && e.startsWith('No hay nada que recibir')),
+    );
     if (errores.length) throw new BadRequestException(errores);
 
-    const summary = settlementSummary(items, lines);
+    const precios = new Map(
+      dispatch.items.map((i) => [
+        i.id,
+        {
+          id: i.id,
+          unitPrice: Number(i.unitPrice),
+          unitCost: Number(i.unitCost),
+        },
+      ]),
+    );
+    const revenue = lineas.reduce(
+      (t, l) => t + (precios.get(l.itemId)?.unitPrice ?? 0) * (l.sold || 0),
+      0,
+    );
 
-    // El pago no puede ser mayor de lo que se vendió: es el defecto del sistema
-    // anterior (aceptaba un abono de $5.000 sobre una venta de $1.000) y aquí se
-    // valida en el servidor.
-    // Sin formas de pago se asume que entregó todo en efectivo (es el atajo de
-    // la pantalla); con formas de pago, manda lo que se registró.
+    // El pago no puede ser mayor de lo que se vendió **en esta recepción**.
+    // Sin formas de pago se asume que entregó todo en efectivo.
     const cobrado = dto.payments?.length
       ? dto.payments.reduce((s, p) => s + p.amount, 0)
-      : summary.revenue;
-    if (cobrado > summary.revenue + 0.01) {
+      : revenue;
+    if (cobrado > revenue + 0.01) {
       throw new BadRequestException(
         `Se está registrando un cobro de $${cobrado.toLocaleString('es-CO')} ` +
-          `sobre una venta de $${summary.revenue.toLocaleString('es-CO')}.`,
+          `sobre una venta de $${revenue.toLocaleString('es-CO')}.`,
       );
     }
 
-    // Envuelto en `retryOnUniqueViolation` porque al cuadrar se crea una venta,
-    // y su consecutivo se calcula con MAX+1: si en ese instante el POS cierra
-    // otra venta, los dos números colisionan. Sin el reintento, cuadrar una
-    // remisión fallaría con un conflicto justo en la hora de más movimiento.
     await retryOnUniqueViolation(async () =>
       this.dataSource.transaction(async (manager) => {
-        // El estado se vuelve a leer **dentro** de la transacción y con la fila
-        // bloqueada: dos clics seguidos en "Cuadrar" creaban dos ventas y
-        // devolvían la mercancía dos veces al inventario.
         await this.lockDispatch(manager, dispatch.id, tenantId);
-
-        const byId = new Map(lines.map((l) => [l.itemId, l]));
+        const despues = new Map(
+          aplicarRecepcion(renglones, lineas).map((r) => [r.id, r]),
+        );
+        const porId = new Map(lineas.map((l) => [l.itemId, l]));
+        const seCierra =
+          !!opciones.cerrar || todoRecibido([...despues.values()]);
 
         for (const item of dispatch.items) {
-          const line = byId.get(item.id)!;
-          await manager
-            .getRepository(StreetDispatchItem)
-            .update(
-              { id: item.id, tenantId },
-              { quantitySold: line.sold, quantityReturned: line.returned },
-            );
+          const line = porId.get(item.id) ?? {
+            itemId: item.id,
+            sold: 0,
+            returned: 0,
+          };
+          const r = despues.get(item.id)!;
+          if (line.sold > 0 || line.returned > 0) {
+            await manager
+              .getRepository(StreetDispatchItem)
+              .update(
+                { id: item.id, tenantId },
+                {
+                  quantitySold: r.quantitySold,
+                  quantityReturned: r.quantityReturned,
+                },
+              );
+          }
 
-          // Vuelve entero, sale entero, o se rompió por el camino.
-          //
-          // Un renglón puede ser una caja de seis. Si el patinador vendió
-          // cuatro y trajo dos, esa caja ya no existe como bulto: reponerla
-          // completa metería seis códigos por dos unidades de existencia.
-          const volvioEntero = line.returned === item.quantity;
-          const seRompio =
-            !!item.stockUnitId && line.returned > 0 && !volvioEntero;
-
-          // Lo que volvió entra a la bodega con su código: el mismo par que
-          // salió, no uno nuevo.
+          // Un renglón puede ser una caja de seis. Vuelve entera solo si
+          // vuelve toda y no se vendió nada de ella; si no, la caja ya no
+          // existe como bulto y se repone la existencia sin código.
+          const volvioEntero =
+            r.quantityReturned === item.quantity && r.quantitySold === 0;
           if (line.returned > 0) {
             await this.ledger.mover(manager, {
               variantId: item.variantId,
@@ -663,9 +704,9 @@ export class StreetService {
               motivo: 'STREET',
               referenciaId: dispatch.id,
               notas:
-                `Devolución de ${dispatch.dispatchNumber} ` +
+                `Volvió de la cesión ${dispatch.dispatchNumber} ` +
                 `(${nombreDelDestino(dispatch)})` +
-                (seRompio
+                (item.stockUnitId && !volvioEntero
                   ? ' · el bulto volvió partido: se repone la existencia sin código'
                   : ''),
               usuarioId: userId,
@@ -677,69 +718,90 @@ export class StreetService {
             });
           }
 
-          // El bulto etiquetado que no volvió entero: vendido si se vendió
-          // todo, dado de baja si se partió o si no volvió ni se vendió. El
-          // que volvió completo ya lo puso el ledger arriba, en el mismo
-          // movimiento que repuso la existencia.
+          // El bulto etiquetado que no vuelve entero: vendido si se vendió
+          // todo; y al cerrar, dado de baja si se partió o si no volvió.
           if (item.stockUnitId && !volvioEntero) {
-            const nextStatus =
-              line.sold > 0 && line.returned === 0
-                ? StockUnitStatus.SOLD
-                : StockUnitStatus.WRITTEN_OFF;
-            await manager.getRepository(StockUnit).update(
-              { id: item.stockUnitId, tenantId },
-              {
-                status: nextStatus,
-              },
-            );
-            await manager.getRepository(StockUnitEvent).save(
-              manager.getRepository(StockUnitEvent).create({
-                stockUnitId: item.stockUnitId,
-                eventType:
-                  nextStatus === StockUnitStatus.SOLD
-                    ? StockUnitEventType.SOLD
-                    : StockUnitEventType.WRITTEN_OFF,
-                fromStatus: StockUnitStatus.CONSIGNED,
-                toStatus: nextStatus,
-                referenceType: REF_DISPATCH,
-                referenceId: dispatch.id,
-                userId,
-                metadata: {
-                  sold: line.sold,
-                  returned: line.returned,
-                  dispatchNumber: dispatch.dispatchNumber,
-                },
-                tenantId,
-              }),
-            );
+            const vendidoEntero = r.quantitySold === item.quantity;
+            const nextStatus = vendidoEntero
+              ? StockUnitStatus.SOLD
+              : seCierra
+                ? StockUnitStatus.WRITTEN_OFF
+                : null;
+            const yaEstaba = await manager
+              .getRepository(StockUnit)
+              .findOne({ where: { id: item.stockUnitId, tenantId } });
+            if (
+              nextStatus &&
+              yaEstaba &&
+              yaEstaba.status === StockUnitStatus.CONSIGNED
+            ) {
+              await manager
+                .getRepository(StockUnit)
+                .update(
+                  { id: item.stockUnitId, tenantId },
+                  { status: nextStatus },
+                );
+              await manager.getRepository(StockUnitEvent).save(
+                manager.getRepository(StockUnitEvent).create({
+                  stockUnitId: item.stockUnitId,
+                  eventType:
+                    nextStatus === StockUnitStatus.SOLD
+                      ? StockUnitEventType.SOLD
+                      : StockUnitEventType.WRITTEN_OFF,
+                  fromStatus: StockUnitStatus.CONSIGNED,
+                  toStatus: nextStatus,
+                  referenceType: REF_DISPATCH,
+                  referenceId: dispatch.id,
+                  userId,
+                  metadata: {
+                    sold: r.quantitySold,
+                    returned: r.quantityReturned,
+                    dispatchNumber: dispatch.dispatchNumber,
+                  },
+                  tenantId,
+                }),
+              );
+            }
           }
         }
 
-        let saleId: string | null = null;
-        if (summary.sold > 0) {
+        let saleId: string | null = dispatch.saleId ?? null;
+        if (revenue > 0) {
           saleId = await this.createStreetSale(
             manager,
             dispatch,
-            items,
-            lines,
+            [...precios.values()],
+            lineas,
             dto,
-            summary.revenue,
+            revenue,
             cobrado,
             userId,
             tenantId,
           );
         }
 
-        await manager.getRepository(StreetDispatch).update(
-          { id: dispatch.id, tenantId },
-          {
-            status: StreetDispatchStatus.SETTLED,
-            settledAt: new Date(),
-            settledById: userId,
-            saleId,
-            collectedAmount: summary.sold > 0 ? cobrado : 0,
-          },
-        );
+        if (seCierra) {
+          await manager.getRepository(StreetDispatch).update(
+            { id: dispatch.id, tenantId },
+            {
+              status: StreetDispatchStatus.SETTLED,
+              settledAt: new Date(),
+              settledById: userId,
+              saleId,
+              collectedAmount:
+                Number(dispatch.collectedAmount ?? 0) +
+                (revenue > 0 ? cobrado : 0),
+            },
+          );
+        } else if (revenue > 0) {
+          await manager.getRepository(StreetDispatch).update(
+            { id: dispatch.id, tenantId },
+            {
+              saleId,
+              collectedAmount: Number(dispatch.collectedAmount ?? 0) + cobrado,
+            },
+          );
+        }
       }),
     );
 

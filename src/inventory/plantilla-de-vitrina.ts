@@ -37,7 +37,11 @@ export interface FilaDeLaPlantilla {
   /** Cuántas muestras de esta referencia se han vendido desde la vitrina. */
   vendidasDeLaVitrina: number;
   /** La última muestra vendida: la talla que conviene reponer. */
-  ultimaMuestra: { variantId: string; talla: string; codigo: string | null } | null;
+  ultimaMuestra: {
+    variantId: string;
+    talla: string;
+    codigo: string | null;
+  } | null;
 }
 
 export type AccionDelHueco = 'reponer' | 'solicitar' | 'sin-existencia';
@@ -48,27 +52,43 @@ export interface HuecoDeVitrina extends FilaDeLaPlantilla {
   pedirA: ExistenciaEnBodega | null;
 }
 
-export function accionDelHueco(f: Pick<FilaDeLaPlantilla, 'enLocal' | 'enOtras'>): AccionDelHueco {
+export function accionDelHueco(
+  f: Pick<FilaDeLaPlantilla, 'enLocal' | 'enOtras'>,
+): AccionDelHueco {
   if (f.enLocal > 0) return 'reponer';
   if (f.enOtras.some((b) => b.cantidad > 0)) return 'solicitar';
   return 'sin-existencia';
 }
 
 /** Solo los puestos vacíos, con qué hacer en cada uno. Los llenos no molestan. */
-export function huecosDeLaPlantilla(filas: FilaDeLaPlantilla[]): HuecoDeVitrina[] {
+export function huecosDeLaPlantilla(
+  filas: FilaDeLaPlantilla[],
+): HuecoDeVitrina[] {
   return filas
     .filter((f) => f.enVitrina <= 0)
     .map((f) => {
       const otras = [...f.enOtras]
         .filter((b) => b.cantidad > 0)
-        .sort((a, b) => b.cantidad - a.cantidad || a.bodega.localeCompare(b.bodega, 'es'));
-      return { ...f, enOtras: otras, accion: accionDelHueco(f), pedirA: otras[0] ?? null };
+        .sort(
+          (a, b) =>
+            b.cantidad - a.cantidad || a.bodega.localeCompare(b.bodega, 'es'),
+        );
+      return {
+        ...f,
+        enOtras: otras,
+        accion: accionDelHueco(f),
+        pedirA: otras[0] ?? null,
+      };
     })
     .sort((a, b) => {
       // Primero lo que se resuelve ya (reponer), luego lo que hay que pedir,
       // y de último lo que no tiene arreglo; dentro de cada grupo, lo que
       // más se ha vendido —es lo que más falta hace en el aparador—.
-      const orden: Record<AccionDelHueco, number> = { reponer: 0, solicitar: 1, 'sin-existencia': 2 };
+      const orden: Record<AccionDelHueco, number> = {
+        reponer: 0,
+        solicitar: 1,
+        'sin-existencia': 2,
+      };
       return (
         orden[a.accion] - orden[b.accion] ||
         b.vendidasDeLaVitrina - a.vendidasDeLaVitrina ||

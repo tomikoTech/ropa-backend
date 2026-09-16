@@ -514,7 +514,12 @@ export class ExhibicionService {
     // Lo que hay en las demás bodegas, por referencia, para saber a quién pedirle.
     const productIds = [...new Set(filas.map((f) => f.product_id))];
     const otras = await this.dataSource.query<
-      { product_id: string; warehouse_id: string; bodega: string; cantidad: string }[]
+      {
+        product_id: string;
+        warehouse_id: string;
+        bodega: string;
+        cantidad: string;
+      }[]
     >(
       `SELECT pv.product_id, s.warehouse_id, w.name AS bodega, SUM(s.quantity) AS cantidad
          FROM stock s
@@ -537,11 +542,21 @@ export class ExhibicionService {
       enVitrina: Number(f.en_vitrina),
       enLocal: Number(f.en_local),
       enOtras: otras
-        .filter((o) => o.product_id === f.product_id && o.warehouse_id !== f.local_id)
-        .map((o) => ({ bodegaId: o.warehouse_id, bodega: o.bodega, cantidad: Number(o.cantidad) })),
+        .filter(
+          (o) => o.product_id === f.product_id && o.warehouse_id !== f.local_id,
+        )
+        .map((o) => ({
+          bodegaId: o.warehouse_id,
+          bodega: o.bodega,
+          cantidad: Number(o.cantidad),
+        })),
       vendidasDeLaVitrina: Number(f.vendidas),
       ultimaMuestra: f.ultima_variant_id
-        ? { variantId: f.ultima_variant_id, talla: f.ultima_talla ?? '', codigo: f.ultima_codigo }
+        ? {
+            variantId: f.ultima_variant_id,
+            talla: f.ultima_talla ?? '',
+            codigo: f.ultima_codigo,
+          }
         : null,
     }));
   }
@@ -585,7 +600,13 @@ export class ExhibicionService {
     orden: { codigo: string },
     usuarioId: string,
     tenantId: string,
-  ): Promise<{ movidas: number; barcode: string; esCaja: boolean; vitrina: string; local: string }> {
+  ): Promise<{
+    movidas: number;
+    barcode: string;
+    esCaja: boolean;
+    vitrina: string;
+    local: string;
+  }> {
     const codigo = orden.codigo.trim();
     return this.dataSource.transaction(async (manager) => {
       const [bulto] = await manager.query<
@@ -611,16 +632,25 @@ export class ExhibicionService {
           WHERE su.tenant_id = $1 AND su.barcode = $2`,
         [tenantId, codigo],
       );
-      if (!bulto) throw new NotFoundException('Ese código no es de ninguna caja ni par de la tienda.');
+      if (!bulto)
+        throw new NotFoundException(
+          'Ese código no es de ninguna caja ni par de la tienda.',
+        );
       const que = bulto.kind === 'BOX' ? 'La caja' : 'El par';
       if (!bulto.es_vitrina) {
-        throw new BadRequestException(`${que} ${bulto.barcode} no está en una vitrina: está en "${bulto.vitrina}".`);
+        throw new BadRequestException(
+          `${que} ${bulto.barcode} no está en una vitrina: está en "${bulto.vitrina}".`,
+        );
       }
       if (bulto.status !== 'IN_STOCK') {
-        throw new BadRequestException(`${que} ${bulto.barcode} ya no está disponible.`);
+        throw new BadRequestException(
+          `${que} ${bulto.barcode} ya no está disponible.`,
+        );
       }
       if (!bulto.local_id || !bulto.variant_id) {
-        throw new BadRequestException(`La vitrina "${bulto.vitrina}" no tiene local al que devolverlo.`);
+        throw new BadRequestException(
+          `La vitrina "${bulto.vitrina}" no tiene local al que devolverlo.`,
+        );
       }
       const cantidad = Number(bulto.quantity) || 1;
       await this.ledger.trasladar(manager, {
@@ -634,7 +664,13 @@ export class ExhibicionService {
         unidades: [bulto.id],
         tenantId,
       });
-      return { movidas: cantidad, barcode: bulto.barcode, esCaja: bulto.kind === 'BOX', vitrina: bulto.vitrina, local: bulto.local! };
+      return {
+        movidas: cantidad,
+        barcode: bulto.barcode,
+        esCaja: bulto.kind === 'BOX',
+        vitrina: bulto.vitrina,
+        local: bulto.local!,
+      };
     });
   }
 }

@@ -145,9 +145,13 @@ export function armarFamilia(fuente: {
 }): Familia {
   const nombreDeBodega = new Map(fuente.bodegas.map((b) => [b.id, b.name]));
   const bodega = (id: string) => nombreDeBodega.get(id) ?? 'Bodega';
-  const vitrinas = new Set(fuente.bodegas.filter((b) => b.esVitrina).map((b) => b.id));
-  const unidadDelCodigo = fuente.unidades.find((u) => u.id === fuente.codigo.unidadId) ?? null;
-  const variantDelCodigo = fuente.codigo.variantId ?? unidadDelCodigo?.variantId ?? null;
+  const vitrinas = new Set(
+    fuente.bodegas.filter((b) => b.esVitrina).map((b) => b.id),
+  );
+  const unidadDelCodigo =
+    fuente.unidades.find((u) => u.id === fuente.codigo.unidadId) ?? null;
+  const variantDelCodigo =
+    fuente.codigo.variantId ?? unidadDelCodigo?.variantId ?? null;
 
   const par = (u: UnidadFuente): ParDeLaFamilia => ({
     id: u.id,
@@ -158,30 +162,38 @@ export function armarFamilia(fuente: {
     enVitrina: vitrinas.has(u.warehouseId),
     esElCodigo: u.id === unidadDelCodigo?.id,
   });
-  const porEstadoYCodigo = (a: { estado: string; codigo: string }, b: { estado: string; codigo: string }) =>
-    (ORDEN_ESTADO[a.estado] ?? 9) - (ORDEN_ESTADO[b.estado] ?? 9) || a.codigo.localeCompare(b.codigo);
+  const porEstadoYCodigo = (
+    a: { estado: string; codigo: string },
+    b: { estado: string; codigo: string },
+  ) =>
+    (ORDEN_ESTADO[a.estado] ?? 9) - (ORDEN_ESTADO[b.estado] ?? 9) ||
+    a.codigo.localeCompare(b.codigo);
 
-  const sumarPorBodega = (filas: { warehouseId: string; quantity: number | string }[]) => {
+  const sumarPorBodega = (
+    filas: { warehouseId: string; quantity: number | string }[],
+  ) => {
     const acumulado = new Map<string, number>();
     for (const f of filas) {
       const n = Number(f.quantity) || 0;
       if (n === 0) continue;
       acumulado.set(f.warehouseId, (acumulado.get(f.warehouseId) ?? 0) + n);
     }
-    return [...acumulado.entries()]
-      .map(([bodegaId, cantidad]) => ({
-        bodegaId,
-        bodega: bodega(bodegaId),
-        cantidad,
-        esVitrina: vitrinas.has(bodegaId),
-      }))
-      // La vitrina va después de su local, no compite con él.
-      .sort(
-        (a, b) =>
-          Number(a.esVitrina) - Number(b.esVitrina) ||
-          b.cantidad - a.cantidad ||
-          a.bodega.localeCompare(b.bodega, 'es'),
-      );
+    return (
+      [...acumulado.entries()]
+        .map(([bodegaId, cantidad]) => ({
+          bodegaId,
+          bodega: bodega(bodegaId),
+          cantidad,
+          esVitrina: vitrinas.has(bodegaId),
+        }))
+        // La vitrina va después de su local, no compite con él.
+        .sort(
+          (a, b) =>
+            Number(a.esVitrina) - Number(b.esVitrina) ||
+            b.cantidad - a.cantidad ||
+            a.bodega.localeCompare(b.bodega, 'es'),
+        )
+    );
   };
 
   const tallas: TallaDeLaFamilia[] = fuente.variantes
@@ -190,11 +202,19 @@ export function armarFamilia(fuente: {
       const stocks = fuente.stocks.filter((s) => s.variantId === v.id);
       const porBodega = sumarPorBodega(stocks);
       const pares = fuente.unidades
-        .filter((u) => u.kind === 'UNIT' && u.variantId === v.id && u.status === 'IN_STOCK')
+        .filter(
+          (u) =>
+            u.kind === 'UNIT' &&
+            u.variantId === v.id &&
+            u.status === 'IN_STOCK',
+        )
         .map(par)
         .sort(porEstadoYCodigo);
       const enCajas = fuente.unidades
-        .filter((u) => u.kind === 'BOX' && u.variantId === v.id && u.status === 'IN_STOCK')
+        .filter(
+          (u) =>
+            u.kind === 'BOX' && u.variantId === v.id && u.status === 'IN_STOCK',
+        )
         .reduce((t, u) => t + (Number(u.quantity) || 0), 0);
       return {
         variantId: v.id,
@@ -207,12 +227,17 @@ export function armarFamilia(fuente: {
         porBodega,
         pares,
         vendidos: fuente.unidades.filter(
-          (u) => u.kind === 'UNIT' && u.variantId === v.id && u.status === 'SOLD',
+          (u) =>
+            u.kind === 'UNIT' && u.variantId === v.id && u.status === 'SOLD',
         ).length,
         esLaDelCodigo: v.id === variantDelCodigo,
       };
     })
-    .sort((a, b) => compararTallas(a.talla, b.talla) || a.color.localeCompare(b.color, 'es'));
+    .sort(
+      (a, b) =>
+        compararTallas(a.talla, b.talla) ||
+        a.color.localeCompare(b.color, 'es'),
+    );
 
   const caja = (u: UnidadFuente): CajaDeLaFamilia => ({
     id: u.id,
@@ -226,20 +251,30 @@ export function armarFamilia(fuente: {
 
   // La caja de origen: la del código si es una caja, o la caja padre del par.
   const origenId =
-    unidadDelCodigo?.kind === 'BOX' ? unidadDelCodigo.id : unidadDelCodigo?.parentUnitId ?? null;
-  const unidadOrigen = origenId ? fuente.unidades.find((u) => u.id === origenId) ?? null : null;
+    unidadDelCodigo?.kind === 'BOX'
+      ? unidadDelCodigo.id
+      : (unidadDelCodigo?.parentUnitId ?? null);
+  const unidadOrigen = origenId
+    ? (fuente.unidades.find((u) => u.id === origenId) ?? null)
+    : null;
   const cajaDeOrigen = unidadOrigen
     ? {
         ...caja(unidadOrigen),
         hermanos: fuente.unidades
           .filter((u) => u.parentUnitId === unidadOrigen.id)
           .map(par)
-          .sort((a, b) => compararTallas(a.talla, b.talla) || porEstadoYCodigo(a, b)),
+          .sort(
+            (a, b) =>
+              compararTallas(a.talla, b.talla) || porEstadoYCodigo(a, b),
+          ),
       }
     : null;
 
   const cajas = fuente.unidades
-    .filter((u) => u.kind === 'BOX' && u.status !== 'SPLIT' && u.status !== 'WRITTEN_OFF')
+    .filter(
+      (u) =>
+        u.kind === 'BOX' && u.status !== 'SPLIT' && u.status !== 'WRITTEN_OFF',
+    )
     .map(caja)
     .sort((a, b) => porEstadoYCodigo(a, b));
 

@@ -57,7 +57,9 @@ export interface VarianteFuente {
  * mezclan, no se venden por catálogo—, así que no salen aunque estén
  * publicados: nadie tiene que acordarse de despublicarlos.
  */
-export function esParaElPublico(p: { category?: { type?: string | null } | null }): boolean {
+export function esParaElPublico(p: {
+  category?: { type?: string | null } | null;
+}): boolean {
   const tipo = (p.category?.type ?? 'STANDARD').toUpperCase();
   return tipo !== 'ESSENCE' && tipo !== 'FRASCO';
 }
@@ -86,7 +88,10 @@ const limpio = (s?: string | null) => (s ?? '').trim() || null;
  */
 export function esTallaUnica(talla: string | null | undefined): boolean {
   const t = (talla ?? '').trim().toLowerCase();
-  return t === '' || ['única', 'unica', 'u', 'unitalla', 'n/a', 'na', '-'].includes(t);
+  return (
+    t === '' ||
+    ['única', 'unica', 'u', 'unitalla', 'n/a', 'na', '-'].includes(t)
+  );
 }
 
 /** Orden natural de tallas: 36, 37, 38… y luego XS, S, M por texto. */
@@ -116,10 +121,15 @@ export function productoDelCatalogo(p: ProductoFuente): ProductoDelCatalogo {
         color: (v.colorName ?? '').trim(),
         disponible: Number(v.stock ?? 0) > 0,
       };
-      if (override != null && override > 0 && override !== precio) t.precio = override;
+      if (override != null && override > 0 && override !== precio)
+        t.precio = override;
       return t;
     })
-    .sort((a, b) => compararTallas(a.talla, b.talla) || a.color.localeCompare(b.color, 'es'));
+    .sort(
+      (a, b) =>
+        compararTallas(a.talla, b.talla) ||
+        a.color.localeCompare(b.color, 'es'),
+    );
   return {
     id: p.id,
     slug: p.slug,
