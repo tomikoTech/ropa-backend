@@ -335,6 +335,11 @@ export class UpdateStoreSettingsDto {
   @IsBoolean()
   isStorefrontActive?: boolean;
 
+  @ApiPropertyOptional({ description: 'El catálogo público está prendido' })
+  @IsOptional()
+  @IsBoolean()
+  catalogoEnabled?: boolean;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsUUID()

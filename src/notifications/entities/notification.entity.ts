@@ -16,7 +16,9 @@ import { TenantAwareEntity } from '../../common/entities/tenant-aware.entity.js'
 export type NotificationType =
   | 'internal_request'
   | 'low_stock'
-  | 'sale_authorization';
+  | 'sale_authorization'
+  /** Alguien pidió desde el catálogo público. */
+  | 'pedido_catalogo';
 
 /**
  * Un aviso para **una persona**. Un mismo evento (una solicitud, una venta por

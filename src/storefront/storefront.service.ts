@@ -27,6 +27,12 @@ import { EcommerceOrderStatus } from '../common/enums/ecommerce-order-status.enu
 import { ProductStatus } from '../common/enums/product-status.enum.js';
 import { ShippingStatus } from '../common/enums/shipping-status.enum.js';
 import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
+import { NotificationsService } from '../notifications/notifications.service.js';
+import {
+  filtrosDelCatalogo,
+  productoDelCatalogo,
+  sinCostos,
+} from './catalogo.js';
 
 @Injectable()
 export class StorefrontService {
@@ -49,6 +55,7 @@ export class StorefrontService {
     private readonly orderItemRepo: Repository<EcommerceOrderItem>,
     private readonly taxService: TaxService,
     private readonly invoiceEmailService: InvoiceEmailService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   private async resolveTenant(
@@ -121,6 +128,40 @@ export class StorefrontService {
       navItems: settings.navItems || null,
       storeTheme: settings.storeTheme || 'dark',
       storeBgColor: settings.storeBgColor || null,
+    };
+  }
+
+  /**
+   * El catálogo público de una tienda: lo tienen todas, salvo que lo apaguen.
+   *
+   * No exige `isStorefrontActive` —eso es la tienda en línea completa— y
+   * devuelve solo lo que el cliente necesita: nombre y WhatsApp de la tienda,
+   * productos publicados con precio al detal y tallas «disponible/agotado».
+   * Qué sale de cada producto lo decide `catalogo.ts`.
+   */
+  async getCatalogo(tenantSlug: string) {
+    const settings = await this.settingsRepo.findOne({
+      where: { storeSlug: tenantSlug },
+    });
+    if (!settings || !settings.catalogoEnabled) {
+      throw new NotFoundException('Ese catálogo no existe o está apagado');
+    }
+    const { products } = await this.getProductsDeTenant(settings.tenantId, {
+      onlyAvailable: true,
+    });
+    const productos = products.map((p) => productoDelCatalogo(p));
+    return {
+      tienda: {
+        nombre: settings.storeName,
+        slug: settings.storeSlug,
+        logoUrl: settings.miniLogoUrl || settings.logoUrl || null,
+        whatsappNumber: settings.whatsappNumber || null,
+        accentColor: settings.accentColor || null,
+        direccion: settings.address || null,
+        instagramUrl: settings.instagramUrl || null,
+      },
+      productos,
+      filtros: filtrosDelCatalogo(productos),
     };
   }
 
@@ -206,7 +247,7 @@ export class StorefrontService {
     return products.map((p) => {
       const store = storeMap.get(p.tenantId);
       return {
-        ...p,
+        ...sinCostos(p),
         storeName: store?.storeName ?? '',
         storeSlug: store?.storeSlug ?? '',
         accentColor: store?.accentColor ?? '#fff',
@@ -229,7 +270,24 @@ export class StorefrontService {
     },
   ) {
     const { tenantId } = await this.resolveTenant(tenantSlug);
+    return this.getProductsDeTenant(tenantId, filters);
+  }
 
+  /** Los productos publicados de un tenant ya resuelto (tienda o catálogo). */
+  private async getProductsDeTenant(
+    tenantId: string,
+    filters?: {
+      category?: string;
+      gender?: string;
+      search?: string;
+      inStock?: boolean;
+      onlyAvailable?: boolean;
+      sizes?: string[];
+      sort?: string;
+      page?: number;
+      limit?: number | null;
+    },
+  ) {
     // Resolve category filter once (slug OR name + descendants).
     const catIds = filters?.category
       ? await this.resolveCategoryIds(tenantId, filters.category)
@@ -572,7 +630,9 @@ export class StorefrontService {
     if (!settings) {
       throw new NotFoundException('Tienda no encontrada');
     }
-    if (!settings.isStorefrontActive) {
+    // El pedido llega desde la tienda en línea o desde el catálogo público:
+    // basta con que uno de los dos esté prendido.
+    if (!settings.isStorefrontActive && !settings.catalogoEnabled) {
       throw new BadRequestException('La tienda no está activa');
     }
     const tenantId = settings.tenantId;
@@ -791,6 +851,22 @@ export class StorefrontService {
         })
         .catch(() => {});
     }
+
+    // A la tienda le llega el aviso —y el push al celular— apenas alguien
+    // pide: el pedido que nadie ve es un cliente que se va.
+    const cuantos = variantData.reduce((t, d) => t + d.quantity, 0);
+    void this.notifications
+      .idsDeAdmins(tenantId)
+      .then((admins) =>
+        this.notifications.crearPara(admins, tenantId, {
+          type: 'pedido_catalogo',
+          title: `Nuevo pedido ${savedOrder.orderNumber}`,
+          body: `${dto.customerName} pide ${cuantos} ${cuantos === 1 ? 'par' : 'pares'} por $${Number(savedOrder.total).toLocaleString('es-CO')}.`,
+          link: '/storefront/orders',
+          dedupeKey: `pedido:${savedOrder.id}`,
+        }),
+      )
+      .catch(() => {});
 
     return {
       orderId: savedOrder.id,

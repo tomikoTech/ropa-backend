@@ -68,6 +68,14 @@ export class StoreSettings extends TenantAwareEntity {
   @Column({ name: 'is_storefront_active', default: false })
   isStorefrontActive: boolean;
 
+  /**
+   * El catálogo público (`/catalogo/<slug>`): ver, armar carrito y pedir.
+   * Lo tienen todas las tiendas y nace prendido; es independiente de la
+   * tienda en línea completa. Ver `catalogo.ts`.
+   */
+  @Column({ name: 'catalogo_enabled', default: true })
+  catalogoEnabled: boolean;
+
   @Column({ name: 'default_warehouse_id', type: 'uuid', nullable: true })
   defaultWarehouseId: string;
 

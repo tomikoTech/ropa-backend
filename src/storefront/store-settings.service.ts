@@ -178,6 +178,8 @@ export class StoreSettingsService {
       settings.posAccentColor = dto.posAccentColor;
     if (dto.isStorefrontActive !== undefined)
       settings.isStorefrontActive = dto.isStorefrontActive;
+    if (dto.catalogoEnabled !== undefined)
+      settings.catalogoEnabled = dto.catalogoEnabled;
     if (dto.defaultWarehouseId !== undefined)
       settings.defaultWarehouseId = dto.defaultWarehouseId;
     if (dto.ecommerceWarehouseId !== undefined)
@@ -666,5 +668,35 @@ export class StoreSettingsService {
     await this.orderRepo.save(order);
 
     return order;
+  }
+
+  /**
+   * Publicar en el catálogo todo lo que tiene existencia.
+   *
+   * Publicar era producto por producto, con el interruptor del globo. Una
+   * tienda con doscientas referencias no va a hacer doscientos clics para
+   * estrenar el catálogo: se publica lo activo que tenga al menos un par, y
+   * lo que no quiera mostrar lo despublica después.
+   */
+  async publicarLoQueTieneExistencia(
+    tenantId: string,
+  ): Promise<{ publicados: number }> {
+    const r: { affected?: number } = await this.dataSource.query(
+      `WITH con_existencia AS (
+         SELECT DISTINCT pv.product_id
+           FROM stock s
+           JOIN product_variants pv ON pv.id = s.variant_id
+          WHERE s.tenant_id = $1 AND s.quantity > 0
+       )
+       UPDATE products p
+          SET is_published = true, published_at = COALESCE(p.published_at, now())
+        WHERE p.tenant_id = $1
+          AND p.status = 'ACTIVE'
+          AND p.is_published = false
+          AND p.id IN (SELECT product_id FROM con_existencia)
+        RETURNING p.id`,
+      [tenantId],
+    ).then((filas: unknown[]) => ({ affected: filas.length }));
+    return { publicados: r.affected ?? 0 };
   }
 }

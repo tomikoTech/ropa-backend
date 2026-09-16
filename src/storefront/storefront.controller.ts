@@ -13,6 +13,7 @@ import { Public } from '../common/decorators/public.decorator.js';
 import { StorefrontService } from './storefront.service.js';
 import { CreateOrderDto } from './dto/create-order.dto.js';
 import { CalculateCheckoutDto } from './dto/calculate-checkout.dto.js';
+import { sinCostos } from './catalogo.js';
 
 @ApiTags('Storefront (Público)')
 @Controller('storefront')
@@ -49,6 +50,16 @@ export class StorefrontController {
   @ApiOperation({ summary: 'Obtener info de la tienda' })
   getSettings(@Param('tenantSlug') tenantSlug: string) {
     return this.storefrontService.getSettings(tenantSlug);
+  }
+
+  @Public()
+  @Get(':tenantSlug/catalogo')
+  @ApiOperation({
+    summary:
+      'El catálogo público: tienda, productos publicados con precio al detal y tallas disponible/agotado',
+  })
+  getCatalogo(@Param('tenantSlug') tenantSlug: string) {
+    return this.storefrontService.getCatalogo(tenantSlug);
   }
 
   @Public()
@@ -153,17 +164,20 @@ export class StorefrontController {
       res.setHeader('X-Limit', String(usedLimit));
     }
 
-    return products;
+    // El costo, el mayorista y el mínimo no salen al público.
+    return products.map((p) => sinCostos(p));
   }
 
   @Public()
   @Get(':tenantSlug/products/:productSlug')
   @ApiOperation({ summary: 'Detalle de producto por slug' })
-  getProductBySlug(
+  async getProductBySlug(
     @Param('tenantSlug') tenantSlug: string,
     @Param('productSlug') productSlug: string,
   ) {
-    return this.storefrontService.getProductBySlug(tenantSlug, productSlug);
+    return sinCostos(
+      await this.storefrontService.getProductBySlug(tenantSlug, productSlug),
+    );
   }
 
   @Public()

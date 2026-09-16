@@ -1,5 +1,6 @@
 import {
   Controller,
+  Post,
   Get,
   Patch,
   Body,
@@ -79,6 +80,14 @@ export class StoreSettingsController {
     @Body() dto: UpdateStoreSettingsDto,
   ) {
     return this.storeSettingsService.updateSettings(tenantId, dto);
+  }
+
+  @Post('catalogo/publicar-con-existencia')
+  @ApiOperation({
+    summary: 'Publicar en el catálogo todo lo activo que tenga existencia',
+  })
+  publicarConExistencia(@TenantId() tenantId: string) {
+    return this.storeSettingsService.publicarLoQueTieneExistencia(tenantId);
   }
 
   @Get('orders')
