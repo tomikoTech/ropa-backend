@@ -29,6 +29,7 @@ import { ShippingStatus } from '../common/enums/shipping-status.enum.js';
 import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
 import {
+  esParaElPublico,
   filtrosDelCatalogo,
   productoDelCatalogo,
   sinCostos,
@@ -149,7 +150,9 @@ export class StorefrontService {
     const { products } = await this.getProductsDeTenant(settings.tenantId, {
       onlyAvailable: true,
     });
-    const productos = products.map((p) => productoDelCatalogo(p));
+    const productos = products
+      .filter((p) => esParaElPublico(p))
+      .map((p) => productoDelCatalogo(p));
     return {
       tienda: {
         nombre: settings.storeName,

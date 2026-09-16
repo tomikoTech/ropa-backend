@@ -1,5 +1,6 @@
 import {
   compararTallas,
+  esParaElPublico,
   filtrosDelCatalogo,
   productoDelCatalogo,
   sinCostos,
@@ -101,5 +102,15 @@ describe('tienda en línea: el costo no sale por el endpoint público', () => {
     expect(limpio).not.toHaveProperty('wholesalePrice');
     expect(limpio).not.toHaveProperty('minimumSalePrice');
     expect(limpio.basePrice).toBe('189900.00');
+  });
+});
+
+describe('catálogo público: la materia prima no sale', () => {
+  it('esencias y frascos no son para el público; lociones y zapatos sí', () => {
+    expect(esParaElPublico({ category: { type: 'ESSENCE' } })).toBe(false);
+    expect(esParaElPublico({ category: { type: 'FRASCO' } })).toBe(false);
+    expect(esParaElPublico({ category: { type: 'STANDARD' } })).toBe(true);
+    expect(esParaElPublico({ category: null })).toBe(true);
+    expect(esParaElPublico({})).toBe(true);
   });
 });

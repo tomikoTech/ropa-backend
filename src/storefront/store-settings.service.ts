@@ -694,6 +694,11 @@ export class StoreSettingsService {
           AND p.status = 'ACTIVE'
           AND p.is_published = false
           AND p.id IN (SELECT product_id FROM con_existencia)
+          -- Esencias y frascos son insumos, no catálogo (ver catalogo.ts).
+          AND NOT EXISTS (
+            SELECT 1 FROM categories c
+             WHERE c.id = p.category_id AND c.type IN ('ESSENCE', 'FRASCO')
+          )
         RETURNING p.id`,
       [tenantId],
     ).then((filas: unknown[]) => ({ affected: filas.length }));

@@ -49,6 +49,19 @@ export interface VarianteFuente {
   stock?: number;
 }
 
+/**
+ * Lo que no es para el público: la materia prima de la perfumería.
+ *
+ * Distri Amber tenía nueve esencias publicadas y salían en el catálogo al
+ * lado de las lociones. Una esencia o un frasco son insumos —se compran, se
+ * mezclan, no se venden por catálogo—, así que no salen aunque estén
+ * publicados: nadie tiene que acordarse de despublicarlos.
+ */
+export function esParaElPublico(p: { category?: { type?: string | null } | null }): boolean {
+  const tipo = (p.category?.type ?? 'STANDARD').toUpperCase();
+  return tipo !== 'ESSENCE' && tipo !== 'FRASCO';
+}
+
 export interface ProductoFuente {
   id: string;
   slug: string;
@@ -61,7 +74,7 @@ export interface ProductoFuente {
   imageUrl?: string | null;
   imageUrls?: string[] | null;
   isAvailable?: boolean;
-  category?: { name?: string | null } | null;
+  category?: { name?: string | null; type?: string | null } | null;
   variants?: VarianteFuente[];
 }
 
