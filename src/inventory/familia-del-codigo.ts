@@ -33,6 +33,8 @@ export interface StockFuente {
 export interface BodegaFuente {
   id: string;
   name: string;
+  /** Es una vitrina: lo que está ahí ya está exhibido. */
+  esVitrina?: boolean;
 }
 
 export interface UnidadFuente {
@@ -67,6 +69,8 @@ export interface ParDeLaFamilia {
   talla: string;
   estado: string;
   bodega: string;
+  /** Está en una vitrina: ya está exhibido. */
+  enVitrina: boolean;
   /** Es el código que se consultó. */
   esElCodigo: boolean;
 }
@@ -96,6 +100,7 @@ export interface CajaDeLaFamilia {
   codigo: string;
   estado: string;
   bodega: string;
+  enVitrina: boolean;
   pares: number;
   esElCodigo: boolean;
   /** Solo en la caja de origen: los pares que salieron de ella. */
@@ -138,6 +143,7 @@ export function armarFamilia(fuente: {
 }): Familia {
   const nombreDeBodega = new Map(fuente.bodegas.map((b) => [b.id, b.name]));
   const bodega = (id: string) => nombreDeBodega.get(id) ?? 'Bodega';
+  const vitrinas = new Set(fuente.bodegas.filter((b) => b.esVitrina).map((b) => b.id));
   const unidadDelCodigo = fuente.unidades.find((u) => u.id === fuente.codigo.unidadId) ?? null;
   const variantDelCodigo = fuente.codigo.variantId ?? unidadDelCodigo?.variantId ?? null;
 
@@ -147,6 +153,7 @@ export function armarFamilia(fuente: {
     talla: (u.sizeName ?? '').trim(),
     estado: u.status,
     bodega: bodega(u.warehouseId),
+    enVitrina: vitrinas.has(u.warehouseId),
     esElCodigo: u.id === unidadDelCodigo?.id,
   });
   const porEstadoYCodigo = (a: { estado: string; codigo: string }, b: { estado: string; codigo: string }) =>
@@ -199,6 +206,7 @@ export function armarFamilia(fuente: {
     codigo: u.barcode,
     estado: u.status,
     bodega: bodega(u.warehouseId),
+    enVitrina: vitrinas.has(u.warehouseId),
     pares: Number(u.quantity) || 0,
     esElCodigo: u.id === unidadDelCodigo?.id,
   });

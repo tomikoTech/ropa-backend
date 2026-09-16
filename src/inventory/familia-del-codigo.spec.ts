@@ -10,6 +10,7 @@ const variantes = [
 const bodegas = [
   { id: 'W1', name: 'AMAWAD' },
   { id: 'W2', name: 'LOCAL 214' },
+  { id: 'WV', name: 'Vitrina AMAWAD', esVitrina: true },
 ];
 const stocks = [
   { variantId: 'v41', warehouseId: 'W1', quantity: 2 },
@@ -26,6 +27,8 @@ const unidades = [
   { id: 'u41c', barcode: 'PAR41C', kind: 'UNIT' as const, status: 'IN_STOCK', variantId: 'v41', sizeName: '41', warehouseId: 'W1', quantity: 1, parentUnitId: 'c1' },
   { id: 'u42', barcode: 'PAR42', kind: 'UNIT' as const, status: 'IN_STOCK', variantId: 'v42', sizeName: '42', warehouseId: 'W1', quantity: 1, parentUnitId: 'c1' },
   { id: 'u43', barcode: 'PAR43', kind: 'UNIT' as const, status: 'SOLD', variantId: 'v43', sizeName: '43', warehouseId: 'W1', quantity: 1, parentUnitId: 'c1' },
+  // Un par de la 42 que ya está en la vitrina.
+  { id: 'u42v', barcode: 'PAR42V', kind: 'UNIT' as const, status: 'IN_STOCK', variantId: 'v42', sizeName: '42', warehouseId: 'WV', quantity: 1, parentUnitId: 'c1' },
 ];
 
 describe('la familia de un código', () => {
@@ -70,7 +73,16 @@ describe('la familia de un código', () => {
       '41 IN_STOCK LOCAL 214',
       '41 IN_STOCK AMAWAD',
       '42 IN_STOCK AMAWAD',
+      '42 IN_STOCK Vitrina AMAWAD',
       '43 SOLD AMAWAD',
+    ]);
+  });
+
+  it('sabe cuál par ya está en la vitrina, para no ofrecer exhibirlo otra vez', () => {
+    const t42 = familia.tallas.find((t) => t.talla === '42')!;
+    expect(t42.pares.map((p) => [p.codigo, p.enVitrina])).toEqual([
+      ['PAR42', false],
+      ['PAR42V', true],
     ]);
   });
 
