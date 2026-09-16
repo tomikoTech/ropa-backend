@@ -1,6 +1,7 @@
 import {
   compararTallas,
   esParaElPublico,
+  esTallaUnica,
   filtrosDelCatalogo,
   productoDelCatalogo,
   sinCostos,
@@ -112,5 +113,22 @@ describe('catálogo público: la materia prima no sale', () => {
     expect(esParaElPublico({ category: { type: 'STANDARD' } })).toBe(true);
     expect(esParaElPublico({ category: null })).toBe(true);
     expect(esParaElPublico({})).toBe(true);
+  });
+});
+
+describe('catálogo público: lo que no viene por tallas', () => {
+  it('«Única», «U» o vacío es talla única; «40» no', () => {
+    for (const t of ['Única', 'unica', 'U', '', ' ', 'Unitalla']) expect(esTallaUnica(t)).toBe(true);
+    expect(esTallaUnica('40')).toBe(false);
+    expect(esTallaUnica('M')).toBe(false);
+  });
+
+  it('la talla única no aparece como filtro', () => {
+    const perfume = productoDelCatalogo({
+      ...fuente,
+      id: 'p3',
+      variants: [{ id: 'vu', sizeName: 'Única', colorName: 'Único', stock: 4 }],
+    });
+    expect(filtrosDelCatalogo([perfume]).tallas).toEqual([]);
   });
 });

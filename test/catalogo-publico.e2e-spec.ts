@@ -57,7 +57,12 @@ describe('Catálogo público (e2e)', () => {
       })
       .expect(201);
     productId = prod.body.id;
-    expect(prod.body.isPublished).toBe(false);
+    // Nace publicado; se despublica para probar que «publicar todo» lo trae.
+    expect(prod.body.isPublished).toBe(true);
+    await request(app.getHttpServer())
+      .patch(`/api/products/${productId}/unpublish`)
+      .set(auth())
+      .expect(200);
     const v40 = prod.body.variants.find(
       (v: { sizeName?: string; size?: string }) => (v.sizeName ?? v.size) === '40',
     );
@@ -77,6 +82,15 @@ describe('Catálogo público (e2e)', () => {
 
   afterAll(async () => {
     await teardownTestApp();
+  });
+
+  it('un producto nuevo nace publicado', async () => {
+    const r = await request(app.getHttpServer())
+      .post('/api/products')
+      .set(auth())
+      .send({ name: `E2ECAT Nace publicado ${ts}`, basePrice: 1000, variants: [{ size: 'U', color: 'Único' }] })
+      .expect(201);
+    expect(r.body.isPublished).toBe(true);
   });
 
   it('publica de una lo que tiene existencia', async () => {

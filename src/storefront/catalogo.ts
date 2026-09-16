@@ -80,6 +80,15 @@ export interface ProductoFuente {
 
 const limpio = (s?: string | null) => (s ?? '').trim() || null;
 
+/**
+ * «Única», «U», «unitalla» o nada: la referencia no viene por tallas (un
+ * perfume, un bolso). No se ofrece como filtro ni se pide elegirla.
+ */
+export function esTallaUnica(talla: string | null | undefined): boolean {
+  const t = (talla ?? '').trim().toLowerCase();
+  return t === '' || ['única', 'unica', 'u', 'unitalla', 'n/a', 'na', '-'].includes(t);
+}
+
 /** Orden natural de tallas: 36, 37, 38… y luego XS, S, M por texto. */
 export function compararTallas(a: string, b: string): number {
   const na = Number.parseFloat(a);
@@ -138,7 +147,7 @@ export function filtrosDelCatalogo(productos: ProductoDelCatalogo[]): {
   for (const p of productos) {
     if (p.marca) marcas.add(p.marca);
     if (p.genero) generos.add(p.genero);
-    for (const t of p.tallas) if (t.talla) tallas.add(t.talla);
+    for (const t of p.tallas) if (!esTallaUnica(t.talla)) tallas.add(t.talla);
   }
   return {
     marcas: [...marcas].sort((a, b) => a.localeCompare(b, 'es')),

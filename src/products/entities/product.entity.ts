@@ -154,7 +154,9 @@ export class Product extends TenantAwareEntity {
   @Column({ name: 'video_url', nullable: true })
   videoUrl: string;
 
-  @Column({ name: 'is_published', default: false })
+  // Nace publicado: con el catálogo público, lo que se crea es lo que se
+  // muestra, y lo que no se quiera mostrar se despublica.
+  @Column({ name: 'is_published', default: true })
   isPublished: boolean;
 
   @Column({ name: 'published_at', type: 'timestamptz', nullable: true })
