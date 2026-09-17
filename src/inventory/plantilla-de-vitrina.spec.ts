@@ -14,6 +14,7 @@ const fila = (x: Partial<FilaDeLaPlantilla>): FilaDeLaPlantilla => ({
   enOtras: [],
   vendidasDeLaVitrina: 0,
   ultimaMuestra: null,
+  bultosEnVitrina: [],
   ...x,
 });
 

@@ -513,6 +513,28 @@ export class ExhibicionService {
 
     // Lo que hay en las demás bodegas, por referencia, para saber a quién pedirle.
     const productIds = [...new Set(filas.map((f) => f.product_id))];
+    // Y los bultos que están hoy en cada vitrina, con su código: «cuál es».
+    const enVitrina = await this.dataSource.query<
+      {
+        product_id: string;
+        warehouse_id: string;
+        barcode: string;
+        kind: string;
+        quantity: number;
+        talla: string | null;
+      }[]
+    >(
+      `SELECT su.product_id, su.warehouse_id, su.barcode, su.kind, su.quantity,
+              COALESCE(sz.name, vsz.name) AS talla
+         FROM stock_units su
+         LEFT JOIN sizes sz ON sz.id = su.size_id
+         LEFT JOIN product_variants pv ON pv.id = su.variant_id
+         LEFT JOIN sizes vsz ON vsz.id = pv.size_id
+        WHERE su.tenant_id = $1 AND su.product_id = ANY($2::uuid[]) AND su.status = 'IN_STOCK'
+          AND su.warehouse_id IN (SELECT id FROM warehouses WHERE tenant_id = $1 AND is_exhibition = true)
+        ORDER BY su.barcode`,
+      [tenantId, productIds],
+    );
     const otras = await this.dataSource.query<
       {
         product_id: string;
