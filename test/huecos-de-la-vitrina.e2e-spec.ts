@@ -62,6 +62,10 @@ describe('Huecos de la vitrina (e2e)', () => {
     const plantilla = await request(app.getHttpServer()).get(`/api/inventory/exhibicion/plantilla?vitrinaId=${vitrinaId}`).set(auth()).expect(200);
     const puesto = plantilla.body.find((f: { productId: string }) => f.productId === productId);
     expect(puesto).toMatchObject({ enVitrina: 1, enLocal: 1, hueco: false });
+    // El código de lo que está en la vitrina: es lo que identifica cuál es.
+    expect(puesto.bultosEnVitrina).toEqual([
+      { codigo: cajas[0].barcode, talla: '40', esCaja: true, pares: 1 },
+    ]);
     const huecos = await request(app.getHttpServer()).get('/api/inventory/exhibicion/huecos').set(auth()).expect(200);
     expect(huecos.body.some((h: { productId: string }) => h.productId === productId)).toBe(false);
   });

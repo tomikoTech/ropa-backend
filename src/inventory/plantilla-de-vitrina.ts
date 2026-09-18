@@ -42,6 +42,8 @@ export interface FilaDeLaPlantilla {
     talla: string;
     codigo: string | null;
   } | null;
+  /** Los bultos que están hoy en la vitrina, con su código: cuál es, exactamente. */
+  bultosEnVitrina: { codigo: string; talla: string; esCaja: boolean; pares: number }[];
 }
 
 export type AccionDelHueco = 'reponer' | 'solicitar' | 'sin-existencia';

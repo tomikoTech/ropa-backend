@@ -580,6 +580,17 @@ export class ExhibicionService {
             codigo: f.ultima_codigo,
           }
         : null,
+      bultosEnVitrina: enVitrina
+        .filter(
+          (u) =>
+            u.product_id === f.product_id && u.warehouse_id === f.vitrina_id,
+        )
+        .map((u) => ({
+          codigo: u.barcode,
+          talla: u.talla ?? '',
+          esCaja: u.kind === 'BOX',
+          pares: Number(u.quantity) || 1,
+        })),
     }));
   }
 
