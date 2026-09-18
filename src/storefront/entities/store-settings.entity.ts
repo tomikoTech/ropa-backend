@@ -379,6 +379,14 @@ export class StoreSettings extends TenantAwareEntity {
   @Column({ name: 'transfer_confirmation_enabled', default: false })
   transferConfirmationEnabled: boolean;
 
+  /**
+   * Cesiones: preguntar si ya llegó y si ya volvió. Apagado, la cesión queda
+   * hecha al despacharla y lo devuelto entra al registrarlo; prendido, el
+   * destino confirma la llegada y el origen confirma el regreso.
+   */
+  @Column({ name: 'cesion_confirmacion_enabled', default: false })
+  cesionConfirmacionEnabled: boolean;
+
   // Préstamos rápidos entre locales (remisión rápida) con retorno. Off por defecto.
   @Column({ name: 'quick_loan_enabled', default: false })
   quickLoanEnabled: boolean;

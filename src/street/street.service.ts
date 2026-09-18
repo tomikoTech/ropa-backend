@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, Repository } from 'typeorm';
+import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
 import { StreetSeller } from './entities/street-seller.entity.js';
 import { Warehouse } from '../inventory/entities/warehouse.entity.js';
 import {
@@ -303,6 +304,10 @@ export class StreetService {
       }
     }
 
+    // Con la confirmación apagada, la cesión llega al despacharla: nadie
+    // tiene que decir «ya llegó». Prendida, queda por confirmar.
+    const pregunta = await this.preguntaLlegada(tenantId);
+
     const dispatchId = await retryOnUniqueViolation(async () =>
       this.dataSource.transaction(async (manager) => {
         const dispatch = await manager.getRepository(StreetDispatch).save(
@@ -315,6 +320,8 @@ export class StreetService {
             createdById: userId,
             notes: dto.notes?.trim() || null,
             status: StreetDispatchStatus.OPEN,
+            llegadaConfirmadaAt: pregunta ? null : new Date(),
+            llegadaConfirmadaPorId: pregunta ? null : userId,
             tenantId,
           }),
         );
@@ -680,15 +687,18 @@ export class StreetService {
           };
           const r = despues.get(item.id)!;
           if (line.sold > 0 || line.returned > 0) {
-            await manager
-              .getRepository(StreetDispatchItem)
-              .update(
-                { id: item.id, tenantId },
-                {
-                  quantitySold: r.quantitySold,
-                  quantityReturned: r.quantityReturned,
-                },
-              );
+            await manager.getRepository(StreetDispatchItem).update(
+              { id: item.id, tenantId },
+              {
+                quantitySold: r.quantitySold,
+                quantityReturned: r.quantityReturned,
+                // Lo que venía de vuelta y ya se recibió deja de estar «en camino».
+                quantityReturning: Math.max(
+                  0,
+                  (item.quantityReturning ?? 0) - line.returned,
+                ),
+              },
+            );
           }
 
           // Un renglón puede ser una caja de seis. Vuelve entera solo si
@@ -953,6 +963,80 @@ export class StreetService {
         );
     });
 
+    return this.findDispatch(id, tenantId);
+  }
+
+  /** Si la tienda pide confirmar la llegada y el regreso de las cesiones. */
+  private async preguntaLlegada(tenantId: string): Promise<boolean> {
+    const settings = await this.dataSource
+      .getRepository(StoreSettings)
+      .findOne({ where: { tenantId } });
+    return !!settings?.cesionConfirmacionEnabled;
+  }
+
+  /** El destino dice «ya me llegó». */
+  async confirmarLlegada(id: string, userId: string, tenantId: string) {
+    const dispatch = await this.dispatchRepo.findOne({
+      where: { id, tenantId },
+    });
+    if (!dispatch) throw new NotFoundException('La cesión no existe');
+    if (dispatch.status !== StreetDispatchStatus.OPEN) {
+      throw new BadRequestException('La cesión ya está cerrada o anulada.');
+    }
+    if (!dispatch.llegadaConfirmadaAt) {
+      await this.dispatchRepo.update(
+        { id, tenantId },
+        { llegadaConfirmadaAt: new Date(), llegadaConfirmadaPorId: userId },
+      );
+    }
+    return this.findDispatch(id, tenantId);
+  }
+
+  /**
+   * El destino dice «ya lo devolví»: queda en camino de vuelta hasta que el
+   * origen lo reciba (`recibir`). No mueve inventario: la mercancía sigue
+   * prestada hasta que llegue.
+   */
+  async devolver(
+    id: string,
+    lineas: { itemId: string; returning: number }[],
+    tenantId: string,
+  ) {
+    const dispatch = await this.dispatchRepo.findOne({
+      where: { id, tenantId },
+      relations: ['items'],
+    });
+    if (!dispatch) throw new NotFoundException('La cesión no existe');
+    if (dispatch.status !== StreetDispatchStatus.OPEN) {
+      throw new BadRequestException('La cesión ya está cerrada o anulada.');
+    }
+    const errores: string[] = [];
+    for (const l of lineas) {
+      const item = dispatch.items.find((i) => i.id === l.itemId);
+      if (!item) {
+        errores.push('Hay un renglón que no pertenece a esta cesión.');
+        continue;
+      }
+      if (!Number.isInteger(l.returning) || l.returning < 0) {
+        errores.push(
+          `"${item.productName}": la cantidad no puede ser negativa.`,
+        );
+        continue;
+      }
+      const fuera =
+        item.quantity - (item.quantitySold ?? 0) - (item.quantityReturned ?? 0);
+      if (l.returning > fuera) {
+        errores.push(
+          `"${item.productName}": se están devolviendo ${l.returning} y solo ${fuera} siguen en préstamo.`,
+        );
+      }
+    }
+    if (errores.length) throw new BadRequestException(errores);
+    for (const l of lineas) {
+      await this.dataSource
+        .getRepository(StreetDispatchItem)
+        .update({ id: l.itemId, tenantId }, { quantityReturning: l.returning });
+    }
     return this.findDispatch(id, tenantId);
   }
 }

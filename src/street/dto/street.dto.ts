@@ -168,3 +168,20 @@ export class SettleDispatchDto {
   @IsOptional()
   clientId?: string;
 }
+
+/** El destino avisa qué está devolviendo (con la confirmación de cesiones prendida). */
+export class DevolverLineaDto {
+  @IsUUID()
+  itemId: string;
+
+  @IsInt()
+  @Min(0)
+  returning: number;
+}
+
+export class DevolverCesionDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => DevolverLineaDto)
+  items: DevolverLineaDto[];
+}

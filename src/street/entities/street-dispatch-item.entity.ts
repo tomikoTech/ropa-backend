@@ -91,6 +91,14 @@ export class StreetDispatchItem extends TenantAwareEntity {
   @Column({ name: 'quantity_returned', type: 'int', default: 0 })
   quantityReturned: number;
 
+  /**
+   * Lo que el destino dice que ya devolvió y el origen todavía no recibió.
+   * Solo se usa con la confirmación de cesiones prendida; al recibirlo pasa
+   * a `quantityReturned`.
+   */
+  @Column({ name: 'quantity_returning', type: 'int', default: 0 })
+  quantityReturning: number;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 }

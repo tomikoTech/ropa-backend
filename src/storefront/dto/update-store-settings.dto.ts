@@ -206,6 +206,11 @@ export class UpdateStoreSettingsDto {
   @IsBoolean()
   transferConfirmationEnabled?: boolean;
 
+  @ApiPropertyOptional({ description: 'Cesiones: preguntar si ya llegó y si ya volvió' })
+  @IsOptional()
+  @IsBoolean()
+  cesionConfirmacionEnabled?: boolean;
+
   @ApiPropertyOptional({
     example: true,
     description: 'Habilita préstamos rápidos entre locales (con retorno)',

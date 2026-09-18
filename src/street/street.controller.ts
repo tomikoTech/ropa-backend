@@ -18,6 +18,7 @@ import { StreetService } from './street.service.js';
 import {
   CreateDispatchDto,
   CreateStreetSellerDto,
+  DevolverCesionDto,
   SettleDispatchDto,
   UpdateStreetSellerDto,
 } from './dto/street.dto.js';
@@ -126,6 +127,29 @@ export class StreetController {
     @TenantId() tenantId: string,
   ) {
     return this.street.createDispatch(dto, userId, tenantId);
+  }
+
+  @Post('dispatches/:id/confirmar-llegada')
+  @ApiOperation({ summary: 'El destino confirma que la cesión le llegó' })
+  confirmarLlegada(
+    @Param('id', ParseUUIDPipe) id: string,
+    @UserId() userId: string,
+    @TenantId() tenantId: string,
+  ) {
+    return this.street.confirmarLlegada(id, userId, tenantId);
+  }
+
+  @Post('dispatches/:id/devolver')
+  @ApiOperation({
+    summary:
+      'El destino avisa qué está devolviendo; queda en camino hasta que el origen lo reciba',
+  })
+  devolver(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: DevolverCesionDto,
+    @TenantId() tenantId: string,
+  ) {
+    return this.street.devolver(id, dto.items, tenantId);
   }
 
   @Post('dispatches/:id/recibir')

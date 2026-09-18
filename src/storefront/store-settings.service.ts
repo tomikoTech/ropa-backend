@@ -117,6 +117,8 @@ export class StoreSettingsService {
       settings.reservationsEnabled = dto.reservationsEnabled;
     if (dto.transferConfirmationEnabled !== undefined)
       settings.transferConfirmationEnabled = dto.transferConfirmationEnabled;
+    if (dto.cesionConfirmacionEnabled !== undefined)
+      settings.cesionConfirmacionEnabled = dto.cesionConfirmacionEnabled;
     if (dto.quickLoanEnabled !== undefined)
       settings.quickLoanEnabled = dto.quickLoanEnabled;
     if (dto.posMarkPaidDefault !== undefined)

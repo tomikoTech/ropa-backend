@@ -96,6 +96,21 @@ export class StreetDispatch extends TenantAwareEntity {
   @Column({ name: 'settled_by', type: 'uuid', nullable: true })
   settledById: string | null;
 
+  /**
+   * Cuándo el destino confirmó que la mercancía le llegó. Con la opción de
+   * la tienda apagada se marca al despachar; prendida, queda en null hasta
+   * que el destino diga «ya llegó».
+   */
+  @Column({
+    name: 'llegada_confirmada_at',
+    type: 'timestamptz',
+    nullable: true,
+  })
+  llegadaConfirmadaAt: Date | null;
+
+  @Column({ name: 'llegada_confirmada_por', type: 'uuid', nullable: true })
+  llegadaConfirmadaPorId: string | null;
+
   @Column({ name: 'settled_at', type: 'timestamptz', nullable: true })
   settledAt: Date | null;
 
