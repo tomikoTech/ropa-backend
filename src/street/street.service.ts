@@ -441,6 +441,9 @@ export class StreetService {
       .createQueryBuilder('d')
       .leftJoinAndSelect('d.seller', 'seller')
       .leftJoinAndSelect('d.warehouse', 'warehouse')
+      // La bodega a la que se le prestó: sin esto la lista decía «Bodega» a
+      // secas y no se sabía a quién se le había cedido.
+      .leftJoinAndSelect('d.bodegaDestino', 'bodegaDestino')
       .leftJoinAndSelect('d.items', 'items')
       .where('d.tenant_id = :tenantId', { tenantId })
       .orderBy('d.created_at', 'DESC');

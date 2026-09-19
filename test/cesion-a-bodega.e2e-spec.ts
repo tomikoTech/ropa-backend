@@ -216,4 +216,14 @@ describe('Cesión a bodega (e2e)', () => {
     expect(delLocal).toBeDefined();
     expect(delLocal!.destinoNombre).toContain('E2E Cesion Local');
   }, 60000);
+
+  it('el listado dice a qué bodega se le prestó (no «Bodega» a secas)', async () => {
+    const r = await request(app.getHttpServer())
+      .get('/api/street/dispatches')
+      .set(auth())
+      .expect(200);
+    const lista = (r.body.data ?? r.body) as { id: string; bodegaDestino?: { name?: string } | null }[];
+    const mia = lista.find((d) => d.id === cesionId);
+    expect(mia?.bodegaDestino?.name).toBeTruthy();
+  });
 });
