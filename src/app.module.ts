@@ -34,6 +34,7 @@ import { AdminModule } from './admin/admin.module.js';
 import { BanksModule } from './banks/banks.module.js';
 import { IncomesModule } from './incomes/incomes.module.js';
 import { CajaModule } from './caja/caja.module.js';
+import { CarteraModule } from './cartera/cartera.module.js';
 import { QuotationsModule } from './quotations/quotations.module.js';
 import { ReservationsModule } from './reservations/reservations.module.js';
 import { CommonModule } from './common/common.module.js';
@@ -118,6 +119,7 @@ import { QzModule } from './qz/qz.module.js';
     BanksModule,
     IncomesModule,
     CajaModule,
+    CarteraModule,
     QuotationsModule,
     ReservationsModule,
     CommonModule,

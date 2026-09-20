@@ -227,6 +227,12 @@ const ROUTE_MODULES: Record<string, string> = {
   // (ni los costos: el controlador los quita si no tiene permiso de Productos).
   'products/search': 'sales',
 
+  // El historial de las dos carteras. Se lee con el mismo permiso que la
+  // cartera que cuenta: quien ve lo que le deben ve cuándo le abonaron, y lo
+  // que se le paga a los proveedores queda con Cuentas por pagar.
+  'cartera/pagos': 'accounts-payable',
+  cartera: 'accounts-receivable',
+
   // Compras.
   'purchases/accounts-payable': 'accounts-payable',
   'purchases/suppliers': 'suppliers',
