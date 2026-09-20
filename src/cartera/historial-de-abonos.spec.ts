@@ -22,6 +22,7 @@ const abono = (p: Partial<AbonoCrudo> & { id: string }): AbonoCrudo => ({
   terceroId: 'cliente-1',
   terceroNombre: 'Tienda La 70',
   documento: 'FV-001',
+  cuentaId: 'ar-1',
   referencia: null,
   bancoNombre: null,
   quien: 'Andrés',

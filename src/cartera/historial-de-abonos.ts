@@ -34,6 +34,8 @@ export interface AbonoCrudo {
   terceroNombre: string;
   /** Número de factura u orden de compra a la que se aplicó. */
   documento: string | null;
+  /** La cuenta a la que entró, para poder abrirla desde el listado. */
+  cuentaId: string | null;
   referencia: string | null;
   bancoNombre: string | null;
   /** Quién recibió el abono (o quién pagó). */

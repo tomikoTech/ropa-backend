@@ -17,6 +17,7 @@ interface FilaDeAbono {
   tercero_id: string | null;
   tercero: string;
   documento: string | null;
+  cuenta_id: string | null;
   referencia: string | null;
   banco: string | null;
   quien: string | null;
@@ -29,6 +30,8 @@ interface FilaDeAbono {
 export interface FiltroDelHistorial {
   /** Cliente o proveedor. */
   terceroId?: string;
+  /** Una factura en concreto: sus abonos, todos, sin importar el periodo. */
+  cuentaId?: string;
   /** Días de la tienda, `YYYY-MM-DD`. */
   desde?: string;
   hasta?: string;
@@ -49,6 +52,8 @@ export interface RespuestaDelHistorial extends Historial {
 const TOPE = 1000;
 /** Cuántos días atrás se mira si no piden otra cosa. */
 const DIAS_POR_DEFECTO = 30;
+/** Para los abonos de una factura: desde antes de que existiera la tienda. */
+const DESDE_SIEMPRE = '2000-01-01';
 
 /**
  * El historial de abonos de las dos carteras.
@@ -80,6 +85,7 @@ export class CarteraService {
               COALESCE(NULLIF(TRIM(CONCAT(c.first_name, ' ', c.last_name)), ''),
                        'Sin cliente')       AS tercero,
               COALESCE(NULLIF(s.invoice_number, ''), s.sale_number) AS documento,
+              p.account_receivable_id::text AS cuenta_id,
               p.reference                   AS referencia,
               b.name                        AS banco,
               NULLIF(TRIM(CONCAT(u.first_name, ' ', u.last_name)), '') AS quien,
@@ -96,6 +102,7 @@ export class CarteraService {
          LEFT JOIN users u ON u.id = COALESCE(p.user_id, s.user_id)
          LEFT JOIN banks b ON b.id = p.bank_id`,
       'ar.client_id',
+      'p.account_receivable_id',
     );
   }
 
@@ -111,6 +118,7 @@ export class CarteraService {
               po.supplier_id::text          AS tercero_id,
               COALESCE(sup.name, 'Sin proveedor') AS tercero,
               COALESCE(NULLIF(po.supplier_invoice_number, ''), po.order_number) AS documento,
+              p.accounts_payable_id::text   AS cuenta_id,
               p.reference                   AS referencia,
               b.name                        AS banco,
               NULLIF(TRIM(CONCAT(u.first_name, ' ', u.last_name)), '') AS quien,
@@ -128,6 +136,7 @@ export class CarteraService {
          LEFT JOIN users u ON u.id = p.user_id
          LEFT JOIN banks b ON b.id = p.bank_id`,
       'po.supplier_id',
+      'p.accounts_payable_id',
     );
   }
 
@@ -136,9 +145,17 @@ export class CarteraService {
     filtro: FiltroDelHistorial,
     select: string,
     columnaDelTercero: string,
+    columnaDeLaCuenta: string,
   ): Promise<RespuestaDelHistorial> {
-    const hasta = filtro.hasta?.trim() || diaLocal(new Date());
-    const desde = filtro.desde?.trim() || haceDias(hasta, DIAS_POR_DEFECTO);
+    // Los abonos de **una factura** son todos los que tenga, y el periodo no
+    // los recorta: la pregunta ahí es «¿cómo se ha ido pagando esta cuenta?»,
+    // y un abono viejo es justo lo que se busca. El periodo es de la pantalla
+    // de «lo que entró», no de la de una cuenta.
+    const hoy = diaLocal(new Date());
+    const hasta = filtro.cuentaId ? hoy : filtro.hasta?.trim() || hoy;
+    const desde = filtro.cuentaId
+      ? DESDE_SIEMPRE
+      : filtro.desde?.trim() || haceDias(hasta, DIAS_POR_DEFECTO);
     // El servidor corre en UTC: sin esto, «hasta el 12» dejaría por fuera los
     // abonos del 12 después de las 7 de la tarde.
     const { desde: inicio } = rangoUtcDelDia(desde);
@@ -149,6 +166,10 @@ export class CarteraService {
     if (filtro.terceroId) {
       params.push(filtro.terceroId);
       where += ` AND ${columnaDelTercero} = $${params.length}`;
+    }
+    if (filtro.cuentaId) {
+      params.push(filtro.cuentaId);
+      where += ` AND ${columnaDeLaCuenta} = $${params.length}`;
     }
     const limite = Math.min(Math.max(Number(filtro.limite) || TOPE, 1), TOPE);
 
@@ -176,6 +197,7 @@ function aAbono(f: FilaDeAbono): AbonoCrudo {
     terceroId: f.tercero_id,
     terceroNombre: f.tercero,
     documento: f.documento,
+    cuentaId: f.cuenta_id,
     referencia: f.referencia,
     bancoNombre: f.banco,
     quien: f.quien,

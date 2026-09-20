@@ -283,6 +283,21 @@ describe('Historial de abonos (e2e)', () => {
     expect([...lotes][0]).toBeTruthy();
   }, 60000);
 
+  it('los abonos de una factura salen todos, aunque sean de otro periodo', async () => {
+    // La pantalla de la factura pregunta «¿cómo se ha ido pagando esta
+    // cuenta?». Recortarla a los últimos 30 días dejaría por fuera los abonos
+    // viejos, que es justo lo que se está buscando.
+    const r = await request(app.getHttpServer())
+      .get(`/api/cartera/abonos?cuentaId=${arId}&desde=2020-01-01&hasta=2020-01-31`)
+      .set(auth())
+      .expect(200);
+    // Con `cuentaId`, el periodo que mande la pantalla no recorta: son los de
+    // esa cuenta y ya.
+    const renglones = renglonesDe(r.body);
+    expect(renglones.length).toBeGreaterThanOrEqual(3);
+    expect(renglones.every((x) => x.documento === numeroDeLaFactura)).toBe(true);
+  }, 60000);
+
   it('un periodo sin abonos responde vacío, no en error', async () => {
     // El caso de entrar un lunes festivo: cero, con su cero en el total.
     const r = await request(app.getHttpServer())

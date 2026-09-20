@@ -20,16 +20,23 @@ export class CarteraController {
       'contra-abono y no suma.',
   })
   @ApiQuery({ name: 'clienteId', required: false })
+  @ApiQuery({
+    name: 'cuentaId',
+    required: false,
+    description: 'Una cuenta por cobrar: trae todos sus abonos, sin periodo',
+  })
   @ApiQuery({ name: 'desde', required: false, description: 'YYYY-MM-DD' })
   @ApiQuery({ name: 'hasta', required: false, description: 'YYYY-MM-DD' })
   abonos(
     @TenantId() tenantId: string,
     @Query('clienteId') clienteId?: string,
+    @Query('cuentaId') cuentaId?: string,
     @Query('desde') desde?: string,
     @Query('hasta') hasta?: string,
   ) {
     return this.cartera.abonosDeClientes(tenantId, {
       terceroId: clienteId,
+      cuentaId,
       desde,
       hasta,
     });
@@ -43,16 +50,23 @@ export class CarteraController {
     summary: 'Historial de pagos a proveedores: cuándo, cuánto y a quién',
   })
   @ApiQuery({ name: 'proveedorId', required: false })
+  @ApiQuery({
+    name: 'cuentaId',
+    required: false,
+    description: 'Una cuenta por pagar: trae todos sus pagos, sin periodo',
+  })
   @ApiQuery({ name: 'desde', required: false, description: 'YYYY-MM-DD' })
   @ApiQuery({ name: 'hasta', required: false, description: 'YYYY-MM-DD' })
   pagos(
     @TenantId() tenantId: string,
     @Query('proveedorId') proveedorId?: string,
+    @Query('cuentaId') cuentaId?: string,
     @Query('desde') desde?: string,
     @Query('hasta') hasta?: string,
   ) {
     return this.cartera.pagosAProveedores(tenantId, {
       terceroId: proveedorId,
+      cuentaId,
       desde,
       hasta,
     });
