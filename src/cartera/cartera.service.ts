@@ -123,10 +123,7 @@ export class CarteraService {
               b.name                        AS banco,
               NULLIF(TRIM(CONCAT(u.first_name, ' ', u.last_name)), '') AS quien,
               p.notes                       AS nota,
-              -- Un pago a proveedor no se deshace con contra-pago: la columna
-              -- no existe de ese lado. Va en null para que el renglón tenga la
-              -- misma forma en las dos carteras.
-              NULL::text                    AS reversa_de,
+              p.reverses_payment_id::text   AS reversa_de,
               p.allocation_batch_id::text   AS lote_id,
               p.receipt_image_url           AS comprobante
          FROM accounts_payable_payments p

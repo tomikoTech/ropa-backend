@@ -34,6 +34,7 @@ import {
   repartirAbono,
 } from '../common/cartera/repartir-abono.js';
 import { sePasaDe } from '../pos/el-pago-cubre-el-total.js';
+import { reversarAbono } from '../pos/reversar-abono.js';
 import { randomUUID } from 'node:crypto';
 import { PaySupplierDto } from './dto/pay-supplier.dto.js';
 
@@ -1103,61 +1104,177 @@ export class PurchasesService {
     return this.apRepository.save(ap);
   }
 
-  async addApPayment(
-    apId: string,
-    dto: {
-      amount: number;
-      method: string;
-      reference?: string;
-      receiptImageUrl?: string;
-      notes?: string;
-    },
+  /**
+   * Una cuenta por pagar con su compra, su proveedor y todos sus pagos.
+   *
+   * Es la pantalla de la factura del proveedor: lo que se debe y cómo se ha
+   * ido pagando. Antes solo existía el listado, y para ver una había que
+   * encontrarla en la tabla.
+   */
+  async findOneAccountPayable(
+    id: string,
     tenantId: string,
   ): Promise<AccountsPayable> {
     const ap = await this.apRepository.findOne({
-      where: { id: apId, tenantId },
-      relations: ['payments', 'purchaseOrder', 'purchaseOrder.supplier'],
+      where: { id, tenantId },
+      relations: ['purchaseOrder', 'purchaseOrder.supplier', 'payments'],
     });
     if (!ap) throw new NotFoundException('Cuenta por pagar no encontrada');
-    if (ap.isPaid)
-      throw new BadRequestException('Esta cuenta ya fue pagada completamente');
+    return ap;
+  }
 
-    const remaining = Number(ap.amount) - Number(ap.paidAmount);
-    // En centavos enteros: pagar el saldo exacto de una factura con decimales
-    // se caía por ruido de punto flotante, igual que se caían las ventas con
-    // descuento. Ver `el-pago-cubre-el-total.ts`.
-    if (sePasaDe(dto.amount, remaining)) {
-      throw new BadRequestException(
-        `El monto excede el saldo pendiente de ${remaining}`,
+  /**
+   * Abona a **una** factura del proveedor.
+   *
+   * Guarda de qué banco salió la plata y quién la pagó —las columnas existían
+   * y solo el pago repartido las llenaba—, y lo hace con la cuenta bloqueada:
+   * dos pagos a la vez sobre la misma factura podían pasar los dos la
+   * validación del saldo y dejarla pagada de más.
+   */
+  async addApPayment(
+    apId: string,
+    dto: PaySupplierDto,
+    tenantId: string,
+    pagadoPor?: string,
+  ): Promise<AccountsPayable> {
+    await this.dataSource.transaction(async (manager) => {
+      const apRepo = manager.getRepository(AccountsPayable);
+      const pagoRepo = manager.getRepository(AccountsPayablePayment);
+      const ap = await apRepo
+        .createQueryBuilder('ap')
+        .setLock('pessimistic_write')
+        .where('ap.id = :apId', { apId })
+        .andWhere('ap.tenantId = :tenantId', { tenantId })
+        .getOne();
+      if (!ap) throw new NotFoundException('Cuenta por pagar no encontrada');
+      if (ap.isPaid)
+        throw new BadRequestException(
+          'Esta cuenta ya fue pagada completamente',
+        );
+      if (!(Number(dto.amount) > 0))
+        throw new BadRequestException(
+          'El monto a pagar debe ser mayor a cero.',
+        );
+
+      const remaining = Number(ap.amount) - Number(ap.paidAmount);
+      // En centavos enteros: pagar el saldo exacto de una factura con decimales
+      // se caía por ruido de punto flotante, igual que se caían las ventas con
+      // descuento. Ver `el-pago-cubre-el-total.ts`.
+      if (sePasaDe(dto.amount, remaining)) {
+        throw new BadRequestException(
+          `El monto excede el saldo pendiente de ${remaining}`,
+        );
+      }
+
+      await pagoRepo.save(
+        pagoRepo.create({
+          accountsPayableId: apId,
+          amount: dto.amount,
+          method: dto.method ?? 'EFECTIVO',
+          reference: dto.reference,
+          bankId: dto.bankId ?? null,
+          receiptImageUrl: dto.receiptImageUrl,
+          notes: dto.notes,
+          userId: pagadoPor ?? null,
+          tenantId,
+        }),
       );
-    }
 
-    const payment = this.apPaymentRepository.create({
-      accountsPayableId: apId,
-      amount: dto.amount,
-      method: dto.method,
-      reference: dto.reference,
-      receiptImageUrl: dto.receiptImageUrl,
-      notes: dto.notes,
-      tenantId,
+      const pagadoCents =
+        Math.round(Number(ap.paidAmount) * 100) +
+        Math.round(Number(dto.amount) * 100);
+      const quedaPagada = pagadoCents >= Math.round(Number(ap.amount) * 100);
+      await apRepo.update(
+        { id: apId, tenantId },
+        {
+          paidAmount: pagadoCents / 100,
+          ...(quedaPagada ? { isPaid: true, paidAt: new Date() } : {}),
+        },
+      );
     });
-    await this.apPaymentRepository.save(payment);
+    return this.findOneAccountPayable(apId, tenantId);
+  }
 
-    const newPaidAmount = Number(ap.paidAmount) + dto.amount;
-    const isNowPaid = newPaidAmount >= Number(ap.amount);
+  /**
+   * Deshace un pago a proveedor: le pone su contra-pago y reabre el saldo.
+   *
+   * La misma regla que el contra-abono de cartera (`reversarAbono`): no se
+   * borra nada, el renglón negativo lleva la fecha de hoy y el día en que
+   * salió la plata queda como estaba. Un contra-pago no se reversa; para eso
+   * está volver a pagar.
+   */
+  async reverseApPayment(
+    apId: string,
+    paymentId: string,
+    tenantId: string,
+    reversadoPor?: string,
+    motivo?: string,
+  ): Promise<AccountsPayable> {
+    await this.dataSource.transaction(async (manager) => {
+      const apRepo = manager.getRepository(AccountsPayable);
+      const pagoRepo = manager.getRepository(AccountsPayablePayment);
+      const ap = await apRepo
+        .createQueryBuilder('ap')
+        .setLock('pessimistic_write')
+        .where('ap.id = :apId', { apId })
+        .andWhere('ap.tenantId = :tenantId', { tenantId })
+        .getOne();
+      if (!ap) throw new NotFoundException('Cuenta por pagar no encontrada');
 
-    await this.apRepository.update(
-      { id: apId, tenantId },
-      {
-        paidAmount: newPaidAmount,
-        ...(isNowPaid ? { isPaid: true, paidAt: new Date() } : {}),
-      },
-    );
+      const pagos = await pagoRepo.find({
+        where: { accountsPayableId: apId, tenantId },
+      });
+      const decision = reversarAbono({
+        abonos: pagos.map((p) => ({
+          id: p.id,
+          centavos: Math.round(Number(p.amount) * 100),
+          reversaA: p.reversesPaymentId,
+        })),
+        abonoId: paymentId,
+      });
+      if (!decision.ok) {
+        // La regla es la de cartera y el mensaje también; solo cambia de
+        // qué lado está la plata.
+        throw new BadRequestException(
+          decision.motivo
+            .replaceAll('abono', 'pago')
+            .replace('cobrar', 'pagar'),
+        );
+      }
 
-    return this.apRepository.findOne({
-      where: { id: apId, tenantId },
-      relations: ['payments', 'purchaseOrder', 'purchaseOrder.supplier'],
-    }) as Promise<AccountsPayable>;
+      const original = pagos.find((p) => p.id === paymentId)!;
+      await pagoRepo.save(
+        pagoRepo.create({
+          accountsPayableId: apId,
+          amount: decision.centavosDelContra / 100,
+          // Mismo método y mismo banco: la plata vuelve por donde salió.
+          method: original.method,
+          bankId: original.bankId ?? null,
+          reference: original.reference,
+          reversesPaymentId: original.id,
+          notes: [
+            `Reversa del pago de $${Number(original.amount).toLocaleString('es-CO')}`,
+            motivo,
+          ]
+            .filter(Boolean)
+            .join(' · '),
+          userId: reversadoPor ?? null,
+          tenantId,
+        }),
+      );
+
+      const quedaPagada =
+        decision.abonadoQueQueda >= Math.round(Number(ap.amount) * 100);
+      await apRepo.update(
+        { id: apId, tenantId },
+        {
+          paidAmount: decision.abonadoQueQueda / 100,
+          isPaid: quedaPagada,
+          paidAt: quedaPagada ? ap.paidAt : null,
+        },
+      );
+    });
+    return this.findOneAccountPayable(apId, tenantId);
   }
 
   /**

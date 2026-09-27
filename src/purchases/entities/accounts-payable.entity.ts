@@ -53,7 +53,7 @@ export class AccountsPayable extends TenantAwareEntity {
   isPaid: boolean;
 
   @Column({ name: 'paid_at', type: 'timestamptz', nullable: true })
-  paidAt: Date;
+  paidAt: Date | null;
 
   @Column({ nullable: true })
   notes: string;
