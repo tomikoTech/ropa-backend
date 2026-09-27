@@ -45,7 +45,8 @@ export interface VarianteFuente {
   sizeName?: string | null;
   colorName?: string | null;
   isActive?: boolean;
-  priceOverride?: number | null;
+  // De la base llega como texto (decimal); el cálculo lo pasa por `Number`.
+  priceOverride?: number | string | null;
   stock?: number;
 }
 

@@ -53,6 +53,13 @@ export class AccountsPayablePayment {
   @Column({ name: 'allocation_batch_id', type: 'uuid', nullable: true })
   allocationBatchId: string | null;
 
+  /**
+   * El pago que este renglón deshace. Si viene, es un contra-pago: va en
+   * negativo y con su propia fecha, igual que el contra-abono de cartera.
+   */
+  @Column({ name: 'reverses_payment_id', type: 'uuid', nullable: true })
+  reversesPaymentId: string | null;
+
   @Column({ name: 'tenant_id' })
   tenantId: string;
 

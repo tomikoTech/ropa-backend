@@ -20,6 +20,7 @@ import {
   PaySupplierDto,
   PayAccountsPayableDto,
 } from './dto/pay-supplier.dto.js';
+import { ReverseArPaymentDto } from '../pos/dto/record-ar-payment.dto.js';
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
 import { TenantId } from '../common/decorators/tenant-id.decorator.js';
 import { Roles } from '../common/decorators/roles.decorator.js';
@@ -250,22 +251,50 @@ export class PurchasesController {
     );
   }
 
+  @Get('accounts-payable/:id')
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Detalle de una cuenta por pagar, con sus pagos' })
+  findOneAccountPayable(
+    @Param('id', ParseUUIDPipe) id: string,
+    @TenantId() tenantId: string,
+  ) {
+    return this.purchasesService.findOneAccountPayable(id, tenantId);
+  }
+
   @Post('accounts-payable/:id/payment')
   @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Registrar abono a cuenta por pagar' })
   addApPayment(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body()
-    body: {
-      amount: number;
-      method: string;
-      reference?: string;
-      receiptImageUrl?: string;
-      notes?: string;
-    },
+    @Body() dto: PaySupplierDto,
+    @CurrentUser() user: { id: string },
     @TenantId() tenantId: string,
   ) {
-    return this.purchasesService.addApPayment(id, body, tenantId);
+    return this.purchasesService.addApPayment(id, dto, tenantId, user.id);
+  }
+
+  @Post('accounts-payable/:id/payment/:paymentId/reverse')
+  @Roles(Role.ADMIN)
+  @ApiOperation({
+    summary: 'Deshacer un pago a proveedor: contra-pago y el saldo se reabre',
+    description:
+      'No borra el pago. Le agrega un renglón en negativo con su propia ' +
+      'fecha, para no reescribir el día en que salió la plata.',
+  })
+  reverseApPayment(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('paymentId', ParseUUIDPipe) paymentId: string,
+    @Body() dto: ReverseArPaymentDto,
+    @CurrentUser() user: { id: string },
+    @TenantId() tenantId: string,
+  ) {
+    return this.purchasesService.reverseApPayment(
+      id,
+      paymentId,
+      tenantId,
+      user.id,
+      dto?.motivo,
+    );
   }
 
   @Post('accounts-payable/pay-batch')
