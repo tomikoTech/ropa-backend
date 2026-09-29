@@ -60,6 +60,18 @@ export class SaleItemDto {
   @Min(0)
   @IsOptional()
   unitPrice?: number;
+
+  /**
+   * Este renglón va con el **precio único** de la venta: el mismo valor para
+   * todo («doscientos pares a 80.000»).
+   *
+   * Lo que cambia en el servidor es que el **precio mínimo del producto no
+   * aplica**: el dueño ya decidió a cuánto sale la mercancía de este negocio.
+   * El precio fijo sí sigue mandando. Ver `precio-de-linea.ts`.
+   */
+  @IsBoolean()
+  @IsOptional()
+  precioUnico?: boolean;
 }
 
 export class PaymentDto {

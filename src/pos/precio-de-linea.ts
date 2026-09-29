@@ -31,6 +31,20 @@ export interface LineaPedida {
   /** Lo que mandó la caja. `undefined` = «el que sugiera el sistema». */
   unitPrice?: number | null;
   discountPercent?: number | null;
+  /**
+   * El renglón va con el **precio único** de la venta.
+   *
+   * Es la llave que abre el piso: «si el precio que yo coloqué en vender todo
+   * al mismo precio es menor a ese precio mínimo, que yo lo pueda vender sin
+   * problema». El caso es un negocio cerrado —doscientos pares a 80.000— donde
+   * el dueño ya decidió a cuánto sale la mercancía, y el piso, que existe para
+   * que nadie rebaje de su cuenta, ahí estorba.
+   *
+   * **El precio fijo no cede.** Ese no es un piso sino un precio cerrado —«las
+   * cajas que yo vendo, si tienen un precio, eso no tiene descuento para
+   * nadie»—, y subirlo también lo rompe.
+   */
+  precioUnico?: boolean;
 }
 
 export interface PrecioResuelto {
@@ -80,7 +94,7 @@ export function precioDeLinea(
   }
 
   const minimo = Number(regla.precioMinimo) || 0;
-  if (minimo > 0) {
+  if (minimo > 0 && !linea.precioUnico) {
     // Con el descuento aplicado, no el de lista: si no, poner el precio de
     // lista con 50% de descuento se salta el piso por la puerta de atrás.
     const efectivo = pedido * (1 - descuento / 100);

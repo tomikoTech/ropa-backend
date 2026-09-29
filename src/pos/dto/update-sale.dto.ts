@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsArray,
   IsEnum,
   IsNumber,
@@ -43,6 +44,15 @@ export class UpdateSaleItemDto {
   @IsNumber()
   @Min(0)
   unitPrice: number;
+
+  /**
+   * La línea va con el **precio único** de la venta: el mínimo del producto no
+   * aplica. Igual que al crearla; si no, corregir una factura hecha con precio
+   * único la rechazaría por el piso que en su momento sí se dejó pasar.
+   */
+  @IsBoolean()
+  @IsOptional()
+  precioUnico?: boolean;
 
   // Descuento histórico propio de esta línea. Es indispensable al editar una
   // venta que mezcla descuentos por producto: omitirlo y reconstruir todo a

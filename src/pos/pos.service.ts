@@ -383,11 +383,25 @@ export class PosService {
               precioMinimo: Number(variant.product.minimumSalePrice) || null,
               precioFijo: !!variant.product.fixedPrice,
             },
-            { unitPrice: item.unitPrice, discountPercent },
+            {
+              unitPrice: item.unitPrice,
+              discountPercent,
+              precioUnico: item.precioUnico,
+            },
           );
           if (resuelto.error !== undefined) {
             throw new BadRequestException(
               `"${variant.product.name}" ${variant.sizeName}/${variant.colorName}: ${resuelto.error}`,
+            );
+          }
+          // Vender bajo el piso es una decisión del dueño, no un accidente:
+          // queda anotada para poder contestar «¿por qué salió a 80.000?».
+          const piso = Number(variant.product.minimumSalePrice) || 0;
+          if (item.precioUnico && piso > 0 && Number(item.unitPrice) < piso) {
+            this.log.warn(
+              `Precio único bajo el mínimo: "${variant.product.name}" ` +
+                `${variant.sizeName}/${variant.colorName} a ${item.unitPrice} ` +
+                `(mínimo ${piso}) · tenant=${tenantId} user=${userId}`,
             );
           }
           // Y si la venta llegó al volumen de mayoreo, ese es el precio.
@@ -1629,6 +1643,10 @@ export class PosService {
               discountPercent: Number(item.discountPercent),
               // Solo cambia el total: los pares siguen siendo los mismos.
               stockUnitIds: item.stockUnitId ? [item.stockUnitId] : undefined,
+              // El precio de estas líneas no se está tocando —se copia el que
+              // ya tenían—, así que volver a medirlo contra el piso rechazaría
+              // una factura que ya está hecha (y las de precio único siempre).
+              precioUnico: true,
             }))
           : undefined);
 
@@ -2143,6 +2161,7 @@ export class PosService {
             const resuelto = precioDeLinea(regla, {
               unitPrice: Number(item.unitPrice),
               discountPercent,
+              precioUnico: requestedItems[index]?.precioUnico,
             });
             if (resuelto.error !== undefined) {
               throw new BadRequestException(

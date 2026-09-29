@@ -164,3 +164,52 @@ describe('precioDeLinea', () => {
     });
   });
 });
+
+/**
+ * El precio único de la venta: la llave que abre el piso.
+ *
+ * «Si el precio que yo coloqué en vender todo al mismo precio es menor a ese
+ * precio mínimo, que yo lo pueda vender sin problema». El caso es un negocio
+ * cerrado —doscientos pares a 80.000— donde el dueño ya decidió a cuánto sale
+ * la mercancía: el piso, que existe para que nadie rebaje por su cuenta, ahí
+ * estorba.
+ */
+describe('precioDeLinea con precio único', () => {
+  it('vende por debajo del piso cuando el renglón va con precio único', () => {
+    expect(
+      precioDeLinea(
+        { precioProducto: 150_000, precioVariante: null, precioMinimo: 100_000, precioFijo: false },
+        { unitPrice: 80_000, precioUnico: true },
+      ),
+    ).toEqual({ precio: 80_000 });
+  });
+
+  it('sin la marca, el piso sigue mandando', () => {
+    // La llave no puede quedar abierta para cualquier edición suelta de
+    // precio: eso dejaría el piso de adorno.
+    const r = precioDeLinea(
+      { precioProducto: 150_000, precioVariante: null, precioMinimo: 100_000, precioFijo: false },
+      { unitPrice: 80_000 },
+    );
+    expect(r.error).toContain('100.000');
+  });
+
+  it('el precio fijo no cede ni con precio único', () => {
+    // No es un piso, es un precio cerrado: «si tienen un precio, eso no tiene
+    // descuento para nadie».
+    const r = precioDeLinea(
+      { precioProducto: 200_000, precioVariante: null, precioMinimo: null, precioFijo: true },
+      { unitPrice: 80_000, precioUnico: true },
+    );
+    expect(r.error).toContain('precio fijo');
+  });
+
+  it('un precio negativo sigue siendo un error, con precio único o sin él', () => {
+    expect(
+      precioDeLinea(
+        { precioProducto: 100_000, precioVariante: null, precioMinimo: null, precioFijo: false },
+        { unitPrice: -1, precioUnico: true },
+      ).error,
+    ).toContain('negativo');
+  });
+});
