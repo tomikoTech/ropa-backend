@@ -131,3 +131,35 @@ describe('plata', () => {
     expect(plata(0)).toBe('$ 0');
   });
 });
+
+/**
+ * El total de pares en la factura.
+ *
+ * Acá solo se puede comprobar que el PDF se arma y no se cae con la línea
+ * nueva; que el número sea el correcto lo fija `conteo-de-la-factura.spec.ts`,
+ * que es donde vive la cuenta.
+ */
+describe('la factura dice cuántos pares lleva', () => {
+  const conCaja = () => ({
+    ...factura(2),
+    renglones: [
+      { ...renglon(1), cantidad: 24, esCaja: true, total: 24 * 38_900 },
+      renglon(2),
+    ],
+  });
+
+  it('sale un PDF con el conteo de pares y cajas', async () => {
+    const pdf = await pdfDeFactura(
+      { ...tienda, rotuloDeUnidades: 'pares' },
+      conCaja(),
+    );
+    expect(pdf.subarray(0, 4).toString()).toBe('%PDF');
+    expect(pdf.length).toBeGreaterThan(1000);
+  });
+
+  it('una factura sin renglones sigue saliendo', async () => {
+    // Pasa de verdad: una venta de solo terceros no trae renglones propios.
+    const pdf = await pdfDeFactura(tienda, { ...factura(0), renglones: [] });
+    expect(pdf.subarray(0, 4).toString()).toBe('%PDF');
+  });
+});

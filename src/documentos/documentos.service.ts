@@ -91,6 +91,9 @@ export class DocumentosService {
           cantidad: it.quantity,
           precioUnitario: Number(it.unitPrice),
           total: Number(it.lineTotal),
+          // Lo que el renglón guardó el día de la venta: una caja sigue
+          // siendo una caja aunque después se haya abierto.
+          esCaja: it.unitKind === 'BOX',
         })),
         ...(deTerceros?.renglones ?? []),
       ],
@@ -214,6 +217,10 @@ export class DocumentosService {
       notaDeVencimiento: s?.invoiceDueNote ?? null,
       agradecimiento: s?.invoiceThankYouNote ?? null,
       muestraCodigos: s?.invoiceShowCodes ?? true,
+      // Quien lleva las cajas y los pares uno por uno vende calzado y cuenta
+      // **pares**; el resto cuenta unidades. Es el mismo interruptor que
+      // enciende los bultos, así que nadie tiene que configurar otra cosa.
+      rotuloDeUnidades: s?.unitTrackingEnabled ? 'pares' : 'unidades',
     };
   }
 

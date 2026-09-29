@@ -16,6 +16,7 @@
  * Traer el logo es cosa de quien llama.
  */
 import PDFDocument from 'pdfkit';
+import { contarLaFactura, textoDelConteo } from './conteo-de-la-factura.js';
 
 export interface DatosDeLaTienda {
   nombre: string;
@@ -34,6 +35,11 @@ export interface DatosDeLaTienda {
   agradecimiento?: string | null;
   /** Si la factura muestra el código de cada renglón. */
   muestraCodigos: boolean;
+  /**
+   * Cómo llama la tienda a lo que vende: una zapatería cuenta **pares**, una
+   * perfumería **unidades**. Solo cambia la palabra, la cuenta es la misma.
+   */
+  rotuloDeUnidades?: 'pares' | 'unidades';
 }
 
 export interface RenglonDeFactura {
@@ -44,6 +50,8 @@ export interface RenglonDeFactura {
   cantidad: number;
   precioUnitario: number;
   total: number;
+  /** El renglón es una caja cerrada: cuenta aparte en el resumen del pie. */
+  esCaja?: boolean;
 }
 
 export interface DatosDeFactura {
@@ -206,6 +214,20 @@ export function pdfDeFactura(
       y += negrita ? 16 : 13;
       doc.fillColor('#000');
     };
+    // Cuántos pares (y cuántas cajas) se lleva el cliente: «me puedes ayudar a
+    // colocar el total de los pares, que un cliente me lo pidió». Va a la
+    // **izquierda**, frente a los totales y no dentro de ellos: es una
+    // cantidad, no pesos, y ahí hay sitio para «26 pares · 2 cajas», que en
+    // la columna del dinero se partiría en dos líneas.
+    const conteo = textoDelConteo(
+      contarLaFactura(factura.renglones),
+      tienda.rotuloDeUnidades ?? 'unidades',
+    );
+    if (conteo) {
+      doc.font('Helvetica-Bold').fontSize(9).fillColor('#000');
+      doc.text(conteo, MARGEN, y + 2, { width: 300 });
+      doc.font('Helvetica');
+    }
     if (factura.descuento > 0 || factura.iva > 0) {
       linea('Subtotal', plata(factura.subtotal));
     }
