@@ -1,9 +1,14 @@
-import { Controller, Post, Body, Get } from '@nestjs/common';
+import { Controller, Post, Body, Get, Patch } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { AuthService } from './auth.service.js';
 import { LoginDto } from './dto/login.dto.js';
 import { RefreshTokenDto } from './dto/refresh-token.dto.js';
+import {
+  CambiarMiClaveDto,
+  CambiarMiUsuarioDto,
+} from './dto/mi-cuenta.dto.js';
+import { TenantId } from '../common/decorators/tenant-id.decorator.js';
 import { Public } from '../common/decorators/public.decorator.js';
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
 import { User } from '../users/entities/user.entity.js';
@@ -49,6 +54,48 @@ export class AuthController {
   @ApiOperation({ summary: 'Refrescar token de acceso' })
   refresh(@Body() refreshTokenDto: RefreshTokenDto) {
     return this.authService.refreshTokens(refreshTokenDto.refreshToken);
+  }
+
+  /**
+   * Mi usuario y mi nombre.
+   *
+   * Cualquiera sobre **lo suyo**: hasta ahora solo un administrador podía
+   * tocar credenciales, y la tienda pidió poder cambiarlas desde la
+   * configuración sin pedir permiso.
+   */
+  @Patch('profile')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Cambiar mi nombre de usuario' })
+  cambiarMiUsuario(
+    @CurrentUser() user: User,
+    @TenantId() tenantId: string,
+    @Body() dto: CambiarMiUsuarioDto,
+  ) {
+    return this.authService.cambiarMiUsuario(user.id, tenantId, dto);
+  }
+
+  /**
+   * Mi contraseña.
+   *
+   * Pide la de ahora y, al cambiarla, cierra las demás sesiones y devuelve
+   * tokens nuevos para esta. El límite por minuto es el del login: probar
+   * contraseñas acá es probar contraseñas igual.
+   */
+  @Throttle({ default: { ttl: 60_000, limit: 10 } })
+  @Post('change-password')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Cambiar mi contraseña' })
+  cambiarMiClave(
+    @CurrentUser() user: User,
+    @TenantId() tenantId: string,
+    @Body() dto: CambiarMiClaveDto,
+  ) {
+    return this.authService.cambiarMiClave(
+      user.id,
+      tenantId,
+      dto.actual,
+      dto.nueva,
+    );
   }
 
   @Post('logout')

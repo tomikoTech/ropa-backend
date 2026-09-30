@@ -1,5 +1,6 @@
 import {
   Injectable,
+  BadRequestException,
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
@@ -7,6 +8,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { User } from './entities/user.entity.js';
+import {
+  normalizarUsuario,
+  porQueNoSirveElUsuario,
+} from './credenciales.js';
 import { CreateUserDto } from './dto/create-user.dto.js';
 import { UpdateUserDto } from './dto/update-user.dto.js';
 
@@ -26,9 +31,25 @@ export class UsersService {
       throw new ConflictException('El email ya está registrado');
     }
 
+    let username: string | undefined;
+    if (createUserDto.username) {
+      const motivo = porQueNoSirveElUsuario(createUserDto.username);
+      if (motivo) throw new BadRequestException(motivo);
+      username = normalizarUsuario(createUserDto.username);
+      const ocupado = await this.userRepository.findOne({
+        where: tenantId ? { username, tenantId } : { username },
+      });
+      if (ocupado) {
+        throw new ConflictException(
+          `El usuario «${username}» ya está tomado en esta tienda.`,
+        );
+      }
+    }
+
     const passwordHash = await bcrypt.hash(createUserDto.password, 10);
     const user = this.userRepository.create({
       email: createUserDto.email,
+      username,
       passwordHash,
       firstName: createUserDto.firstName,
       lastName: createUserDto.lastName,
@@ -67,6 +88,25 @@ export class UsersService {
     });
   }
 
+  /**
+   * Quién tiene ese usuario **en esta tienda**.
+   *
+   * Por tenant y no global: dos tiendas distintas pueden tener cada una su
+   * «caja1» sin estorbarse, que es lo que dice el índice único de la tabla.
+   */
+  async findByUsernameEnTenant(
+    username: string,
+    tenantId: string,
+  ): Promise<User | null> {
+    if (!username) return null;
+    return this.userRepository.findOne({ where: { username, tenantId } });
+  }
+
+  /** Guardar un usuario ya resuelto. Lo usa el cambio de credenciales. */
+  async guardar(user: User): Promise<User> {
+    return this.userRepository.save(user);
+  }
+
   async update(
     id: string,
     updateUserDto: UpdateUserDto,
@@ -81,6 +121,24 @@ export class UsersService {
       if (existing) {
         throw new ConflictException('El email ya está registrado');
       }
+    }
+
+    // El nombre de usuario lo puede poner el administrador (y cada quien el
+    // suyo, desde su configuración). Antes el campo existía, el login ya lo
+    // aceptaba… y nada lo escribía: solo el que trajera el alta.
+    if (updateUserDto.username !== undefined) {
+      const motivo = porQueNoSirveElUsuario(updateUserDto.username);
+      if (motivo) throw new BadRequestException(motivo);
+      const username = normalizarUsuario(updateUserDto.username);
+      const ocupado = await this.userRepository.findOne({
+        where: { username, tenantId },
+      });
+      if (ocupado && ocupado.id !== id) {
+        throw new ConflictException(
+          `El usuario «${username}» ya está tomado en esta tienda.`,
+        );
+      }
+      user.username = username;
     }
 
     if (updateUserDto.password) {

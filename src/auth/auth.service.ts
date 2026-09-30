@@ -1,4 +1,9 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -7,6 +12,11 @@ import * as bcrypt from 'bcrypt';
 import { UsersService } from '../users/users.service.js';
 import { RefreshToken } from './entities/refresh-token.entity.js';
 import { LoginDto } from './dto/login.dto.js';
+import {
+  normalizarUsuario,
+  porQueNoSirveElUsuario,
+  porQueNoSirveLaClave,
+} from '../users/credenciales.js';
 import { User } from '../users/entities/user.entity.js';
 import {
   SCOPE_DESCARGA,
@@ -43,6 +53,85 @@ export class AuthService {
       throw new UnauthorizedException('Usuario desactivado');
     }
 
+    return this.generateTokens(user);
+  }
+
+  /**
+   * Cambiar el **propio** nombre de usuario.
+   *
+   * Hasta ahora solo un administrador podía tocar las credenciales de nadie,
+   * y ni siquiera el usuario: «que se puedan cambiar en la configuración sin
+   * problema». Quien entra con `andres` tiene que poder volverse `andres2`
+   * sin pedirle permiso a nadie.
+   *
+   * No pide contraseña: el usuario por sí solo no abre nada, y pedirla sería
+   * fricción para cambiar una etiqueta. Cambiar la **contraseña** sí la pide.
+   */
+  async cambiarMiUsuario(
+    userId: string,
+    tenantId: string,
+    cambios: { username?: string; firstName?: string; lastName?: string },
+  ) {
+    const user = await this.usersService.findOne(userId, tenantId);
+
+    if (cambios.username !== undefined) {
+      const motivo = porQueNoSirveElUsuario(cambios.username);
+      if (motivo) throw new BadRequestException(motivo);
+      const username = normalizarUsuario(cambios.username);
+      // Dos personas con el mismo usuario en la misma tienda no podrían
+      // entrar: el login no sabría a cuál de las dos.
+      const ocupado = await this.usersService.findByUsernameEnTenant(
+        username,
+        tenantId,
+      );
+      if (ocupado && ocupado.id !== userId) {
+        throw new ConflictException(
+          `El usuario «${username}» ya está tomado en esta tienda.`,
+        );
+      }
+      user.username = username;
+    }
+    if (cambios.firstName?.trim()) user.firstName = cambios.firstName.trim();
+    if (cambios.lastName?.trim()) user.lastName = cambios.lastName.trim();
+
+    const guardado = await this.usersService.guardar(user);
+    return {
+      id: guardado.id,
+      email: guardado.email,
+      username: guardado.username,
+      firstName: guardado.firstName,
+      lastName: guardado.lastName,
+    };
+  }
+
+  /**
+   * Cambiar la propia contraseña.
+   *
+   * Pide la de ahora: sin eso, un celular desbloqueado en el mostrador —o una
+   * sesión que alguien dejó abierta— deja cambiarla y quedarse con la cuenta.
+   *
+   * Al final se cierran **las demás sesiones** y se devuelven tokens nuevos
+   * para esta: si alguien se metió con la contraseña vieja, cambiarla tiene
+   * que sacarlo, que es justo para lo que se cambia.
+   */
+  async cambiarMiClave(userId: string, tenantId: string, actual: string, nueva: string) {
+    const user = await this.usersService.findOne(userId, tenantId);
+    const correcta = await bcrypt.compare(actual, user.passwordHash);
+    if (!correcta) {
+      throw new BadRequestException('La contraseña de ahora no es esa.');
+    }
+    const motivo = porQueNoSirveLaClave(nueva, {
+      actual,
+      usuario: user.username || undefined,
+    });
+    if (motivo) throw new BadRequestException(motivo);
+
+    user.passwordHash = await bcrypt.hash(nueva, 10);
+    await this.usersService.guardar(user);
+    await this.refreshTokenRepository.update(
+      { userId: user.id, isRevoked: false },
+      { isRevoked: true },
+    );
     return this.generateTokens(user);
   }
 
