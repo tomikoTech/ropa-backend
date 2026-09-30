@@ -10,6 +10,7 @@
  * ya pagó.
  */
 import PDFDocument from 'pdfkit';
+import { contarLaFactura, totalesDeLaFactura } from './conteo-de-la-factura.js';
 import { plata, type DatosDeLaTienda } from './factura-pdf.js';
 
 export interface FacturaDelEstado {
@@ -20,10 +21,19 @@ export interface FacturaDelEstado {
   pagado: number;
   saldo: number;
   estado: 'PAID' | 'PARTIAL' | 'PENDING';
-  renglones: { nombre: string; detalle?: string | null; cantidad: number; total: number }[];
+  renglones: {
+    nombre: string;
+    detalle?: string | null;
+    cantidad: number;
+    total: number;
+    /** El renglón salió de una caja cerrada: cuenta aparte arriba. */
+    esCaja?: boolean;
+  }[];
 }
 
 export interface DatosDelEstadoDeCuenta {
+  /** «pares» en una zapatería, «unidades» en el resto. */
+  rotuloDeUnidades?: 'pares' | 'unidades';
   cliente: string;
   documento?: string | null;
   telefono?: string | null;
@@ -123,6 +133,29 @@ export function pdfDeEstadoDeCuenta(
     );
     doc.fillColor('#000');
     y += 60;
+
+    // ── Cuánta mercancía es, arriba ──────────────────────────────────────
+    // Lo mismo que en la factura y por lo mismo: «a los clientes les da
+    // pereza bajar». Acá se cuenta **lo que se debe**, que es lo que traen
+    // los renglones de este documento.
+    const totales = totalesDeLaFactura(
+      contarLaFactura(estado.facturas.flatMap((f) => f.renglones)),
+      estado.rotuloDeUnidades ?? 'unidades',
+    );
+    if (totales.length) {
+      const ancho = (ANCHO_UTIL - (totales.length - 1) * 8) / totales.length;
+      const alto = 32;
+      totales.forEach((t, i) => {
+        const x = MARGEN + i * (ancho + 8);
+        doc.roundedRect(x, y, ancho, alto, 3).fill('#f5f5f5');
+        doc.fillColor('#666').font('Helvetica').fontSize(7.5);
+        doc.text(t.titulo.toUpperCase(), x, y + 5, { width: ancho, align: 'center' });
+        doc.fillColor('#000').font('Helvetica-Bold').fontSize(13);
+        doc.text(t.valor, x, y + 15, { width: ancho, align: 'center' });
+      });
+      doc.font('Helvetica').fontSize(9).fillColor('#000');
+      y += alto + 12;
+    }
 
     // ── Facturas ─────────────────────────────────────────────────────────
     const col = { num: MARGEN, fecha: 130, estado: 230, total: 330, pagado: 410, saldo: 490 };

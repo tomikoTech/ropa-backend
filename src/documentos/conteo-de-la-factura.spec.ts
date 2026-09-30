@@ -1,6 +1,7 @@
 import {
   contarLaFactura,
   textoDelConteo,
+  totalesDeLaFactura,
   type RenglonContable,
 } from './conteo-de-la-factura.js';
 
@@ -43,6 +44,8 @@ describe('contarLaFactura', () => {
       unidades: 0,
       cajas: 0,
       unidadesEnCajas: 0,
+      productos: 0,
+      items: 0,
     });
   });
 
@@ -89,5 +92,50 @@ describe('textoDelConteo', () => {
 
   it('una factura sin renglones no imprime la línea', () => {
     expect(textoDelConteo(contarLaFactura([]), 'pares')).toBe('');
+  });
+});
+
+/**
+ * Los tres totales de arriba.
+ *
+ * «Pueden ser total productos, total cajas y luego total ítems, que haga la
+ * suma de las cajas y los productos… total productos, solo productos, es
+ * decir, los que no sean cajas».
+ */
+describe('totalesDeLaFactura', () => {
+  it('separa lo suelto de las cajas y suma los ítems', () => {
+    // Dos cajas (24 y 12 pares) más dos pares sueltos: el cliente recibe
+    // cuatro cosas, y de esas dos son cajas.
+    const t = totalesDeLaFactura(
+      contarLaFactura([caja(24), caja(12), par(2)]),
+      'pares',
+    );
+    expect(t).toEqual([
+      { titulo: 'Total pares', valor: '2' },
+      { titulo: 'Total cajas', valor: '2' },
+      { titulo: 'Total ítems', valor: '4' },
+    ]);
+  });
+
+  it('sin cajas no hay desglose que hacer: un solo recuadro', () => {
+    expect(totalesDeLaFactura(contarLaFactura([par(5)]), 'pares')).toEqual([
+      { titulo: 'Total pares', valor: '5' },
+    ]);
+  });
+
+  it('quien no vende calzado cuenta productos', () => {
+    expect(totalesDeLaFactura(contarLaFactura([par(3)]), 'unidades')).toEqual([
+      { titulo: 'Total productos', valor: '3' },
+    ]);
+  });
+
+  it('una factura de puras cajas dice cero sueltos, no esconde la fila', () => {
+    // Que diga «0» es información: el cliente sabe que todo va empacado.
+    const t = totalesDeLaFactura(contarLaFactura([caja(24)]), 'pares');
+    expect(t.map((x) => x.valor)).toEqual(['0', '1', '1']);
+  });
+
+  it('una factura vacía no pinta recuadros', () => {
+    expect(totalesDeLaFactura(contarLaFactura([]), 'pares')).toEqual([]);
   });
 });

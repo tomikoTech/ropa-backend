@@ -3448,6 +3448,8 @@ export class PosService {
           quantity: it.quantity,
           unitPrice: Number(it.unitPrice),
           lineTotal: it.quantity * Number(it.unitPrice),
+          // Para contar cajas aparte de pares en el estado de cuenta.
+          unitKind: it.unitKind ?? null,
         })),
       };
     });

@@ -16,7 +16,7 @@
  * Traer el logo es cosa de quien llama.
  */
 import PDFDocument from 'pdfkit';
-import { contarLaFactura, textoDelConteo } from './conteo-de-la-factura.js';
+import { contarLaFactura, totalesDeLaFactura } from './conteo-de-la-factura.js';
 
 export interface DatosDeLaTienda {
   nombre: string;
@@ -162,6 +162,33 @@ export function pdfDeFactura(
     doc.fillColor('#000');
     y = doc.y + 14;
 
+    // ── Cuánto se lleva: arriba, no al pie ───────────────────────────────
+    // «Por lo general a los clientes les da pereza bajar, como que toda la
+    // información fuera la de colocar en la parte de arriba». Quien recibe la
+    // mercancía cuenta bultos antes de mirar el total en pesos, así que las
+    // cifras van antes de la tabla, en recuadros que se leen de un vistazo.
+    const totales = totalesDeLaFactura(
+      contarLaFactura(factura.renglones),
+      tienda.rotuloDeUnidades ?? 'unidades',
+    );
+    if (totales.length) {
+      const ancho = (ANCHO_UTIL - (totales.length - 1) * 8) / totales.length;
+      const alto = 34;
+      totales.forEach((t, i) => {
+        const x = MARGEN + i * (ancho + 8);
+        doc.roundedRect(x, y, ancho, alto, 3).fill('#f5f5f5');
+        doc.fillColor('#666').font('Helvetica').fontSize(7.5);
+        doc.text(t.titulo.toUpperCase(), x, y + 6, {
+          width: ancho,
+          align: 'center',
+        });
+        doc.fillColor('#000').font('Helvetica-Bold').fontSize(14);
+        doc.text(t.valor, x, y + 16, { width: ancho, align: 'center' });
+      });
+      doc.font('Helvetica').fontSize(9).fillColor('#000');
+      y += alto + 14;
+    }
+
     // ── Tabla de renglones ───────────────────────────────────────────────
     const col = { nombre: MARGEN, cant: 400, unit: 450, total: 520 };
     const filaEncabezado = (yy: number) => {
@@ -214,20 +241,6 @@ export function pdfDeFactura(
       y += negrita ? 16 : 13;
       doc.fillColor('#000');
     };
-    // Cuántos pares (y cuántas cajas) se lleva el cliente: «me puedes ayudar a
-    // colocar el total de los pares, que un cliente me lo pidió». Va a la
-    // **izquierda**, frente a los totales y no dentro de ellos: es una
-    // cantidad, no pesos, y ahí hay sitio para «26 pares · 2 cajas», que en
-    // la columna del dinero se partiría en dos líneas.
-    const conteo = textoDelConteo(
-      contarLaFactura(factura.renglones),
-      tienda.rotuloDeUnidades ?? 'unidades',
-    );
-    if (conteo) {
-      doc.font('Helvetica-Bold').fontSize(9).fillColor('#000');
-      doc.text(conteo, MARGEN, y + 2, { width: 300 });
-      doc.font('Helvetica');
-    }
     if (factura.descuento > 0 || factura.iva > 0) {
       linea('Subtotal', plata(factura.subtotal));
     }

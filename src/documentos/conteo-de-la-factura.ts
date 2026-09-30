@@ -25,12 +25,21 @@ export interface RenglonContable {
 }
 
 export interface ConteoDeLaFactura {
-  /** Pares (o unidades) en total, cajas incluidas. */
+  /** Pares (o unidades) en total, los de dentro de las cajas incluidos. */
   unidades: number;
   /** Cuántas cajas cerradas. */
   cajas: number;
   /** Cuántos de esos pares venían dentro de cajas. */
   unidadesEnCajas: number;
+  /** Lo que se vende suelto: todo lo que **no** es caja. */
+  productos: number;
+  /**
+   * Lo que el cliente recibe contando bultos: los sueltos más las cajas.
+   *
+   * Es la cifra con la que se recibe el pedido —«me llegaron cuatro cosas:
+   * dos cajas y dos pares»—, no la de cuántos pares hay dentro.
+   */
+  items: number;
 }
 
 export function contarLaFactura(
@@ -50,11 +59,51 @@ export function contarLaFactura(
       unidadesEnCajas += n;
     }
   }
-  return { unidades, cajas, unidadesEnCajas };
+  const productos = unidades - unidadesEnCajas;
+  return {
+    unidades,
+    cajas,
+    unidadesEnCajas,
+    productos,
+    items: productos + cajas,
+  };
 }
 
 /**
- * El texto que va en la factura: «24 pares · 2 cajas».
+ * Los recuadros que van **arriba** de la factura.
+ *
+ * Arriba y no al pie: «por lo general a los clientes les da pereza bajar,
+ * como que toda la información fuera la de colocar en la parte de arriba».
+ * Quien recibe la mercancía mira esto antes que el total en pesos.
+ *
+ * Son tres cifras y cada una contesta una pregunta distinta:
+ *
+ *  - **Productos**: lo que viene suelto, fuera de caja.
+ *  - **Cajas**: cuántas cajas cerradas.
+ *  - **Ítems**: las dos anteriores sumadas, que es lo que se cuenta al
+ *    descargar («me llegaron cuatro cosas»).
+ *
+ * Sin cajas de por medio sobra el desglose: se devuelve un solo recuadro, que
+ * en una perfumería es todo lo que hace falta.
+ */
+export function totalesDeLaFactura(
+  conteo: ConteoDeLaFactura,
+  rotulo: 'pares' | 'unidades' = 'unidades',
+): { titulo: string; valor: string }[] {
+  if (!conteo.unidades && !conteo.cajas) return [];
+  const nombreDeLoSuelto = rotulo === 'pares' ? 'Total pares' : 'Total productos';
+  if (!conteo.cajas) {
+    return [{ titulo: nombreDeLoSuelto, valor: String(conteo.productos) }];
+  }
+  return [
+    { titulo: nombreDeLoSuelto, valor: String(conteo.productos) },
+    { titulo: 'Total cajas', valor: String(conteo.cajas) },
+    { titulo: 'Total ítems', valor: String(conteo.items) },
+  ];
+}
+
+/**
+ * El texto de una línea: «24 pares · 2 cajas».
  *
  * `rotulo` distingue a quien vende calzado de quien vende frascos: la misma
  * cuenta, la palabra que usa cada tienda.

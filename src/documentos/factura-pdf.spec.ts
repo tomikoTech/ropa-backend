@@ -119,6 +119,27 @@ describe('pdfDeEstadoDeCuenta', () => {
     expect(esPdf(b)).toBe(true);
   });
 
+  it('con cajas de por medio sigue saliendo, con sus totales arriba', async () => {
+    // Los recuadros de «total pares / cajas / ítems» se dibujan antes de la
+    // tabla; lo que se comprueba acá es que no tumban el documento.
+    const base = estado(1);
+    const b = await pdfDeEstadoDeCuenta(
+      { ...tienda, rotuloDeUnidades: 'pares' },
+      {
+        ...base,
+        rotuloDeUnidades: 'pares' as const,
+        facturas: base.facturas.map((f) => ({
+          ...f,
+          renglones: [
+            ...f.renglones,
+            { nombre: 'Caja surtida', detalle: '38-42', cantidad: 24, total: 1_920_000, esCaja: true },
+          ],
+        })),
+      },
+    );
+    expect(esPdf(b)).toBe(true);
+  });
+
   it('cuarenta facturas con saldo ocupan más de una hoja', async () => {
     expect(paginas(await pdfDeEstadoDeCuenta(tienda, estado(40)))).toBeGreaterThan(1);
   });
