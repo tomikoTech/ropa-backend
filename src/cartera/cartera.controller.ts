@@ -1,4 +1,4 @@
-import { Controller, Get, Query, Res, StreamableFile } from '@nestjs/common';
+import { Controller, Get, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { libroDeCarteraCompleta } from './cartera-completa-excel.js';
 import { pdfDeCarteraCompleta } from '../documentos/cartera-completa-pdf.js';
@@ -93,7 +93,7 @@ export class CarteraController {
   })
   async completa(
     @TenantId() tenantId: string,
-    @Res({ passthrough: true }) res: Response,
+    @Res() res: Response,
     @Query('formato') formato?: string,
   ) {
     const cartera = await this.cartera.carteraCompleta(tenantId);
@@ -106,12 +106,15 @@ export class CarteraController {
         cartera,
         generadoEl,
       );
+      // Se escribe directo: el interceptor de respuestas envolvía el archivo
+      // en JSON y la descarga llegaba de 96 bytes.
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader(
         'Content-Disposition',
         `attachment; filename="cartera-completa-${fecha}.pdf"`,
       );
-      return new StreamableFile(pdf);
+      res.end(pdf);
+      return;
     }
     if (formato === 'xlsx') {
       const tienda = await this.cartera.nombreDeLaTienda(tenantId);
@@ -128,8 +131,9 @@ export class CarteraController {
         'Content-Disposition',
         `attachment; filename="cartera-completa-${fecha}.xlsx"`,
       );
-      return new StreamableFile(Buffer.from(buffer));
+      res.end(Buffer.from(buffer));
+      return;
     }
-    return cartera;
+    res.json(cartera);
   }
 }
