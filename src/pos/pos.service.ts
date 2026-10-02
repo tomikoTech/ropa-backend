@@ -5,6 +5,7 @@ import {
   BadRequestException,
   Logger,
 } from '@nestjs/common';
+import { perfilDelNegocio } from '../tienda/perfil-del-negocio.js';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource, EntityManager, In, Not } from 'typeorm';
 import { Sale } from './entities/sale.entity.js';
@@ -72,10 +73,7 @@ import {
   tomarParaLaLinea,
   type CodigoDisponible,
 } from './repartir-codigos-en-lineas.js';
-import {
-  bultosRepetidos,
-  porQueNoSePuedeGuardar,
-} from './bultos-repetidos.js';
+import { bultosRepetidos, porQueNoSePuedeGuardar } from './bultos-repetidos.js';
 import { emparejarRenglones } from './emparejar-renglones.js';
 
 @Injectable()
@@ -146,6 +144,7 @@ export class PosService {
     // descuento de inventario y el consecutivo de factura.
     await this.caja.exigirTurnoAbierto(tenantId, userId, dto.warehouseId);
     await this.caja.exigirComprobante(tenantId, dto.payments);
+    await this.exigirBodegaDeVenta(tenantId, dto.warehouseId);
     // El consecutivo de venta/factura se calcula leyendo el último existente:
     // dos cajas vendiendo a la vez pueden elegir el mismo número y chocar contra
     // el índice único. Reintentar la transacción completa (rollback + recálculo)
@@ -476,7 +475,10 @@ export class PosService {
         // 33% de descuento el del carrito daba cuatro billonésimas de peso
         // menos: la venta se caía con «Pago insuficiente. Total: $30753,
         // Pagado: $30752.999999999996». Ver `el-pago-cubre-el-total.ts`.
-        if (!isPending && !cubreElTotal(totalRegular + totalCredit, saleTotals.total)) {
+        if (
+          !isPending &&
+          !cubreElTotal(totalRegular + totalCredit, saleTotals.total)
+        ) {
           throw new BadRequestException(
             `Pago insuficiente. Total: $${saleTotals.total}, Pagado: $${totalRegular + totalCredit}`,
           );
@@ -1005,9 +1007,7 @@ export class PosService {
           ${warehouseId ? 'AND u.warehouse_id = $3' : ''}
         ORDER BY u.created_at ASC, u.id ASC
         LIMIT 400`,
-      warehouseId
-        ? [tenantId, variantId, warehouseId]
-        : [tenantId, variantId],
+      warehouseId ? [tenantId, variantId, warehouseId] : [tenantId, variantId],
     );
 
     if (!warehouseId && filas.length > 1) {
@@ -1421,8 +1421,7 @@ export class PosService {
       const [saleId, variantId] = clave.split('|');
       const vigentes = paresVigentesDeLaVenta(lista);
       if (!vigentes.length) continue;
-      const porVariante =
-        porVenta.get(saleId) ?? new Map<string, string[]>();
+      const porVariante = porVenta.get(saleId) ?? new Map<string, string[]>();
       porVariante.set(variantId, vigentes);
       porVenta.set(saleId, porVariante);
     }
@@ -1927,12 +1926,17 @@ export class PosService {
             // línea. Varios pares sueltos no caben en una columna sola, y esa
             // línea sigue guardándose sin código como siempre.
             const bultoDeLaLinea =
-              pedidos.length === 1 && Number(pedidos[0].quantity) === item.quantity
+              pedidos.length === 1 &&
+              Number(pedidos[0].quantity) === item.quantity
                 ? pedidos[0]
                 : null;
             const contenidoDelBulto =
               bultoDeLaLinea?.kind === StockUnitKind.BOX
-                ? await this.contenidoDeLaCaja(manager, bultoDeLaLinea, tenantId)
+                ? await this.contenidoDeLaCaja(
+                    manager,
+                    bultoDeLaLinea,
+                    tenantId,
+                  )
                 : null;
             const unidadDeLaLinea = keptUnit ?? bultoDeLaLinea;
 
@@ -2538,7 +2542,8 @@ export class PosService {
         deuda.isFullyPaid = false;
         deuda.fullyPaidAt = null;
         deuda.notes = anotar(
-          dto.creditNotes ?? `Pasada a crédito desde ${plan.pagosQueSeBorran.length ? 'un pago ya registrado' : 'una venta sin cobrar'}`,
+          dto.creditNotes ??
+            `Pasada a crédito desde ${plan.pagosQueSeBorran.length ? 'un pago ya registrado' : 'una venta sin cobrar'}`,
           plan.carteraQueRevive ? cuenta!.notes : null,
         );
         await arRepo.save(deuda);
@@ -3082,10 +3087,10 @@ export class PosService {
         {
           paidAmount: decision.abonadoQueQueda / 100,
           isFullyPaid:
-            decision.abonadoQueQueda >= Math.round(Number(ar.totalAmount) * 100),
-          fullyPaidAt:
             decision.abonadoQueQueda >=
-            Math.round(Number(ar.totalAmount) * 100)
+            Math.round(Number(ar.totalAmount) * 100),
+          fullyPaidAt:
+            decision.abonadoQueQueda >= Math.round(Number(ar.totalAmount) * 100)
               ? ar.fullyPaidAt
               : null,
         },
@@ -3468,6 +3473,34 @@ export class PosService {
       invoices,
       totals: { totalCredit, totalPaid, totalDebt },
     };
+  }
+  /**
+   * En una perfumería la factura sale **siempre** por la bodega de venta.
+   *
+   * «La factura siempre la vamos a cobrar por DistriAmber; no necesito las
+   * otras dos bodegas en ese espacio porque pueden confundirlo y cobrarlo por
+   * otro lado». ESENCIAS y FRASCOS guardan insumos, no se vende desde ahí:
+   * una venta contra ellas descuadra las dos cosas a la vez. El POS ya no las
+   * ofrece; esto es el candado del lado del servidor.
+   */
+  private async exigirBodegaDeVenta(
+    tenantId: string,
+    warehouseId?: string | null,
+  ): Promise<void> {
+    if (!warehouseId) return;
+    const s = await this.storeSettingsRepo.findOne({ where: { tenantId } });
+    if (!perfilDelNegocio(s).soloTerminadosEnVenta) return;
+    const bodega = await this.dataSource
+      .getRepository(Warehouse)
+      .findOne({
+        where: { id: warehouseId, tenantId },
+        select: ['id', 'name', 'isPosLocation'],
+      });
+    if (bodega && !bodega.isPosLocation) {
+      throw new BadRequestException(
+        `«${bodega.name}» no es una bodega de venta: la factura se cobra por la bodega principal.`,
+      );
+    }
   }
 }
 

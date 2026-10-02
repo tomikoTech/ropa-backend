@@ -1,4 +1,8 @@
 import {
+  perfilDelNegocio,
+  tipoDeProductoPorDefecto,
+} from '../tienda/perfil-del-negocio.js';
+import {
   Injectable,
   NotFoundException,
   BadRequestException,
@@ -28,10 +32,7 @@ import { UpdateWarehouseDto } from './dto/update-warehouse.dto.js';
 import { AdjustStockDto } from './dto/adjust-stock.dto.js';
 import { TransferStockDto } from './dto/transfer-stock.dto.js';
 import { TrasladoEnLoteDto } from './dto/traslado-en-lote.dto.js';
-import {
-  bultosRepetidos,
-  numerosDeLosRenglones,
-} from './remision-en-lote.js';
+import { bultosRepetidos, numerosDeLosRenglones } from './remision-en-lote.js';
 import { randomUUID } from 'node:crypto';
 import { MovementType } from '../common/enums/movement-type.enum.js';
 import { ProductVariant } from '../products/entities/product-variant.entity.js';
@@ -505,9 +506,21 @@ export class InventoryService {
       genders?: string[];
       /** Uno de: stock-desc, stock-asc, name-asc, name-desc. */
       sort?: string;
+      /**
+       * Tipo de producto: STANDARD (terminado, incluye sin categoría), FRASCO
+       * o ESSENCE. Sin pedirlo, una perfumería ve solo el terminado: las
+       * esencias y los frascos tienen su propia pestaña.
+       */
+      type?: string;
     },
   ) {
     const pagina = resolverPagina(opts, { limitDefault: 50, limitMax: 200 });
+    const tipo = tipoDeProductoPorDefecto(
+      perfilDelNegocio(
+        await this.settingsRepository.findOne({ where: { tenantId } }),
+      ),
+      opts.type,
+    );
 
     // Whitelist del orden: nunca se concatena lo que llega de la URL. Cualquier
     // valor desconocido cae al de siempre (más inventario primero).
@@ -534,7 +547,13 @@ export class InventoryService {
         // buscar y filtrar por ellos.
         .leftJoin('v.colorRef', 'col')
         .leftJoin('v.sizeRef', 'sz')
+        .leftJoin('p.category', 'cat')
         .where('s.tenantId = :tenantId', { tenantId });
+      if (tipo === 'STANDARD') {
+        qb.andWhere("(cat.type = 'STANDARD' OR cat.type IS NULL)");
+      } else if (tipo) {
+        qb.andWhere('cat.type = :tipo', { tipo });
+      }
       if (opts.warehouseId) {
         qb.andWhere('s.warehouseId = :warehouseId', {
           warehouseId: opts.warehouseId,
@@ -965,7 +984,11 @@ export class InventoryService {
    */
   private async validarBultoDelTraslado(
     manager: import('typeorm').EntityManager,
-    renglon: { variantId: string; quantity: number; stockUnitId?: string | null },
+    renglon: {
+      variantId: string;
+      quantity: number;
+      stockUnitId?: string | null;
+    },
     fromWarehouseId: string,
     tenantId: string,
   ): Promise<void> {
@@ -1091,7 +1114,9 @@ export class InventoryService {
             }),
           );
           ids.push(transfer.id);
-          const unidades = renglon.stockUnitId ? [renglon.stockUnitId] : undefined;
+          const unidades = renglon.stockUnitId
+            ? [renglon.stockUnitId]
+            : undefined;
           if (enTransito) {
             // Sale del origen y queda en tránsito; entra al destino al recibir.
             await this.ledger.mover(manager, {

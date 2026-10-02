@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
 import { ClientsService } from './clients.service.js';
 import { Client } from './entities/client.entity.js';
 
@@ -13,12 +14,23 @@ describe('ClientsService.create (cliente rápido)', () => {
     repo = {
       findOne: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockImplementation((d) => d),
-      save: jest.fn().mockImplementation((d) => Promise.resolve({ ...d, id: 'c1' })),
+      save: jest
+        .fn()
+        .mockImplementation((d) => Promise.resolve({ ...d, id: 'c1' })),
+      // El aviso de «ya existe un cliente llamado así» busca candidatos por
+      // nombre; acá no hay ninguno.
+      createQueryBuilder: jest.fn(() => ({
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([]),
+      })),
     };
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ClientsService,
         { provide: getRepositoryToken(Client), useValue: repo },
+        // La fusión usa una transacción; crear no.
+        { provide: DataSource, useValue: {} },
       ],
     }).compile();
     service = module.get(ClientsService);

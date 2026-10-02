@@ -48,10 +48,12 @@ const factura = (renglones = 3) => ({
 
 /** Un PDF empieza con `%PDF-` y termina con `%%EOF`. */
 const esPdf = (b: Buffer) =>
-  b.subarray(0, 5).toString() === '%PDF-' && b.toString('latin1').trimEnd().endsWith('%%EOF');
+  b.subarray(0, 5).toString() === '%PDF-' &&
+  b.toString('latin1').trimEnd().endsWith('%%EOF');
 
 /** Cuántas páginas: pdfkit escribe un objeto `/Type /Page` por hoja. */
-const paginas = (b: Buffer) => (b.toString('latin1').match(/\/Type \/Page[^s]/g) ?? []).length;
+const paginas = (b: Buffer) =>
+  (b.toString('latin1').match(/\/Type \/Page[^s]/g) ?? []).length;
 
 describe('pdfDeFactura', () => {
   it('produce un PDF de verdad', async () => {
@@ -63,7 +65,10 @@ describe('pdfDeFactura', () => {
   it('sin logo, sin lema y sin notas sigue saliendo', async () => {
     // Una tienda recién creada no tiene nada de eso configurado: la factura
     // no puede depender de que lo tenga.
-    const b = await pdfDeFactura({ nombre: 'Nueva', muestraCodigos: false }, factura(1));
+    const b = await pdfDeFactura(
+      { nombre: 'Nueva', muestraCodigos: false },
+      factura(1),
+    );
     expect(esPdf(b)).toBe(true);
   });
 
@@ -75,7 +80,12 @@ describe('pdfDeFactura', () => {
   });
 
   it('con saldo pendiente y vencimiento no se cae', async () => {
-    const f = { ...factura(2), pagado: 20_000, saldo: 57_800, vence: '2026-12-12' };
+    const f = {
+      ...factura(2),
+      pagado: 20_000,
+      saldo: 57_800,
+      vence: '2026-12-12',
+    };
     expect(esPdf(await pdfDeFactura(tienda, f))).toBe(true);
   });
 
@@ -103,7 +113,14 @@ describe('pdfDeEstadoDeCuenta', () => {
       pagado: i === 0 ? 100_000 : 30_000,
       saldo: i === 0 ? 0 : 70_000,
       estado: (i === 0 ? 'PAID' : 'PARTIAL') as 'PAID' | 'PARTIAL',
-      renglones: [{ nombre: 'Tenis Runner', detalle: '38 / Negro', cantidad: 2, total: 100_000 }],
+      renglones: [
+        {
+          nombre: 'Tenis Runner',
+          detalle: '38 / Negro',
+          cantidad: 2,
+          total: 100_000,
+        },
+      ],
     })),
     totalFacturado: 100_000 * facturas,
     totalPagado: 100_000 + 30_000 * (facturas - 1),
@@ -115,7 +132,12 @@ describe('pdfDeEstadoDeCuenta', () => {
   });
 
   it('sin facturas no se cae', async () => {
-    const b = await pdfDeEstadoDeCuenta(tienda, { ...estado(0), deuda: 0, totalFacturado: 0, totalPagado: 0 });
+    const b = await pdfDeEstadoDeCuenta(tienda, {
+      ...estado(0),
+      deuda: 0,
+      totalFacturado: 0,
+      totalPagado: 0,
+    });
     expect(esPdf(b)).toBe(true);
   });
 
@@ -132,7 +154,13 @@ describe('pdfDeEstadoDeCuenta', () => {
           ...f,
           renglones: [
             ...f.renglones,
-            { nombre: 'Caja surtida', detalle: '38-42', cantidad: 24, total: 1_920_000, esCaja: true },
+            {
+              nombre: 'Caja surtida',
+              detalle: '38-42',
+              cantidad: 24,
+              total: 1_920_000,
+              esCaja: true,
+            },
           ],
         })),
       },
@@ -141,7 +169,9 @@ describe('pdfDeEstadoDeCuenta', () => {
   });
 
   it('cuarenta facturas con saldo ocupan más de una hoja', async () => {
-    expect(paginas(await pdfDeEstadoDeCuenta(tienda, estado(40)))).toBeGreaterThan(1);
+    expect(
+      paginas(await pdfDeEstadoDeCuenta(tienda, estado(40))),
+    ).toBeGreaterThan(1);
   });
 });
 
@@ -182,5 +212,53 @@ describe('la factura dice cuántos pares lleva', () => {
     // Pasa de verdad: una venta de solo terceros no trae renglones propios.
     const pdf = await pdfDeFactura(tienda, { ...factura(0), renglones: [] });
     expect(pdf.subarray(0, 4).toString()).toBe('%PDF');
+  });
+});
+
+/**
+ * El descuento se ve renglón por renglón.
+ *
+ * Que el número sea el correcto lo fija `descuento-de-la-factura.spec.ts`;
+ * acá se comprueba que un PDF con precio tachado, porcentaje y frase al pie
+ * se arma y sale, con los tres caminos: por línea, a mano y general.
+ */
+describe('la factura enseña el descuento tachado', () => {
+  it('sale un PDF con rebajas por línea, a mano y general', async () => {
+    const f = {
+      ...factura(0),
+      renglones: [
+        {
+          ...renglon(1),
+          precioUnitario: 60_000,
+          descuentoPorcentaje: 15,
+          total: 51_000,
+        },
+        {
+          ...renglon(2),
+          precioUnitario: 27_000,
+          precioDeLista: 30_000,
+          total: 27_000,
+        },
+        { ...renglon(3), precioUnitario: 10_000, total: 10_000 },
+      ],
+      subtotal: 97_000,
+      descuento: 5_000,
+      total: 83_000,
+      pagado: 83_000,
+      saldo: 0,
+    };
+    const b = await pdfDeFactura(tienda, f);
+    expect(esPdf(b)).toBe(true);
+    // Hay más tinta que en la misma factura sin descuentos.
+    const sin = await pdfDeFactura(tienda, {
+      ...f,
+      renglones: f.renglones.map((r) => ({
+        ...r,
+        descuentoPorcentaje: 0,
+        precioDeLista: null,
+      })),
+      descuento: 0,
+    });
+    expect(b.length).toBeGreaterThan(sin.length);
   });
 });

@@ -9,7 +9,12 @@ import {
   Res,
   ParseUUIDPipe,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiQuery,
+} from '@nestjs/swagger';
 import type { Response } from 'express';
 import { PurchasesService } from './purchases.service.js';
 import { buildStatementWorkbook } from '../common/utils/statement-excel.util.js';
@@ -217,8 +222,10 @@ export class PurchasesController {
     return this.purchasesService.send(id, tenantId);
   }
 
+  // Sin `@Roles(ADMIN)`: quien recibe la mercancía es el de bodega o el de
+  // producción (César), no el dueño. Lo que puede o no hacer lo dice la
+  // matriz de permisos (`purchases: editar`), no el rol de la cuenta.
   @Post(':id/receive')
-  @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Recibir items de orden de compra' })
   receive(
     @Param('id', ParseUUIDPipe) id: string,

@@ -1,4 +1,8 @@
 import {
+  contarUnidades,
+  perfilDelNegocio,
+} from '../tienda/perfil-del-negocio.js';
+import {
   Injectable,
   NotFoundException,
   BadRequestException,
@@ -109,6 +113,9 @@ export class StorefrontService {
       wompiEnabled:
         !!settings.wompiPublicKey && !!settings.wompiIntegritySecret,
       codEnabled: settings.codEnabled,
+      tipoDeNegocio: perfilDelNegocio(settings).tipo,
+      pedidoSiempreADomicilio:
+        perfilDelNegocio(settings).pedidoSiempreADomicilio,
       flatShippingCost: Number(settings.flatShippingCost) || 0,
       storeCityName: settings.storeCityName || null,
       storeDepartment: settings.storeDepartment || null,
@@ -162,6 +169,9 @@ export class StorefrontService {
         accentColor: settings.accentColor || null,
         direccion: settings.address || null,
         instagramUrl: settings.instagramUrl || null,
+        // Para que el carrito pida dirección y avise que la tienda confirma.
+        pedidoSiempreADomicilio:
+          perfilDelNegocio(settings).pedidoSiempreADomicilio,
       },
       productos,
       filtros: filtrosDelCatalogo(productos),
@@ -638,6 +648,22 @@ export class StorefrontService {
     if (!settings.isStorefrontActive && !settings.catalogoEnabled) {
       throw new BadRequestException('La tienda no está activa');
     }
+    // En una perfumería el pedido es **siempre a domicilio** —«aquí en la
+    // bodega no debería venir nadie»— y se confirma por WhatsApp: sin
+    // teléfono y sin dirección no hay a quién ni a dónde mandarle nada.
+    if (perfilDelNegocio(settings).pedidoSiempreADomicilio) {
+      if (!dto.customerPhone?.trim()) {
+        throw new BadRequestException(
+          'El teléfono es obligatorio: te confirmamos el pedido por WhatsApp.',
+        );
+      }
+      if (!dto.shippingAddress?.trim()) {
+        throw new BadRequestException(
+          'La dirección es obligatoria: los pedidos van a domicilio.',
+        );
+      }
+      dto.deliveryMethod = 'shipping';
+    }
     const tenantId = settings.tenantId;
     const warehouseId =
       settings.ecommerceWarehouseId || settings.defaultWarehouseId;
@@ -814,6 +840,12 @@ export class StorefrontService {
       contactLines.push(`Mi correo: ${dto.customerEmail}`);
     }
 
+    const porConfirmar = perfilDelNegocio(settings).pedidoSiempreADomicilio
+      ? [
+          '',
+          'Entiendo que el precio y la disponibilidad están sujetos a confirmación de la tienda.',
+        ]
+      : [];
     const message = [
       `Hola! Soy ${dto.customerName}.`,
       `Estoy interesado en:`,
@@ -822,6 +854,7 @@ export class StorefrontService {
       '',
       `Total estimado: $${Number(saleTotals.total).toLocaleString('es-CO')}`,
       ...contactLines,
+      ...porConfirmar,
     ].join('\n');
 
     // Only generate WhatsApp URL if customer provided a phone number
@@ -864,7 +897,7 @@ export class StorefrontService {
         this.notifications.crearPara(admins, tenantId, {
           type: 'pedido_catalogo',
           title: `Nuevo pedido ${savedOrder.orderNumber}`,
-          body: `${dto.customerName} pide ${cuantos} ${cuantos === 1 ? 'par' : 'pares'} por $${Number(savedOrder.total).toLocaleString('es-CO')}.`,
+          body: `${dto.customerName} pide ${contarUnidades(perfilDelNegocio(settings), cuantos)} por $${Number(savedOrder.total).toLocaleString('es-CO')}.`,
           link: '/storefront/orders',
           dedupeKey: `pedido:${savedOrder.id}`,
         }),

@@ -1,4 +1,8 @@
 import {
+  TIPOS_DE_NEGOCIO,
+  type TipoDeNegocio,
+} from '../../tienda/perfil-del-negocio.js';
+import {
   IsString,
   IsOptional,
   IsBoolean,
@@ -206,7 +210,9 @@ export class UpdateStoreSettingsDto {
   @IsBoolean()
   transferConfirmationEnabled?: boolean;
 
-  @ApiPropertyOptional({ description: 'Cesiones: preguntar si ya llegó y si ya volvió' })
+  @ApiPropertyOptional({
+    description: 'Cesiones: preguntar si ya llegó y si ya volvió',
+  })
   @IsOptional()
   @IsBoolean()
   cesionConfirmacionEnabled?: boolean;
@@ -375,6 +381,15 @@ export class UpdateStoreSettingsDto {
   @IsOptional()
   @IsBoolean()
   unitTrackingEnabled?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'Qué clase de negocio es la tienda: calzado, perfumeria o general',
+    enum: TIPOS_DE_NEGOCIO,
+  })
+  @IsOptional()
+  @IsIn(TIPOS_DE_NEGOCIO)
+  tipoDeNegocio?: TipoDeNegocio;
 
   // ─── Cuadre y cierre de caja ───
 

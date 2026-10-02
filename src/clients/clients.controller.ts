@@ -14,6 +14,8 @@ import { ClientsService } from './clients.service.js';
 import { CreateClientDto } from './dto/create-client.dto.js';
 import { UpdateClientDto } from './dto/update-client.dto.js';
 import { TenantId } from '../common/decorators/tenant-id.decorator.js';
+import { Roles } from '../common/decorators/roles.decorator.js';
+import { Role } from '../common/enums/role.enum.js';
 
 @ApiTags('clients')
 @ApiBearerAuth()
@@ -70,5 +72,16 @@ export class ClientsController {
   @Delete(':id')
   remove(@Param('id', ParseUUIDPipe) id: string, @TenantId() tenantId: string) {
     return this.clientsService.remove(id, tenantId);
+  }
+
+  /** `:id` sobrevive; `:absorbidoId` le entrega todo y desaparece. */
+  @Post(':id/fusionar/:absorbidoId')
+  @Roles(Role.ADMIN)
+  fusionar(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('absorbidoId', ParseUUIDPipe) absorbidoId: string,
+    @TenantId() tenantId: string,
+  ) {
+    return this.clientsService.fusionar(id, absorbidoId, tenantId);
   }
 }

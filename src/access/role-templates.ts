@@ -237,6 +237,24 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
     }),
   },
   {
+    key: 'produccion',
+    name: 'Producción (perfumería)',
+    description:
+      'Quien fabrica: confirma lo que llegó de la compra, registra la esencia que ' +
+      'gasta y la entrada de producto terminado. No vende ni ve cartera.',
+    permissions: build(NONE, {
+      dashboard: R,
+      production: RCE,
+      // Recibir la compra es «editar» la orden: así César dice cuánto llegó.
+      purchases: RE,
+      suppliers: R,
+      inventory: R,
+      warehouses: R,
+      products: R,
+      categories: R,
+    }),
+  },
+  {
     key: 'inventario',
     name: 'Inventario',
     description:

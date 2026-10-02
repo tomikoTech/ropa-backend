@@ -130,7 +130,8 @@ export class InventoryController {
 
   @Get('stock/paged')
   @ApiOperation({
-    summary: 'Existencias por página, con filtros y resumen del filtro completo',
+    summary:
+      'Existencias por página, con filtros y resumen del filtro completo',
   })
   @ApiQuery({ name: 'page', required: false })
   @ApiQuery({ name: 'limit', required: false })
@@ -145,7 +146,17 @@ export class InventoryController {
     description: 'Solo las existencias de esa bodega.',
   })
   @ApiQuery({ name: 'sizes', required: false, description: 'Tallas (coma).' })
-  @ApiQuery({ name: 'genders', required: false, description: 'Géneros (coma).' })
+  @ApiQuery({
+    name: 'type',
+    required: false,
+    description:
+      'STANDARD, FRASCO o ESSENCE. En una perfumería, sin pedirlo, solo STANDARD.',
+  })
+  @ApiQuery({
+    name: 'genders',
+    required: false,
+    description: 'Géneros (coma).',
+  })
   @ApiQuery({ name: 'sort', required: false })
   getStockPaged(
     @TenantId() tenantId: string,
@@ -157,6 +168,7 @@ export class InventoryController {
     @Query('sizes') sizes?: string,
     @Query('genders') genders?: string,
     @Query('sort') sort?: string,
+    @Query('type') type?: string,
   ) {
     // Listas separadas por coma en la URL → arreglos; vacío es «todos».
     const aLista = (v?: string) =>
@@ -173,6 +185,7 @@ export class InventoryController {
       sizes: aLista(sizes),
       genders: aLista(genders),
       sort,
+      type: type || undefined,
     });
   }
 
@@ -293,7 +306,10 @@ export class InventoryController {
   }
 
   @Get('exhibicion/plantilla')
-  @ApiOperation({ summary: 'La plantilla de la vitrina: qué referencias tienen puesto, llenas o vacías' })
+  @ApiOperation({
+    summary:
+      'La plantilla de la vitrina: qué referencias tienen puesto, llenas o vacías',
+  })
   @ApiQuery({ name: 'vitrinaId', required: false })
   plantillaDeVitrina(
     @TenantId() tenantId: string,
@@ -303,7 +319,9 @@ export class InventoryController {
   }
 
   @Delete('exhibicion/plantilla/:vitrinaId/:productId')
-  @ApiOperation({ summary: 'Esa referencia ya no se exhibe: pierde su puesto en la vitrina' })
+  @ApiOperation({
+    summary: 'Esa referencia ya no se exhibe: pierde su puesto en la vitrina',
+  })
   quitarDePlantilla(
     @Param('vitrinaId', ParseUUIDPipe) vitrinaId: string,
     @Param('productId', ParseUUIDPipe) productId: string,
@@ -313,7 +331,10 @@ export class InventoryController {
   }
 
   @Post('exhibicion/bajar-codigo')
-  @ApiOperation({ summary: 'Bajar de la vitrina ese par o esa caja, por su código (vuelve al local)' })
+  @ApiOperation({
+    summary:
+      'Bajar de la vitrina ese par o esa caja, por su código (vuelve al local)',
+  })
   bajarPorCodigo(
     @Body() dto: ExhibirPorCodigoDto,
     @CurrentUser() user: User,
@@ -374,7 +395,9 @@ export class InventoryController {
   // ─── Remisiones (traslados con confirmación) y préstamos ───
 
   @Post('transfers/lote/:loteId/receive')
-  @ApiOperation({ summary: 'Recibir todos los renglones en tránsito de una remisión' })
+  @ApiOperation({
+    summary: 'Recibir todos los renglones en tránsito de una remisión',
+  })
   recibirLote(
     @Param('loteId', ParseUUIDPipe) loteId: string,
     @CurrentUser() user: User,

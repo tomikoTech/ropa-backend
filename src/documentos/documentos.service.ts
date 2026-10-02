@@ -12,7 +12,12 @@
  * nombre del cliente y su teléfono, así que el enlace no se publica en ningún
  * listado ni se puede recorrer: solo lo tiene quien lo recibió.
  */
-import { Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { perfilDelNegocio } from '../tienda/perfil-del-negocio.js';
+import {
+  Injectable,
+  NotFoundException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { PosService } from '../pos/pos.service.js';
@@ -20,7 +25,11 @@ import { ConsignmentsService } from '../consignments/consignments.service.js';
 import { R2Service } from '../uploads/r2.service.js';
 import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
 import { Tenant } from '../tenants/entities/tenant.entity.js';
-import { pdfDeFactura, type DatosDeFactura, type DatosDeLaTienda } from './factura-pdf.js';
+import {
+  pdfDeFactura,
+  type DatosDeFactura,
+  type DatosDeLaTienda,
+} from './factura-pdf.js';
 import { pdfDeEstadoDeCuenta } from './estado-de-cuenta-pdf.js';
 import { facturaDeTerceros, nombreDelArchivo } from './factura-de-terceros.js';
 
@@ -54,11 +63,17 @@ export class DocumentosService {
     const tienda = await this.datosDeLaTienda(tenantId);
     let deTerceros: DatosDeFactura | null = null;
     if (terceros.length) {
-      const { filas, abonos } = await this.terceros.paraFactura(terceros, tenantId);
+      const { filas, abonos } = await this.terceros.paraFactura(
+        terceros,
+        tenantId,
+      );
       deTerceros = facturaDeTerceros(filas, abonos);
     }
 
-    const pagado = (venta.payments ?? []).reduce((s, p) => s + Number(p.amount), 0);
+    const pagado = (venta.payments ?? []).reduce(
+      (s, p) => s + Number(p.amount),
+      0,
+    );
     const total = Number(venta.total);
     const cartera = venta.accountsReceivable?.[0];
     // El saldo sale de cartera si la hay: es la fuente de verdad de lo que se
@@ -76,17 +91,23 @@ export class DocumentosService {
       fecha: venta.createdAt.toISOString(),
       vence: cartera?.dueDate ?? null,
       cliente: venta.client
-        ? `${venta.client.firstName ?? ''} ${venta.client.lastName ?? ''}`.trim() || 'Consumidor final'
+        ? `${venta.client.firstName ?? ''} ${venta.client.lastName ?? ''}`.trim() ||
+          'Consumidor final'
         : 'Consumidor final',
       // El consumidor final es un cliente genérico con un documento de ceros:
       // imprimírselo es imprimir basura.
-      documento: venta.client && !venta.client.isGeneric ? venta.client.documentNumber : null,
+      documento:
+        venta.client && !venta.client.isGeneric
+          ? venta.client.documentNumber
+          : null,
       telefono: venta.client?.phone ?? null,
       direccion: venta.client?.address ?? null,
       renglones: [
         ...(venta.items ?? []).map((it) => ({
           nombre: it.productName,
-          detalle: [it.variantSize, it.variantColor].filter(Boolean).join(' / ') || null,
+          detalle:
+            [it.variantSize, it.variantColor].filter(Boolean).join(' / ') ||
+            null,
           codigo: it.variant?.barcode ?? null,
           cantidad: it.quantity,
           precioUnitario: Number(it.unitPrice),
@@ -94,6 +115,9 @@ export class DocumentosService {
           // Lo que el renglón guardó el día de la venta: una caja sigue
           // siendo una caja aunque después se haya abierto.
           esCaja: it.unitKind === 'BOX',
+          precioDeLista:
+            it.listUnitPrice != null ? Number(it.listUnitPrice) : null,
+          descuentoPorcentaje: Number(it.discountPercent) || 0,
         })),
         ...(deTerceros?.renglones ?? []),
       ],
@@ -103,7 +127,12 @@ export class DocumentosService {
       total: totalConTerceros,
       pagado: totalConTerceros - saldoConTerceros,
       saldo: saldoConTerceros,
-      notas: venta.notes ?? null,
+      // La nota de la venta **y** la del crédito: Andrea escribía «descuento
+      // incluido» en la nota del crédito y no salía en ningún papel.
+      notas:
+        [venta.notes, cartera?.notes]
+          .filter((n) => n && String(n).trim())
+          .join('\n') || null,
     });
 
     return {
@@ -138,7 +167,10 @@ export class DocumentosService {
   }
 
   /** El estado de cuenta de un cliente, como enlace a un PDF. */
-  async enlaceDeEstadoDeCuenta(clientId: string, tenantId: string): Promise<{ url: string }> {
+  async enlaceDeEstadoDeCuenta(
+    clientId: string,
+    tenantId: string,
+  ): Promise<{ url: string }> {
     const estado = await this.pos.getClientStatement(clientId, tenantId);
     if (!estado.client) throw new NotFoundException('Cliente no encontrado');
     const tienda = await this.datosDeLaTienda(tenantId);
@@ -170,7 +202,9 @@ export class DocumentosService {
       deuda: estado.totals.totalDebt,
     });
 
-    return { url: await this.subir(tenantId, `estados-de-cuenta/${clientId}.pdf`, pdf) };
+    return {
+      url: await this.subir(tenantId, `estados-de-cuenta/${clientId}.pdf`, pdf),
+    };
   }
 
   /**
@@ -185,7 +219,11 @@ export class DocumentosService {
    * que se configura en el panel de R2 y no en código. Ver `R2-CICLO-DE-VIDA`
    * en la documentación.
    */
-  private async subir(tenantId: string, nombre: string, pdf: Buffer): Promise<string> {
+  private async subir(
+    tenantId: string,
+    nombre: string,
+    pdf: Buffer,
+  ): Promise<string> {
     if (!this.r2.isConfigured()) {
       // Sin dónde alojarlo no hay enlace que mandar. Se dice claro en vez de
       // devolver una URL rota que el cliente abre y no encuentra nada.
@@ -195,7 +233,11 @@ export class DocumentosService {
     }
     const tenant = await this.tenantRepo.findOne({ where: { id: tenantId } });
     const slug = (tenant?.slug ?? tenantId).replace(/[^a-z0-9-]/gi, '');
-    const url = await this.r2.uploadConNombre(`documentos/${slug}/${nombre}`, pdf, 'application/pdf');
+    const url = await this.r2.uploadConNombre(
+      `documentos/${slug}/${nombre}`,
+      pdf,
+      'application/pdf',
+    );
     // El nombre es fijo pero el enlace no: `?v=` cambia con cada generación.
     // Pasó en AMAWAD: abonaron, mandaron el estado de cuenta otra vez y el
     // celular abrió el PDF que ya tenía guardado —el de antes del abono— y
@@ -212,17 +254,19 @@ export class DocumentosService {
       nombre: s?.storeName || 'Mi tienda',
       logo: await this.logo(s?.logoUrl),
       direccion: s?.address ?? null,
-      ciudad: [s?.storeCityName, s?.storeDepartment].filter(Boolean).join(', ') || null,
+      ciudad:
+        [s?.storeCityName, s?.storeDepartment].filter(Boolean).join(', ') ||
+        null,
       whatsapp: s?.whatsappNumber ?? null,
       lema: s?.invoiceTagline ?? null,
       notaAlPie: s?.invoiceFooterNote ?? null,
       notaDeVencimiento: s?.invoiceDueNote ?? null,
       agradecimiento: s?.invoiceThankYouNote ?? null,
       muestraCodigos: s?.invoiceShowCodes ?? true,
-      // Quien lleva las cajas y los pares uno por uno vende calzado y cuenta
-      // **pares**; el resto cuenta unidades. Es el mismo interruptor que
-      // enciende los bultos, así que nadie tiene que configurar otra cosa.
-      rotuloDeUnidades: s?.unitTrackingEnabled ? 'pares' : 'unidades',
+      // Pares o unidades lo decide el perfil de la tienda: una zapatería con
+      // bultos cuenta pares; una perfumería, unidades, diga lo que diga el
+      // interruptor de cajas.
+      rotuloDeUnidades: perfilDelNegocio(s).rotuloDeUnidades,
     };
   }
 

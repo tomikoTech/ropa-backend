@@ -107,6 +107,22 @@ export class StoreSettings extends TenantAwareEntity {
   @Column({ name: 'unit_tracking_enabled', default: true })
   unitTrackingEnabled: boolean;
 
+  /**
+   * Qué clase de negocio es la tienda: `calzado`, `perfumeria` u otro.
+   *
+   * De aquí salen el vocabulario (pares o unidades), qué pantallas sobran
+   * (tallas y cajas en una perfumería) y qué se enseña al vender (solo el
+   * producto terminado). La regla vive en `src/tienda/perfil-del-negocio.ts`.
+   * `calzado` es el valor de nacimiento: ninguna tienda de antes cambia.
+   */
+  @Column({
+    name: 'tipo_de_negocio',
+    type: 'varchar',
+    length: 20,
+    default: 'calzado',
+  })
+  tipoDeNegocio: string;
+
   @Column({ name: 'cod_enabled', default: false })
   codEnabled: boolean;
 

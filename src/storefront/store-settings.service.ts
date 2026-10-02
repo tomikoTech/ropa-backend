@@ -1,3 +1,4 @@
+import { perfilDelNegocio } from '../tienda/perfil-del-negocio.js';
 import {
   Injectable,
   NotFoundException,
@@ -132,6 +133,15 @@ export class StoreSettingsService {
       settings.arPaymentAllocationMode = dto.arPaymentAllocationMode;
     if (dto.unitTrackingEnabled !== undefined)
       settings.unitTrackingEnabled = dto.unitTrackingEnabled;
+    if (dto.tipoDeNegocio !== undefined)
+      settings.tipoDeNegocio = dto.tipoDeNegocio;
+    // Una perfumería no etiqueta par por par: el perfil manda sobre el
+    // interruptor, y se guarda apagado para que nadie lo lea prendido.
+    if (
+      !perfilDelNegocio(settings).tieneCajas &&
+      settings.tipoDeNegocio === 'perfumeria'
+    )
+      settings.unitTrackingEnabled = false;
     if (dto.comprobanteTransferenciaObligatorio !== undefined)
       settings.comprobanteTransferenciaObligatorio =
         dto.comprobanteTransferenciaObligatorio;
@@ -683,8 +693,9 @@ export class StoreSettingsService {
   async publicarLoQueTieneExistencia(
     tenantId: string,
   ): Promise<{ publicados: number }> {
-    const r: { affected?: number } = await this.dataSource.query(
-      `WITH con_existencia AS (
+    const r: { affected?: number } = await this.dataSource
+      .query(
+        `WITH con_existencia AS (
          SELECT DISTINCT pv.product_id
            FROM stock s
            JOIN product_variants pv ON pv.id = s.variant_id
@@ -702,8 +713,9 @@ export class StoreSettingsService {
              WHERE c.id = p.category_id AND c.type IN ('ESSENCE', 'FRASCO')
           )
         RETURNING p.id`,
-      [tenantId],
-    ).then((filas: unknown[]) => ({ affected: filas.length }));
+        [tenantId],
+      )
+      .then((filas: unknown[]) => ({ affected: filas.length }));
     return { publicados: r.affected ?? 0 };
   }
 }

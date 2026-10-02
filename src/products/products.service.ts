@@ -1,4 +1,8 @@
 import {
+  perfilDelNegocio,
+  tipoDeProductoPorDefecto,
+} from '../tienda/perfil-del-negocio.js';
+import {
   BadRequestException,
   Injectable,
   Logger,
@@ -147,6 +151,20 @@ export class ProductsService {
   // Cuando el tenant tiene la gestión automática de frascos activada,
   // cada loción tiene un "Frasco {nombre}" vinculado cuyo nombre se
   // sincroniza con el de la loción. Desactivado para el resto de tenants.
+  /**
+   * El tipo de producto que se busca cuando el POS no pidió uno: en una
+   * perfumería, solo el terminado (ver `perfil-del-negocio.ts`). Las pestañas
+   * de Frascos y Esencias piden el suyo y lo reciben.
+   */
+  private async tipoPorDefecto(
+    tenantId: string,
+    pedido?: string,
+  ): Promise<string | undefined> {
+    if (pedido) return pedido;
+    const s = await this.storeSettingsRepo.findOne({ where: { tenantId } });
+    return tipoDeProductoPorDefecto(perfilDelNegocio(s), pedido);
+  }
+
   private async isFrascoAutoManaged(tenantId: string): Promise<boolean> {
     const s = await this.storeSettingsRepo.findOne({ where: { tenantId } });
     return !!s?.frascoAutoManaged;
@@ -1072,6 +1090,7 @@ export class ProductsService {
       filtros?: FiltrosDelMostrador;
     },
   ): Promise<ProductVariant[]> {
+    opts = { ...opts, type: await this.tipoPorDefecto(tenantId, opts?.type) };
     // Límite configurable (para el catálogo del POS con "ver más"), con tope.
     const limit = Math.min(Math.max(Number(opts?.limit) || 20, 1), 200);
     const offset = Math.max(Number(opts?.offset) || 0, 0);
@@ -1180,6 +1199,7 @@ export class ProductsService {
     tenantId: string,
     opts?: { warehouseId?: string; inStock?: boolean; type?: string },
   ): Promise<{ tallas: string[]; marcas: string[]; generos: string[] }> {
+    opts = { ...opts, type: await this.tipoPorDefecto(tenantId, opts?.type) };
     let bodegasVisibles: string[] | undefined;
     if (opts?.warehouseId) {
       const bodegas = await this.warehouseRepository.find({
@@ -1308,6 +1328,7 @@ export class ProductsService {
     }[];
     hasMore: boolean;
   }> {
+    opts = { ...opts, type: await this.tipoPorDefecto(tenantId, opts?.type) };
     const limit = Math.min(Math.max(Number(opts?.limit) || 30, 1), 100);
     const offset = Math.max(Number(opts?.offset) || 0, 0);
     const cleanQuery = (query || '').trim();

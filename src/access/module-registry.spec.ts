@@ -341,6 +341,9 @@ describe('plantillas de rol', () => {
       'Vendedor (cobra directo)',
       'Revendedor (persona natural)',
       'Jefe de Bodega',
+      // Octubre de 2026: quien fabrica en una perfumería (César): confirma
+      // la compra, saca esencia y entra producto terminado. No vende.
+      'Producción (perfumería)',
       'Inventario',
       'Consulta',
     ]);
