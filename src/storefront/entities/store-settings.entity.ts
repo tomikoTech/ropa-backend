@@ -620,4 +620,15 @@ export class StoreSettings extends TenantAwareEntity {
   /** Mano de obra por unidad, la general; un producto puede poner la suya. */
   @Column({ name: 'mano_de_obra_por_unidad', type: 'int', default: 0 })
   manoDeObraPorUnidad: number;
+
+  /**
+   * Los descuentos que la tienda usa de verdad (10, 15, 20, 30…): botones en
+   * el POS y al aceptar pedidos. El catálogo público no los enseña.
+   */
+  @Column({
+    name: 'descuentos_presets',
+    type: 'jsonb',
+    default: () => "'[10,15,20,30]'",
+  })
+  descuentosPresets: number[];
 }

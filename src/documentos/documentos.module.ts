@@ -13,8 +13,14 @@ import { Tenant } from '../tenants/entities/tenant.entity.js';
  * `documentos.service.ts` para el porqué del enlace.
  */
 @Module({
-  imports: [PosModule, ConsignmentsModule, UploadsModule, TypeOrmModule.forFeature([StoreSettings, Tenant])],
+  imports: [
+    PosModule,
+    ConsignmentsModule,
+    UploadsModule,
+    TypeOrmModule.forFeature([StoreSettings, Tenant]),
+  ],
   controllers: [DocumentosController],
   providers: [DocumentosService],
+  exports: [DocumentosService],
 })
 export class DocumentosModule {}

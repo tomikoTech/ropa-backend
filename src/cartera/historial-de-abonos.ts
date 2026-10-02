@@ -114,7 +114,8 @@ export function historialDeAbonos(abonos: AbonoCrudo[]): Historial {
       dia,
       centavos: lista.reduce((t, r) => t + r.centavos, 0),
       renglones: lista.sort(
-        (a, b) => b.fecha.getTime() - a.fecha.getTime() || a.id.localeCompare(b.id),
+        (a, b) =>
+          b.fecha.getTime() - a.fecha.getTime() || a.id.localeCompare(b.id),
       ),
     }))
     .sort((a, b) => (a.dia < b.dia ? 1 : a.dia > b.dia ? -1 : 0));

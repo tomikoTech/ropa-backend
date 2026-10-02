@@ -1,5 +1,13 @@
-import { Controller, Get, Query } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { Controller, Get, Query, Res, StreamableFile } from '@nestjs/common';
+import type { Response } from 'express';
+import { libroDeCarteraCompleta } from './cartera-completa-excel.js';
+import { pdfDeCarteraCompleta } from '../documentos/cartera-completa-pdf.js';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiQuery,
+  ApiTags,
+} from '@nestjs/swagger';
 import { CarteraService } from './cartera.service.js';
 import { TenantId } from '../common/decorators/tenant-id.decorator.js';
 import { Roles } from '../common/decorators/roles.decorator.js';
@@ -70,5 +78,58 @@ export class CarteraController {
       desde,
       hasta,
     });
+  }
+
+  /**
+   * La cartera de todos los clientes, para uso interno: PDF, Excel o JSON.
+   * Se abre con ticket de descarga (`?token=`), como el estado de cuenta.
+   */
+  @Get('completa')
+  @ApiOperation({ summary: 'Cartera completa: todos los clientes con saldo' })
+  @ApiQuery({
+    name: 'formato',
+    required: false,
+    description: 'pdf | xlsx | json (por defecto json)',
+  })
+  async completa(
+    @TenantId() tenantId: string,
+    @Res({ passthrough: true }) res: Response,
+    @Query('formato') formato?: string,
+  ) {
+    const cartera = await this.cartera.carteraCompleta(tenantId);
+    const generadoEl = new Date().toISOString();
+    const fecha = generadoEl.slice(0, 10);
+    if (formato === 'pdf') {
+      const tienda = await this.cartera.nombreDeLaTienda(tenantId);
+      const pdf = await pdfDeCarteraCompleta(
+        { nombre: tienda, muestraCodigos: false },
+        cartera,
+        generadoEl,
+      );
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="cartera-completa-${fecha}.pdf"`,
+      );
+      return new StreamableFile(pdf);
+    }
+    if (formato === 'xlsx') {
+      const tienda = await this.cartera.nombreDeLaTienda(tenantId);
+      const buffer = await libroDeCarteraCompleta(
+        tienda,
+        cartera,
+        generadoEl,
+      ).xlsx.writeBuffer();
+      res.setHeader(
+        'Content-Type',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      );
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="cartera-completa-${fecha}.xlsx"`,
+      );
+      return new StreamableFile(Buffer.from(buffer));
+    }
+    return cartera;
   }
 }

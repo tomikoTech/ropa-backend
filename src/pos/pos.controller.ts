@@ -28,6 +28,7 @@ import {
   CollectAccountsDto,
   RecordArPaymentDto,
   ReverseArPaymentDto,
+  RecibirReciboDto,
 } from './dto/record-ar-payment.dto.js';
 import { SendInvoiceDto } from './dto/send-invoice.dto.js';
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
@@ -270,6 +271,24 @@ export class PosController {
     );
   }
 
+  @Post('accounts-receivable/clients/:clientId/recibo')
+  @ApiOperation({
+    summary: 'Un recibo que paga varias facturas, repartido a mano',
+  })
+  recordClientReceipt(
+    @Param('clientId', ParseUUIDPipe) clientId: string,
+    @Body() dto: RecibirReciboDto,
+    @TenantId() tenantId: string,
+    @UserId() cobradoPor: string,
+  ) {
+    return this.posService.recordClientReceipt(
+      clientId,
+      dto,
+      tenantId,
+      cobradoPor,
+    );
+  }
+
   @Post('accounts-receivable/clients/:clientId/balance-payment')
   @ApiOperation({
     summary: 'Aplicar un abono al saldo del cliente por FIFO',
@@ -423,7 +442,8 @@ export class PosController {
 
   @Post('sales/:id/metodo-de-pago')
   @ApiOperation({
-    summary: 'Corregir con qué se pagó una venta ya hecha (efectivo ↔ crédito…)',
+    summary:
+      'Corregir con qué se pagó una venta ya hecha (efectivo ↔ crédito…)',
   })
   cambiarMetodoDePago(
     @Param('id', ParseUUIDPipe) id: string,

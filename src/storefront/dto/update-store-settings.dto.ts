@@ -719,4 +719,15 @@ export class UpdateStoreSettingsDto {
   @IsInt()
   @Min(0)
   manoDeObraPorUnidad?: number;
+
+  @ApiPropertyOptional({
+    description: 'Porcentajes de descuento de la tienda',
+    example: [10, 15, 20, 30],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
+  @Min(0, { each: true })
+  @Max(100, { each: true })
+  descuentosPresets?: number[];
 }

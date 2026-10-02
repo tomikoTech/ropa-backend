@@ -157,6 +157,10 @@ export class StoreSettingsService {
       settings.costoFijoDeEsencia = dto.costoFijoDeEsencia;
     if (dto.manoDeObraPorUnidad !== undefined)
       settings.manoDeObraPorUnidad = dto.manoDeObraPorUnidad;
+    if (dto.descuentosPresets !== undefined)
+      settings.descuentosPresets = [...new Set(dto.descuentosPresets)].sort(
+        (a, b) => a - b,
+      );
     if (dto.autoReplenishEnabled !== undefined)
       settings.autoReplenishEnabled = dto.autoReplenishEnabled;
     if (dto.autoReplenishThreshold !== undefined)

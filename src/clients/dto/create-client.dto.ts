@@ -1,4 +1,14 @@
-import { IsString, IsOptional, IsEnum, IsEmail } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsEnum,
+  IsEmail,
+  ValidateIf,
+  IsInt,
+  Min,
+  Max,
+} from 'class-validator';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import { DocumentType } from '../../common/enums/document-type.enum.js';
 
 export class CreateClientDto {
@@ -31,4 +41,14 @@ export class CreateClientDto {
   @IsString()
   @IsOptional()
   address?: string;
+
+  @ApiPropertyOptional({
+    description: 'Descuento que se le propone al facturar (%)',
+  })
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsInt()
+  @Min(0)
+  @Max(100)
+  descuentoPorDefecto?: number | null;
 }

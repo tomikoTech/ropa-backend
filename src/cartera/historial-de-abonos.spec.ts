@@ -107,7 +107,8 @@ describe('marcarReversos', () => {
 });
 
 describe('resumirAbonos', () => {
-  const resumen = (abonos: AbonoCrudo[]) => resumirAbonos(marcarReversos(abonos));
+  const resumen = (abonos: AbonoCrudo[]) =>
+    resumirAbonos(marcarReversos(abonos));
 
   it('el neto descuenta lo que se deshizo', () => {
     // Se abonaron 100.000 y se deshicieron: en el periodo entraron 0, aunque
@@ -205,7 +206,8 @@ describe('aCentavos', () => {
 });
 
 describe('resumirAbonos con abonos repartidos', () => {
-  const resumen = (abonos: AbonoCrudo[]) => resumirAbonos(marcarReversos(abonos));
+  const resumen = (abonos: AbonoCrudo[]) =>
+    resumirAbonos(marcarReversos(abonos));
 
   it('un abono al saldo repartido en tres facturas cuenta como uno', () => {
     // Quien abonó 150.000 pagó una vez. Contar las aplicaciones mostraba tres

@@ -5,6 +5,8 @@ import {
   BadRequestException,
   Logger,
 } from '@nestjs/common';
+import { RecibirReciboDto } from './dto/record-ar-payment.dto.js';
+import { comprobarReparto } from '../cartera/repartir-recibo.js';
 import { perfilDelNegocio } from '../tienda/perfil-del-negocio.js';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource, EntityManager, In, Not } from 'typeorm';
@@ -3135,6 +3137,88 @@ export class PosService {
    * validar que no se cobre de más, escribir cada aplicación con su fila
    * contable y dejarlas atadas por un mismo lote para poder auditarlas juntas.
    */
+  /**
+   * Un recibo del cliente que paga varias facturas, repartido a mano.
+   *
+   * «Me dan un recibo con 100.000: 50 a una factura y 50 a otra; que yo
+   * ingrese el recibo y el recibo busque las facturas». El número del recibo
+   * va en `reference`; el reparto lo comprueba `repartir-recibo.ts` antes de
+   * tocar nada, y todo queda en un solo lote (`allocationBatchId`).
+   */
+  async recordClientReceipt(
+    clientId: string,
+    dto: RecibirReciboDto,
+    tenantId: string,
+    cobradoPor?: string,
+  ) {
+    await this.caja.exigirComprobante(tenantId, [
+      { method: dto.method, receiptImageUrl: dto.receiptImageUrl },
+    ]);
+    return this.dataSource.transaction(async (manager) => {
+      const client = await manager.getRepository(Client).findOne({
+        where: { id: clientId, tenantId },
+      });
+      if (!client) throw new NotFoundException('Cliente no encontrado');
+      const arRepo = manager.getRepository(AccountsReceivable);
+      const abiertas = await arRepo
+        .createQueryBuilder('ar')
+        .innerJoinAndSelect('ar.sale', 'sale')
+        .setLock('pessimistic_write', undefined, ['ar'])
+        .where('ar.clientId = :clientId', { clientId })
+        .andWhere('ar.tenantId = :tenantId', { tenantId })
+        .andWhere('ar.isFullyPaid = false')
+        .andWhere('sale.status <> :cancelled', {
+          cancelled: SaleStatus.CANCELLED,
+        })
+        .orderBy('sale.createdAt', 'ASC')
+        .getMany();
+      const facturas = abiertas.map((ar) => ({
+        id: ar.id,
+        numero:
+          ar.sale?.invoiceNumber ?? ar.sale?.saleNumber ?? ar.id.slice(0, 8),
+        fecha: ar.sale?.createdAt?.toISOString?.() ?? '',
+        saldo: Number(ar.totalAmount) - Number(ar.paidAmount),
+      }));
+      const comprobado = comprobarReparto(
+        facturas,
+        dto.amount,
+        dto.reparto.map((r) => ({
+          id: r.accountReceivableId,
+          monto: r.amount,
+        })),
+      );
+      if (!comprobado.ok) throw new BadRequestException(comprobado.motivo);
+      const saldoDe = new Map(
+        abiertas.map((ar) => [
+          ar.id,
+          Math.round((Number(ar.totalAmount) - Number(ar.paidAmount)) * 100),
+        ]),
+      );
+      const reparto = dto.reparto
+        .filter((r) => Number(r.amount) > 0)
+        .map((r) => {
+          const centavos = Math.round(Number(r.amount) * 100);
+          return {
+            cuentaId: r.accountReceivableId,
+            centavos,
+            quedaSaldada: centavos >= (saldoDe.get(r.accountReceivableId) ?? 0),
+          };
+        });
+      const cuentas = abiertas.filter((ar) =>
+        reparto.some((r) => r.cuentaId === ar.id),
+      );
+      return this.aplicarAbono(
+        manager,
+        cuentas,
+        dto,
+        tenantId,
+        cobradoPor,
+        0,
+        reparto,
+      );
+    });
+  }
+
   private async aplicarAbono(
     manager: EntityManager,
     cuentas: AccountsReceivable[],
@@ -3142,6 +3226,16 @@ export class PosService {
     tenantId: string,
     cobradoPor?: string,
     descartadas = 0,
+    /**
+     * Reparto puesto a mano («50 a esta factura y 50 a la otra»): un recibo
+     * del cliente paga varias facturas en un solo lote. Sin esto, va de la
+     * más vieja a la más nueva.
+     */
+    repartoAMano?: {
+      cuentaId: string;
+      centavos: number;
+      quedaSaldada: boolean;
+    }[],
   ): Promise<{
     batchId: string;
     amount: number;
@@ -3191,7 +3285,8 @@ export class PosService {
       isFullyPaid: boolean;
     }[] = [];
 
-    for (const aplicacion of repartirAbono(enCentavos, abonoCents)) {
+    for (const aplicacion of repartoAMano ??
+      repartirAbono(enCentavos, abonoCents)) {
       const cuenta = porId.get(aplicacion.cuentaId)!;
       const pagadoCents = aCentavos(cuenta.paidAmount) + aplicacion.centavos;
       const totalCents = aCentavos(cuenta.totalAmount);

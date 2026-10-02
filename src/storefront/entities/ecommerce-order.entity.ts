@@ -23,6 +23,9 @@ export class EcommerceOrder extends TenantAwareEntity {
 
   @Column({ name: 'order_number' })
   orderNumber: string;
+  /** La venta que nació al aceptar el pedido; sin ella, sigue por confirmar. */
+  @Column({ name: 'sale_id', type: 'uuid', nullable: true })
+  saleId: string | null;
 
   @Column({ name: 'customer_name' })
   customerName: string;

@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { armarCarteraCompleta } from './cartera-completa.js';
 import { DataSource } from 'typeorm';
 import { rangoUtcDelDia, diaLocal } from '../caja/cuadre.js';
 import {
@@ -182,6 +183,64 @@ export class CarteraService {
       hasta,
       truncado,
     };
+  }
+
+  /**
+   * La cartera entera: todos los clientes con saldo y sus facturas.
+   * «No voy cliente por cliente». Ver `cartera-completa.ts`.
+   */
+  async carteraCompleta(
+    tenantId: string,
+    hoy = new Date().toISOString().slice(0, 10),
+  ) {
+    const filas: {
+      cliente_id: string;
+      cliente: string;
+      telefono: string | null;
+      factura_id: string;
+      numero: string;
+      fecha: Date;
+      vence: string | null;
+      total: string;
+      pagado: string;
+    }[] = await this.dataSource.query(
+      `SELECT c.id AS cliente_id,
+              trim(coalesce(c.first_name,'') || ' ' || coalesce(c.last_name,'')) AS cliente,
+              c.phone AS telefono,
+              ar.id AS factura_id,
+              coalesce(s.invoice_number, s.sale_number) AS numero,
+              s.created_at AS fecha,
+              ar.due_date::text AS vence,
+              ar.total_amount AS total,
+              ar.paid_amount AS pagado
+         FROM accounts_receivable ar
+         JOIN sales s ON s.id = ar.sale_id
+         JOIN clients c ON c.id = ar.client_id
+        WHERE ar.tenant_id = $1 AND ar.is_fully_paid = false AND s.status <> 'CANCELLED'`,
+      [tenantId],
+    );
+    return armarCarteraCompleta(
+      filas.map((f) => ({
+        clienteId: f.cliente_id,
+        cliente: f.cliente || 'Sin nombre',
+        telefono: f.telefono,
+        facturaId: f.factura_id,
+        numero: f.numero ?? '—',
+        fecha: new Date(f.fecha).toISOString(),
+        vence: f.vence,
+        total: Number(f.total),
+        pagado: Number(f.pagado),
+      })),
+      hoy,
+    );
+  }
+
+  async nombreDeLaTienda(tenantId: string): Promise<string> {
+    const [s]: { store_name: string }[] = await this.dataSource.query(
+      `SELECT store_name FROM store_settings WHERE tenant_id = $1`,
+      [tenantId],
+    );
+    return s?.store_name || 'Mi tienda';
   }
 }
 

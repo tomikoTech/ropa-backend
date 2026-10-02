@@ -1,3 +1,4 @@
+import { Type } from 'class-transformer';
 import {
   ArrayNotEmpty,
   IsArray,
@@ -8,8 +9,10 @@ import {
   IsUUID,
   MaxLength,
   Min,
+  ArrayMinSize,
+  ValidateNested,
 } from 'class-validator';
-import { ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiPropertyOptional, ApiProperty } from '@nestjs/swagger';
 import { PaymentMethod } from '../../common/enums/payment-method.enum.js';
 
 export class RecordArPaymentDto {
@@ -64,4 +67,25 @@ export class ReverseArPaymentDto {
   @IsString()
   @MaxLength(300)
   motivo?: string;
+}
+
+export class RepartoDelReciboDto {
+  @ApiProperty({ description: 'La cuenta por cobrar (factura) a la que va' })
+  @IsUUID()
+  accountReceivableId: string;
+
+  @ApiProperty({ example: 50000 })
+  @IsNumber()
+  @Min(0)
+  amount: number;
+}
+
+/** Un recibo que paga varias facturas: `reference` es el número del recibo. */
+export class RecibirReciboDto extends RecordArPaymentDto {
+  @ApiProperty({ type: [RepartoDelReciboDto] })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => RepartoDelReciboDto)
+  reparto: RepartoDelReciboDto[];
 }

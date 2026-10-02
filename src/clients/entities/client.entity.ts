@@ -38,6 +38,9 @@ export class Client extends TenantAwareEntity {
 
   @Column({ nullable: true })
   address: string;
+  /** El descuento que se le propone a este cliente al facturar; null = ninguno. */
+  @Column({ name: 'descuento_por_defecto', type: 'int', nullable: true })
+  descuentoPorDefecto: number | null;
 
   @Column({ name: 'is_generic', default: false })
   isGeneric: boolean;
