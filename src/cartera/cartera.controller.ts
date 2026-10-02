@@ -134,6 +134,7 @@ export class CarteraController {
       res.end(Buffer.from(buffer));
       return;
     }
-    res.json(cartera);
+    // Con la misma envoltura que pone el interceptor en el resto del API.
+    res.json({ data: cartera, statusCode: 200, timestamp: generadoEl });
   }
 }
