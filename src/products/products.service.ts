@@ -160,7 +160,8 @@ export class ProductsService {
     tenantId: string,
     pedido?: string,
   ): Promise<string | undefined> {
-    if (pedido) return pedido;
+    // «TODOS» también pasa por la regla: ahí se vuelve «sin filtro».
+    if (pedido && pedido !== 'TODOS') return pedido;
     const s = await this.storeSettingsRepo.findOne({ where: { tenantId } });
     return tipoDeProductoPorDefecto(perfilDelNegocio(s), pedido);
   }
