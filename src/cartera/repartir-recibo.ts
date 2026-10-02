@@ -23,6 +23,11 @@ export interface Reparto {
   monto: number;
 }
 
+/** La más vieja primero; a igual fecha (o sin ella), por número de factura. */
+export const ordenDeCobro = (a: FacturaPorPagar, b: FacturaPorPagar) =>
+  a.fecha.localeCompare(b.fecha) ||
+  a.numero.localeCompare(b.numero, 'es', { numeric: true });
+
 const centavos = (n: number) => Math.round((Number(n) || 0) * 100);
 const pesos = (c: number) => c / 100;
 
@@ -32,9 +37,7 @@ export function repartoPropuesto(
   monto: number,
 ): Reparto[] {
   let resta = centavos(monto);
-  const orden = [...facturas]
-    .filter((f) => f.saldo > 0)
-    .sort((a, b) => a.fecha.localeCompare(b.fecha));
+  const orden = [...facturas].filter((f) => f.saldo > 0).sort(ordenDeCobro);
   const reparto: Reparto[] = [];
   for (const f of orden) {
     if (resta <= 0) break;
