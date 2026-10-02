@@ -29,10 +29,19 @@ export class BotConfig extends TenantAwareEntity {
   @Column({ name: 'location_response', type: 'text', default: '' })
   locationResponse: string;
 
-  @Column({ name: 'out_of_stock_message', type: 'text', default: 'Este producto existe pero está agotado. Revisalo acá y quedate pendiente para cuando llegue:' })
+  @Column({
+    name: 'out_of_stock_message',
+    type: 'text',
+    default:
+      'Este producto existe pero está agotado. Revisalo acá y quedate pendiente para cuando llegue:',
+  })
   outOfStockMessage: string;
 
-  @Column({ name: 'menu_header', type: 'text', default: 'En qué te puedo ayudar?' })
+  @Column({
+    name: 'menu_header',
+    type: 'text',
+    default: 'En qué te puedo ayudar?',
+  })
   menuHeader: string;
 
   @Column({ name: 'btn_products_label', default: 'Buscar productos' })

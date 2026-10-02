@@ -701,4 +701,22 @@ export class UpdateStoreSettingsDto {
   @IsInt()
   @Min(0)
   mayoristaDesde?: number;
+
+  @ApiPropertyOptional({
+    description: 'Pesos de esencia por unidad terminada (perfumería)',
+    example: 7000,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  costoFijoDeEsencia?: number;
+
+  @ApiPropertyOptional({
+    description: 'Mano de obra por unidad terminada, la general',
+    example: 7000,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  manoDeObraPorUnidad?: number;
 }

@@ -27,7 +27,6 @@ import { EcommerceOrderStatus } from '../common/enums/ecommerce-order-status.enu
 @ApiBearerAuth()
 @Controller('store-settings')
 export class StoreSettingsController {
-
   /**
    * El logo de la etiqueta, servido por nosotros.
    *
@@ -39,7 +38,9 @@ export class StoreSettingsController {
    * proxy de cualquier URL.
    */
   @Get('label-logo')
-  @ApiOperation({ summary: 'Logo de la etiqueta (para incrustarlo al imprimir)' })
+  @ApiOperation({
+    summary: 'Logo de la etiqueta (para incrustarlo al imprimir)',
+  })
   async labelLogo(@TenantId() tenantId: string, @Res() res: Response) {
     const settings = await this.storeSettingsService.getSettings(tenantId);
     const url = settings.labelLogoUrl || settings.logoUrl;

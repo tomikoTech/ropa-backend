@@ -9,6 +9,7 @@ import {
   Min,
   ValidateIf,
   ValidateNested,
+  IsInt,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
@@ -65,6 +66,15 @@ export class UpdateProductDto {
   @IsNumber()
   @Min(0)
   costPrice?: number;
+
+  @ApiPropertyOptional({
+    description: 'Mano de obra por unidad de este producto; null = la general',
+  })
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsInt()
+  @Min(0)
+  manoDeObra?: number | null;
 
   @ApiPropertyOptional({ example: 40000, description: 'Precio al por mayor' })
   @IsOptional()

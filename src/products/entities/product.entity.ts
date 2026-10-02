@@ -37,6 +37,13 @@ export class Product extends TenantAwareEntity {
   @Column({ name: 'base_price', type: 'decimal', precision: 12, scale: 2 })
   basePrice: number;
 
+  /**
+   * Mano de obra por unidad de **este** producto, cuando no cobra igual que
+   * la general de la tienda. `null` = la general.
+   */
+  @Column({ name: 'mano_de_obra', type: 'int', nullable: true })
+  manoDeObra: number | null;
+
   @Column({
     name: 'cost_price',
     type: 'decimal',

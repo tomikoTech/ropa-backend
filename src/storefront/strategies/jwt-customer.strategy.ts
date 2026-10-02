@@ -14,7 +14,10 @@ interface CustomerJwtPayload {
 }
 
 @Injectable()
-export class JwtCustomerStrategy extends PassportStrategy(Strategy, 'jwt-customer') {
+export class JwtCustomerStrategy extends PassportStrategy(
+  Strategy,
+  'jwt-customer',
+) {
   constructor(
     configService: ConfigService,
     @InjectRepository(EcommerceCustomer)

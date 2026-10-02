@@ -3,6 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
+import { resolverRecepcion } from './recepcion-con-averias.js';
 import { InjectRepository } from '@nestjs/typeorm';
 import {
   Repository,
@@ -448,7 +449,8 @@ export class PurchasesService {
       qb: T,
     ): T => {
       qb.andWhere('po.tenant_id = :tenantId', { tenantId });
-      if (filters.status) qb.andWhere('po.status = :status', { status: filters.status });
+      if (filters.status)
+        qb.andWhere('po.status = :status', { status: filters.status });
       // `none` es el grupo «Sin proveedor» del agregado; su carga perezosa pide
       // las órdenes sin proveedor, no todas.
       if (filters.supplierId === 'none') {
@@ -482,7 +484,9 @@ export class PurchasesService {
       .getRawMany<{ id: string }>();
     const ids = idRows.map((r) => r.id);
 
-    const contarQb = this.poRepository.createQueryBuilder('po').leftJoin('po.supplier', 'sup');
+    const contarQb = this.poRepository
+      .createQueryBuilder('po')
+      .leftJoin('po.supplier', 'sup');
     aplicarFiltros(contarQb);
     const total = await contarQb.getCount();
 
@@ -536,7 +540,10 @@ export class PurchasesService {
       .getRawMany<{ supplierId: string | null; pending: string }>();
 
     const deudaPorProveedor = new Map<string, number>(
-      deudaRows.map((r) => [r.supplierId ?? 'sin-proveedor', Number(r.pending)]),
+      deudaRows.map((r) => [
+        r.supplierId ?? 'sin-proveedor',
+        Number(r.pending),
+      ]),
     );
     const suppliers = compradoRows
       .map((r) => ({
@@ -698,7 +705,8 @@ export class PurchasesService {
       if (dto.supplierId !== undefined) po.supplierId = dto.supplierId;
       if (dto.warehouseId !== undefined) po.warehouseId = dto.warehouseId;
       if (dto.notes !== undefined) po.notes = dto.notes;
-      if (dto.orderName !== undefined) po.orderName = dto.orderName?.trim() || null;
+      if (dto.orderName !== undefined)
+        po.orderName = dto.orderName?.trim() || null;
       if (dto.supplierInvoiceNumber !== undefined)
         po.supplierInvoiceNumber = dto.supplierInvoiceNumber;
 
@@ -857,15 +865,20 @@ export class PurchasesService {
           );
         }
 
-        const remaining = poItem.quantityOrdered - poItem.quantityReceived;
-        if (receiveItem.quantityReceived > remaining) {
-          throw new BadRequestException(
-            `Cantidad recibida (${receiveItem.quantityReceived}) excede pendiente (${remaining}) para item ${poItem.id}`,
-          );
-        }
+        // «Llegaron 100, uno malo»: lo recibido cierra la compra y lo
+        // averiado se da de baja en el mismo acto (`recepcion-con-averias`).
+        const recepcion = resolverRecepcion({
+          ordenadas: poItem.quantityOrdered,
+          yaRecibidas: poItem.quantityReceived,
+          recibidas: receiveItem.quantityReceived,
+          averiadas: receiveItem.quantityDamaged,
+        });
+        if (recepcion.error) throw new BadRequestException(recepcion.error);
 
         // Update received quantity
-        poItem.quantityReceived += receiveItem.quantityReceived;
+        poItem.quantityReceived += recepcion.recibidas;
+        poItem.quantityDamaged =
+          (poItem.quantityDamaged ?? 0) + recepcion.averiadas;
         await poItemRepo.save(poItem);
 
         // Recibir mercancía la mete al inventario **con su etiqueta**: una
@@ -882,6 +895,20 @@ export class PurchasesService {
           usuarioId: userId,
           tenantId,
         });
+        if (recepcion.averiadas > 0) {
+          // Entró y sale: así la compra cuadra con la factura del proveedor
+          // y el estante con el inventario, y la pérdida queda a la vista.
+          await this.ledger.mover(manager, {
+            variantId: poItem.variantId,
+            warehouseId: po.warehouseId,
+            cantidad: -recepcion.averiadas,
+            motivo: 'ADJUSTMENT',
+            referenciaId: po.id,
+            notas: `Avería al recibir OC ${po.orderNumber}: ${recepcion.averiadas} de ${recepcion.recibidas} llegaron malas`,
+            usuarioId: userId,
+            tenantId,
+          });
+        }
       }
 
       // Update order status
@@ -991,7 +1018,9 @@ export class PurchasesService {
 
     // Fecha (vencimiento) y búsqueda (proveedor): valen para la página y para el
     // agregado. El estado y el proveedor de la carga perezosa, solo la página.
-    const filtrosComunes = <T extends SelectQueryBuilder<AccountsPayable>>(qb: T): T => {
+    const filtrosComunes = <T extends SelectQueryBuilder<AccountsPayable>>(
+      qb: T,
+    ): T => {
       qb.andWhere('ap.tenant_id = :tenantId', { tenantId });
       if (search) qb.andWhere('sup.name ILIKE :s', { s: `%${search}%` });
       if (filters.from && filters.to) {
@@ -1012,9 +1041,11 @@ export class PurchasesService {
       .select('ap.id', 'id')
       .where('1 = 1');
     filtrosComunes(idsQb);
-    if (filters.isPaid !== undefined) idsQb.andWhere('ap.is_paid = :isPaid', { isPaid: filters.isPaid });
+    if (filters.isPaid !== undefined)
+      idsQb.andWhere('ap.is_paid = :isPaid', { isPaid: filters.isPaid });
     if (filters.supplierId === 'none') idsQb.andWhere('po.supplier_id IS NULL');
-    else if (filters.supplierId) idsQb.andWhere('po.supplier_id = :sid', { sid: filters.supplierId });
+    else if (filters.supplierId)
+      idsQb.andWhere('po.supplier_id = :sid', { sid: filters.supplierId });
     const idRows = await idsQb
       .orderBy('ap.due_date', 'ASC')
       .addOrderBy('ap.id', 'ASC')
@@ -1029,9 +1060,12 @@ export class PurchasesService {
       .leftJoin('po.supplier', 'sup')
       .where('1 = 1');
     filtrosComunes(contarQb);
-    if (filters.isPaid !== undefined) contarQb.andWhere('ap.is_paid = :isPaid', { isPaid: filters.isPaid });
-    if (filters.supplierId === 'none') contarQb.andWhere('po.supplier_id IS NULL');
-    else if (filters.supplierId) contarQb.andWhere('po.supplier_id = :sid', { sid: filters.supplierId });
+    if (filters.isPaid !== undefined)
+      contarQb.andWhere('ap.is_paid = :isPaid', { isPaid: filters.isPaid });
+    if (filters.supplierId === 'none')
+      contarQb.andWhere('po.supplier_id IS NULL');
+    else if (filters.supplierId)
+      contarQb.andWhere('po.supplier_id = :sid', { sid: filters.supplierId });
     const total = await contarQb.getCount();
 
     const filas = ids.length
@@ -1350,7 +1384,9 @@ export class PurchasesService {
           paidAmount: pagadoCents / 100,
           // Solo se marca al saldarse. Un pago parcial no puede «despagar»
           // nada: `isPaid` va de falso a verdadero y nunca al revés.
-          ...(aplicacion.quedaSaldada ? { isPaid: true, paidAt: new Date() } : {}),
+          ...(aplicacion.quedaSaldada
+            ? { isPaid: true, paidAt: new Date() }
+            : {}),
         },
       );
 

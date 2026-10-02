@@ -2,6 +2,10 @@ import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { ProductionService } from './production.service.js';
 import { CreateProductionDto } from './dto/create-production.dto.js';
+import {
+  EntradaDeTerminadoDto,
+  SalidaDeEsenciaDto,
+} from './dto/produccion-simple.dto.js';
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
 import { TenantId } from '../common/decorators/tenant-id.decorator.js';
 import { User } from '../users/entities/user.entity.js';
@@ -22,6 +26,35 @@ export class ProductionController {
     @TenantId() tenantId: string,
   ) {
     return this.productionService.create(dto, user.id, tenantId);
+  }
+
+  // ── Producción simple (perfumería): dos pasos separados a propósito ──
+  @Get('esencias')
+  @ApiOperation({ summary: 'Lo que queda de cada esencia, en gramos' })
+  esencias(@TenantId() tenantId: string) {
+    return this.productionService.existenciasDeEsencia(tenantId);
+  }
+
+  @Post('salida-de-esencia')
+  @ApiOperation({ summary: 'César saca esencia para producir (gramos)' })
+  sacarEsencia(
+    @Body() dto: SalidaDeEsenciaDto,
+    @CurrentUser() user: User,
+    @TenantId() tenantId: string,
+  ) {
+    return this.productionService.sacarEsencia(dto, user.id, tenantId);
+  }
+
+  @Post('entrada-de-terminado')
+  @ApiOperation({
+    summary: 'Entran lociones terminadas: sale el frasco y queda el costo',
+  })
+  entrarTerminado(
+    @Body() dto: EntradaDeTerminadoDto,
+    @CurrentUser() user: User,
+    @TenantId() tenantId: string,
+  ) {
+    return this.productionService.entrarTerminado(dto, user.id, tenantId);
   }
 
   @Get()

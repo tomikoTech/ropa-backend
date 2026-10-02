@@ -39,7 +39,10 @@ export class BotChatService {
     });
   }
 
-  async getConversation(tenantId: string, id: string): Promise<BotConversation> {
+  async getConversation(
+    tenantId: string,
+    id: string,
+  ): Promise<BotConversation> {
     const conv = await this.conversationRepo.findOne({
       where: { id, tenantId },
       relations: ['messages'],
@@ -48,7 +51,10 @@ export class BotChatService {
     return conv;
   }
 
-  async getMessages(tenantId: string, conversationId: string): Promise<BotMessage[]> {
+  async getMessages(
+    tenantId: string,
+    conversationId: string,
+  ): Promise<BotMessage[]> {
     const conv = await this.conversationRepo.findOne({
       where: { id: conversationId, tenantId },
     });
@@ -85,10 +91,10 @@ export class BotChatService {
     conv.tenantId = data.tenantId;
     conv.storeSlug = data.storeSlug;
     conv.customerPhone = data.customerPhone;
-    conv.customerName = data.customerName || null as any;
+    conv.customerName = data.customerName || (null as any);
     conv.status = 'active';
-    conv.escalationReason = data.escalationReason || null as any;
-    conv.escalationSummary = data.escalationSummary || null as any;
+    conv.escalationReason = data.escalationReason || (null as any);
+    conv.escalationSummary = data.escalationSummary || (null as any);
     const saved = await this.conversationRepo.save(conv);
 
     // Save initial messages (conversation history from bot)
@@ -161,7 +167,10 @@ export class BotChatService {
     return saved;
   }
 
-  async closeConversation(tenantId: string, conversationId: string): Promise<BotConversation> {
+  async closeConversation(
+    tenantId: string,
+    conversationId: string,
+  ): Promise<BotConversation> {
     const conv = await this.getConversation(tenantId, conversationId);
     conv.status = 'closed';
     conv.closedAt = new Date();
@@ -189,7 +198,11 @@ export class BotChatService {
 
   // --- WhatsApp send ---
 
-  private async sendWhatsApp(storeSlug: string, toPhone: string, text: string): Promise<void> {
+  private async sendWhatsApp(
+    storeSlug: string,
+    toPhone: string,
+    text: string,
+  ): Promise<void> {
     const config = await this.botConfigRepo.findOne({ where: { storeSlug } });
     if (!config?.whatsappAccessToken || !config?.whatsappPhoneNumberId) {
       throw new BadRequestException(
@@ -209,7 +222,7 @@ export class BotChatService {
     const resp = await fetch(url, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${config.whatsappAccessToken}`,
+        Authorization: `Bearer ${config.whatsappAccessToken}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(payload),
@@ -217,7 +230,9 @@ export class BotChatService {
 
     if (!resp.ok) {
       const body = await resp.text();
-      throw new BadRequestException(`WhatsApp send failed: ${resp.status} ${body}`);
+      throw new BadRequestException(
+        `WhatsApp send failed: ${resp.status} ${body}`,
+      );
     }
   }
 }

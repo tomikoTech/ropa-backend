@@ -74,7 +74,10 @@ export class CreateOrderDto {
   @IsString()
   shippingType?: string;
 
-  @ApiPropertyOptional({ example: 'pickup', enum: ['pickup', 'shipping', 'cod'] })
+  @ApiPropertyOptional({
+    example: 'pickup',
+    enum: ['pickup', 'shipping', 'cod'],
+  })
   @IsOptional()
   @IsIn(['pickup', 'shipping', 'cod'])
   deliveryMethod?: string;

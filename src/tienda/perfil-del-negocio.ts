@@ -40,8 +40,14 @@ export interface PerfilDelNegocio {
    * terminado**, dejando esencias y frascos para sus propias pestañas.
    */
   soloTerminadosEnVenta: boolean;
-  /** Si el pedido del catálogo es siempre a domicilio (no se recoge). */
+  /** El pedido del catálogo es siempre a domicilio. */
   pedidoSiempreADomicilio: boolean;
+  /**
+   * El frasco se descuenta al **producir**, no al vender. La botella se usa
+   * cuando César llena la loción; descontarla otra vez en la venta era
+   * contar el mismo frasco dos veces (así quedó ASAD BOURBON en −17).
+   */
+  frascoSeDescuentaAlProducir: boolean;
 }
 
 /** Lo que se lee de `store_settings` para armar el perfil. */
@@ -91,6 +97,7 @@ export function perfilDelNegocio(
         tieneCajas: false,
         soloTerminadosEnVenta: true,
         pedidoSiempreADomicilio: true,
+        frascoSeDescuentaAlProducir: true,
       };
     case 'general':
       return {
@@ -101,6 +108,7 @@ export function perfilDelNegocio(
         tieneCajas: !!s?.unitTrackingEnabled,
         soloTerminadosEnVenta: false,
         pedidoSiempreADomicilio: false,
+        frascoSeDescuentaAlProducir: false,
       };
     default:
       return {
@@ -113,6 +121,7 @@ export function perfilDelNegocio(
         tieneCajas: !!s?.unitTrackingEnabled,
         soloTerminadosEnVenta: false,
         pedidoSiempreADomicilio: false,
+        frascoSeDescuentaAlProducir: false,
       };
   }
 }
@@ -133,6 +142,9 @@ export function tipoDeProductoPorDefecto(
   perfil: PerfilDelNegocio,
   pedido?: string | null,
 ): string | undefined {
+  // `TODOS` lo manda el buscador compartido (compras, ajustes, traslados):
+  // ahí sí hace falta ver esencias y frascos, que es lo que se compra.
+  if (pedido === 'TODOS') return undefined;
   if (pedido) return pedido;
   return perfil.soloTerminadosEnVenta ? 'STANDARD' : undefined;
 }

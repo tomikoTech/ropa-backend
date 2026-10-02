@@ -608,4 +608,16 @@ export class StoreSettings extends TenantAwareEntity {
    */
   @Column({ name: 'mayorista_desde', type: 'int', default: 0 })
   mayoristaDesde: number;
+
+  /**
+   * Producción simple de una perfumería: el costo de una loción terminada es
+   * frasco + esencia fija por unidad + mano de obra
+   * (`src/production/costo-del-terminado.ts`). «Mucha o poca, 7.000».
+   */
+  @Column({ name: 'costo_fijo_de_esencia', type: 'int', default: 0 })
+  costoFijoDeEsencia: number;
+
+  /** Mano de obra por unidad, la general; un producto puede poner la suya. */
+  @Column({ name: 'mano_de_obra_por_unidad', type: 'int', default: 0 })
+  manoDeObraPorUnidad: number;
 }

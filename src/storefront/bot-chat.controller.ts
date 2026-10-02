@@ -1,11 +1,4 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Body,
-  Param,
-  Query,
-} from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { Public } from '../common/decorators/public.decorator.js';
 import { TenantId } from '../common/decorators/tenant-id.decorator.js';
@@ -65,20 +58,14 @@ export class BotChatController {
   @Get('bot-conversations/:id')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get conversation with messages' })
-  async getConversation(
-    @TenantId() tenantId: string,
-    @Param('id') id: string,
-  ) {
+  async getConversation(@TenantId() tenantId: string, @Param('id') id: string) {
     return this.chatService.getConversation(tenantId, id);
   }
 
   @Get('bot-conversations/:id/messages')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get messages for a conversation' })
-  async getMessages(
-    @TenantId() tenantId: string,
-    @Param('id') id: string,
-  ) {
+  async getMessages(@TenantId() tenantId: string, @Param('id') id: string) {
     return this.chatService.getMessages(tenantId, id);
   }
 
@@ -97,10 +84,7 @@ export class BotChatController {
   @Post('bot-conversations/:id/close')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Close conversation — returns customer to bot' })
-  async close(
-    @TenantId() tenantId: string,
-    @Param('id') id: string,
-  ) {
+  async close(@TenantId() tenantId: string, @Param('id') id: string) {
     return this.chatService.closeConversation(tenantId, id);
   }
 
@@ -108,7 +92,9 @@ export class BotChatController {
 
   @Public()
   @Post('storefront/bot-chat/conversations')
-  @ApiOperation({ summary: 'Create conversation (called by bot on escalation)' })
+  @ApiOperation({
+    summary: 'Create conversation (called by bot on escalation)',
+  })
   async createConversation(@Body() dto: CreateConversationDto) {
     return this.chatService.createConversation(dto);
   }

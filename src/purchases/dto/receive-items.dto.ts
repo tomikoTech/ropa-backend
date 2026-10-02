@@ -5,9 +5,10 @@ import {
   IsNumber,
   Min,
   ArrayMinSize,
+  IsOptional,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class ReceiveItemDto {
   @ApiProperty({ description: 'ID del item de la orden' })
@@ -18,6 +19,15 @@ export class ReceiveItemDto {
   @IsNumber()
   @Min(1)
   quantityReceived: number;
+
+  @ApiPropertyOptional({
+    example: 1,
+    description: 'De las recibidas, cuántas llegaron averiadas',
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  quantityDamaged?: number;
 }
 
 export class ReceiveItemsDto {

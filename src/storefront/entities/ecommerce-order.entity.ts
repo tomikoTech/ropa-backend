@@ -153,7 +153,11 @@ export class EcommerceOrder extends TenantAwareEntity {
   @Column({ name: 'cod_payment_confirmed', default: false })
   codPaymentConfirmed: boolean;
 
-  @Column({ name: 'cod_payment_confirmed_at', type: 'timestamptz', nullable: true })
+  @Column({
+    name: 'cod_payment_confirmed_at',
+    type: 'timestamptz',
+    nullable: true,
+  })
   codPaymentConfirmedAt: Date;
 
   @Column({ name: 'delivery_method', nullable: true })

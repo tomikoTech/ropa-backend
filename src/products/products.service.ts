@@ -814,6 +814,7 @@ export class ProductsService {
       product.lote = dto.lote?.trim() || (null as never);
     if (dto.frascoVariantId !== undefined)
       product.frascoVariantId = dto.frascoVariantId || null;
+    if (dto.manoDeObra !== undefined) product.manoDeObra = dto.manoDeObra;
     if (dto.status !== undefined) product.status = dto.status;
     if (dto.taxRate !== undefined) product.taxRate = dto.taxRate;
     if (dto.displayName !== undefined) product.displayName = dto.displayName;

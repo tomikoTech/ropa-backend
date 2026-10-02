@@ -57,6 +57,7 @@ describe('perfilDelNegocio', () => {
     expect(p.tieneCajas).toBe(false);
     expect(p.soloTerminadosEnVenta).toBe(true);
     expect(p.pedidoSiempreADomicilio).toBe(true);
+    expect(p.frascoSeDescuentaAlProducir).toBe(true);
   });
 
   it('otro comercio: unidades con tallas, y cajas si las pidió', () => {
@@ -97,6 +98,10 @@ describe('tipoDeProductoPorDefecto', () => {
   it('las pestañas de Frascos y Esencias piden su tipo y lo reciben', () => {
     expect(tipoDeProductoPorDefecto(perfumeria, 'FRASCO')).toBe('FRASCO');
     expect(tipoDeProductoPorDefecto(perfumeria, 'ESSENCE')).toBe('ESSENCE');
+  });
+
+  it('«TODOS» abre el buscador de compras y ajustes a esencias y frascos', () => {
+    expect(tipoDeProductoPorDefecto(perfumeria, 'TODOS')).toBeUndefined();
   });
 
   it('una zapatería sigue viendo todo', () => {

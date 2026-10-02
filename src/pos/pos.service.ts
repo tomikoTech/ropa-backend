@@ -772,8 +772,14 @@ export class PosService {
           // descontar 1 frasco por cada unidad vendida. NO bloquea la venta:
           // descuenta lo disponible y el remanente deja el frasco en negativo
           // (aviso de que hay que reponer).
+          // En la producción simple (perfumería) el frasco ya salió cuando
+          // se registró la loción terminada: descontarlo otra vez al vender
+          // era contar la misma botella dos veces.
           const frascoVariantId = data.variant.product.frascoVariantId;
-          if (frascoVariantId) {
+          if (
+            frascoVariantId &&
+            !(await this.frascoYaSalioAlProducir(tenantId))
+          ) {
             const frascoStocks = await stockRepo.find({
               where: { variantId: frascoVariantId, tenantId },
               order: { quantity: 'DESC' },
@@ -3483,6 +3489,11 @@ export class PosService {
    * una venta contra ellas descuadra las dos cosas a la vez. El POS ya no las
    * ofrece; esto es el candado del lado del servidor.
    */
+  private async frascoYaSalioAlProducir(tenantId: string): Promise<boolean> {
+    const s = await this.storeSettingsRepo.findOne({ where: { tenantId } });
+    return perfilDelNegocio(s).frascoSeDescuentaAlProducir;
+  }
+
   private async exigirBodegaDeVenta(
     tenantId: string,
     warehouseId?: string | null,
@@ -3490,12 +3501,10 @@ export class PosService {
     if (!warehouseId) return;
     const s = await this.storeSettingsRepo.findOne({ where: { tenantId } });
     if (!perfilDelNegocio(s).soloTerminadosEnVenta) return;
-    const bodega = await this.dataSource
-      .getRepository(Warehouse)
-      .findOne({
-        where: { id: warehouseId, tenantId },
-        select: ['id', 'name', 'isPosLocation'],
-      });
+    const bodega = await this.dataSource.getRepository(Warehouse).findOne({
+      where: { id: warehouseId, tenantId },
+      select: ['id', 'name', 'isPosLocation'],
+    });
     if (bodega && !bodega.isPosLocation) {
       throw new BadRequestException(
         `«${bodega.name}» no es una bodega de venta: la factura se cobra por la bodega principal.`,

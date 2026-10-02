@@ -153,6 +153,10 @@ export class StoreSettingsService {
       settings.exhibicionObjetivo = dto.exhibicionObjetivo;
     if (dto.mayoristaDesde !== undefined)
       settings.mayoristaDesde = dto.mayoristaDesde;
+    if (dto.costoFijoDeEsencia !== undefined)
+      settings.costoFijoDeEsencia = dto.costoFijoDeEsencia;
+    if (dto.manoDeObraPorUnidad !== undefined)
+      settings.manoDeObraPorUnidad = dto.manoDeObraPorUnidad;
     if (dto.autoReplenishEnabled !== undefined)
       settings.autoReplenishEnabled = dto.autoReplenishEnabled;
     if (dto.autoReplenishThreshold !== undefined)

@@ -34,6 +34,10 @@ export class PurchaseOrderItem extends TenantAwareEntity {
   @Column({ name: 'quantity_received', type: 'int', default: 0 })
   quantityReceived: number;
 
+  /** Lo que llegó malo: entró y se dio de baja en el mismo acto. */
+  @Column({ name: 'quantity_damaged', type: 'int', default: 0 })
+  quantityDamaged: number;
+
   @Column({ name: 'unit_cost', type: 'decimal', precision: 14, scale: 2 })
   unitCost: number;
 

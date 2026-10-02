@@ -2,7 +2,9 @@ import { IsString, IsOptional, IsBoolean } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class UpdateBotConfigDto {
-  @ApiPropertyOptional({ example: 'Qué más, máquina! Bienvenido a The Culture...' })
+  @ApiPropertyOptional({
+    example: 'Qué más, máquina! Bienvenido a The Culture...',
+  })
   @IsOptional()
   @IsString()
   greetingMessage?: string;

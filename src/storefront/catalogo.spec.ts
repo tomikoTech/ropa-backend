@@ -26,7 +26,14 @@ const fuente = {
   variants: [
     { id: 'v40', sizeName: '40', colorName: 'Negro', stock: 2, isActive: true },
     { id: 'v41', sizeName: '41', colorName: 'Negro', stock: 0, isActive: true },
-    { id: 'v38', sizeName: '38', colorName: 'Negro', stock: 5, isActive: true, priceOverride: '159900' },
+    {
+      id: 'v38',
+      sizeName: '38',
+      colorName: 'Negro',
+      stock: 5,
+      isActive: true,
+      priceOverride: '159900',
+    },
     { id: 'vx', sizeName: '39', colorName: 'Negro', stock: 9, isActive: false },
   ],
 };
@@ -35,7 +42,9 @@ describe('catálogo público: qué sale de un producto', () => {
   const p = productoDelCatalogo(fuente);
 
   it('el costo y el mayorista no viajan; el precio es el de venta al detal', () => {
-    expect(JSON.stringify(p)).not.toMatch(/90000|120000|150000|costPrice|wholesale/);
+    expect(JSON.stringify(p)).not.toMatch(
+      /90000|120000|150000|costPrice|wholesale/,
+    );
     expect(p.precio).toBe(189900);
   });
 
@@ -64,7 +73,9 @@ describe('catálogo público: qué sale de un producto', () => {
   });
 
   it('una referencia marcada agotada por la tienda sale agotada aunque tenga pares', () => {
-    expect(productoDelCatalogo({ ...fuente, isAvailable: false }).disponible).toBe(false);
+    expect(
+      productoDelCatalogo({ ...fuente, isAvailable: false }).disponible,
+    ).toBe(false);
     expect(productoDelCatalogo(fuente).disponible).toBe(true);
     expect(
       productoDelCatalogo({
@@ -77,7 +88,13 @@ describe('catálogo público: qué sale de un producto', () => {
 
 describe('catálogo público: filtros y tallas', () => {
   it('ordena tallas numéricas por número y las de letra después', () => {
-    expect(['M', '40', '38', 'S', '42.5'].sort(compararTallas)).toEqual(['38', '40', '42.5', 'M', 'S']);
+    expect(['M', '40', '38', 'S', '42.5'].sort(compararTallas)).toEqual([
+      '38',
+      '40',
+      '42.5',
+      'M',
+      'S',
+    ]);
   });
 
   it('los filtros salen de lo que hay', () => {
@@ -118,7 +135,8 @@ describe('catálogo público: la materia prima no sale', () => {
 
 describe('catálogo público: lo que no viene por tallas', () => {
   it('«Única», «U» o vacío es talla única; «40» no', () => {
-    for (const t of ['Única', 'unica', 'U', '', ' ', 'Unitalla']) expect(esTallaUnica(t)).toBe(true);
+    for (const t of ['Única', 'unica', 'U', '', ' ', 'Unitalla'])
+      expect(esTallaUnica(t)).toBe(true);
     expect(esTallaUnica('40')).toBe(false);
     expect(esTallaUnica('M')).toBe(false);
   });

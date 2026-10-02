@@ -1,12 +1,4 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Body,
-  Param,
-  Query,
-  Res,
-} from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { ApiTags, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { Public } from '../common/decorators/public.decorator.js';
@@ -143,18 +135,22 @@ export class StorefrontController {
     const pageNum = page ? parseInt(page, 10) : undefined;
     const limitNum = limit ? parseInt(limit, 10) : undefined;
 
-    const { products, total, page: usedPage, limit: usedLimit } =
-      await this.storefrontService.getProducts(tenantSlug, {
-        category,
-        gender,
-        search,
-        inStock: inStock === 'true',
-        onlyAvailable: onlyAvailable === 'true',
-        sizes,
-        sort,
-        page: pageNum,
-        limit: limitNum,
-      });
+    const {
+      products,
+      total,
+      page: usedPage,
+      limit: usedLimit,
+    } = await this.storefrontService.getProducts(tenantSlug, {
+      category,
+      gender,
+      search,
+      inStock: inStock === 'true',
+      onlyAvailable: onlyAvailable === 'true',
+      sizes,
+      sort,
+      page: pageNum,
+      limit: limitNum,
+    });
 
     // Expose pagination metadata via headers only when paginating, so the
     // default response (and its body shape) stays byte-identical to before.

@@ -60,7 +60,13 @@ import { NotificationsModule } from '../notifications/notifications.module.js';
       }),
     }),
   ],
-  controllers: [StorefrontController, StoreSettingsController, CustomerAuthController, BotConfigController, BotChatController],
+  controllers: [
+    StorefrontController,
+    StoreSettingsController,
+    CustomerAuthController,
+    BotConfigController,
+    BotChatController,
+  ],
   providers: [
     StorefrontService,
     StoreSettingsService,
