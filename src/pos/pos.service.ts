@@ -872,7 +872,7 @@ export class PosService {
             clientId: clientId!,
             totalAmount: totalCredit,
             paidAmount: 0,
-            dueDate: diaDeCalendario(dto.creditDueDate!),
+            dueDate: diaDeCalendario(dto.creditDueDate),
             notes: dto.creditNotes,
             tenantId,
           });
@@ -2539,18 +2539,18 @@ export class PosService {
         sale.payments = [];
 
         const deuda = plan.carteraQueRevive
-          ? cuenta!
+          ? cuenta
           : arRepo.create({ saleId: sale.id, tenantId });
         deuda.clientId = cliente!.id;
         deuda.totalAmount = enPesos(plan.totalCentavos);
         deuda.paidAmount = 0;
-        deuda.dueDate = diaDeCalendario(pedido.fechaDeVencimiento!);
+        deuda.dueDate = diaDeCalendario(pedido.fechaDeVencimiento);
         deuda.isFullyPaid = false;
         deuda.fullyPaidAt = null;
         deuda.notes = anotar(
           dto.creditNotes ??
             `Pasada a crédito desde ${plan.pagosQueSeBorran.length ? 'un pago ya registrado' : 'una venta sin cobrar'}`,
-          plan.carteraQueRevive ? cuenta!.notes : null,
+          plan.carteraQueRevive ? cuenta.notes : null,
         );
         await arRepo.save(deuda);
 

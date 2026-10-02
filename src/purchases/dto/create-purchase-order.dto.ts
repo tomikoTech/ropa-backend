@@ -40,7 +40,9 @@ export class PurchaseOrderPaymentDto {
   @Min(0)
   amount: number;
 
-  @ApiPropertyOptional({ description: 'Referencia (N.º de transferencia, etc.)' })
+  @ApiPropertyOptional({
+    description: 'Referencia (N.º de transferencia, etc.)',
+  })
   @IsOptional()
   @IsString()
   reference?: string;

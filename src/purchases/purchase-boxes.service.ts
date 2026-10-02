@@ -541,7 +541,11 @@ export class PurchaseBoxesService {
         order.status = PurchaseOrderStatus.PARTIAL;
         await orderRepo.save(order);
       }
-      await this.recalculateOrderTotals(manager, line.purchaseOrderId, tenantId);
+      await this.recalculateOrderTotals(
+        manager,
+        line.purchaseOrderId,
+        tenantId,
+      );
       return line;
     });
   }

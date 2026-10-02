@@ -246,9 +246,7 @@ export class ProductionService {
   // es más pequeño», y el costo lo cerraron en un valor fijo.
 
   /** Las esencias con lo que queda de cada una, en gramos, por bodega. */
-  async existenciasDeEsencia(
-    tenantId: string,
-  ): Promise<
+  async existenciasDeEsencia(tenantId: string): Promise<
     {
       variantId: string;
       productId: string;
@@ -327,13 +325,11 @@ export class ProductionService {
           notes: dto.notes ?? undefined,
           createdById: userId,
           items: [
-            manager
-              .getRepository(ProductionItem)
-              .create({
-                tenantId,
-                variantId: variante.id,
-                quantity: dto.gramos,
-              }),
+            manager.getRepository(ProductionItem).create({
+              tenantId,
+              variantId: variante.id,
+              quantity: dto.gramos,
+            }),
           ],
         }),
       );

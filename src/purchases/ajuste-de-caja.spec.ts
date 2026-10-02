@@ -32,10 +32,7 @@ describe('puedeReajustarPorCaja', () => {
 
   it('con pagos, una BAJA se bloquea', () => {
     expect(
-      puedeReajustarPorCaja(
-        { amount: 100, paidAmount: 40, isPaid: false },
-        80,
-      ),
+      puedeReajustarPorCaja({ amount: 100, paidAmount: 40, isPaid: false }, 80),
     ).toBe(false);
   });
 
@@ -53,19 +50,13 @@ describe('puedeReajustarPorCaja', () => {
   // puede bloquear: no hay dinero que proteger.
   it('cuenta en cero marcada pagada (isPaid) pero sin abonos: se permite agregar la primera caja', () => {
     expect(
-      puedeReajustarPorCaja(
-        { amount: 0, paidAmount: 0, isPaid: true },
-        4512,
-      ),
+      puedeReajustarPorCaja({ amount: 0, paidAmount: 0, isPaid: true }, 4512),
     ).toBe(true);
   });
 
   it('una baja con abonos reales sí se bloquea aunque isPaid sea false', () => {
     expect(
-      puedeReajustarPorCaja(
-        { amount: 100, paidAmount: 40, isPaid: false },
-        80,
-      ),
+      puedeReajustarPorCaja({ amount: 100, paidAmount: 40, isPaid: false }, 80),
     ).toBe(false);
   });
 });
