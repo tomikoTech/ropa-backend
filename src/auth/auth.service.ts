@@ -35,17 +35,26 @@ export class AuthService {
   ) {}
 
   async login(loginDto: LoginDto) {
-    // `email` puede ser un email O un nombre de usuario.
-    const user = await this.usersService.findByEmailOrUsername(loginDto.email);
-    if (!user) {
+    // `email` puede ser un email O un nombre de usuario, y el nombre de
+    // usuario es único **por tienda**: dos negocios pueden tener cada uno su
+    // «bodega». Por eso se prueban todas las cuentas que respondan a lo que
+    // se escribió y entra aquella cuya contraseña coincide —que es la que
+    // identifica de cuál de las dos se trata—.
+    const candidatos = await this.usersService.findCandidatosParaLogin(
+      loginDto.email,
+    );
+    if (!candidatos.length) {
       throw new UnauthorizedException('Credenciales inválidas');
     }
 
-    const isPasswordValid = await bcrypt.compare(
-      loginDto.password,
-      user.passwordHash,
-    );
-    if (!isPasswordValid) {
+    let user: User | null = null;
+    for (const candidato of candidatos) {
+      if (await bcrypt.compare(loginDto.password, candidato.passwordHash)) {
+        user = candidato;
+        break;
+      }
+    }
+    if (!user) {
       throw new UnauthorizedException('Credenciales inválidas');
     }
 

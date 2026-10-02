@@ -1,5 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
+import { DataSource } from 'typeorm';
+import * as bcrypt from 'bcrypt';
 import { setupTestApp, loginAsAdmin, teardownTestApp } from './helpers/setup';
 
 /**
@@ -133,6 +135,40 @@ describe('Entrar con usuario (e2e)', () => {
     await entrar(`cajamayor${ts.toString().slice(-4)}`, 'clave-nueva-1').expect(201);
     // Y la vieja deja de servir, que es para lo que se cambia.
     await entrar(`cajamayor${ts.toString().slice(-4)}`, clave).expect(401);
+  }, 60000);
+
+  it('dos tiendas pueden tener su propia «bodega», y cada quien entra en la suya', async () => {
+    // Pasó de verdad el 2026-10-02: AMAWAD ya tenía un usuario «bodega» y,
+    // al ponerle ese mismo nombre a la bodega de Distri Amber, esta dejó de
+    // poder entrar **con su contraseña correcta**. El login buscaba el
+    // nombre de usuario sin mirar de qué tienda era y comparaba contra la
+    // cuenta de la otra.
+    const ds = app.get(DataSource);
+    const compartido = `bodega${ts.toString().slice(-6)}`;
+    const [otra]: { id: string }[] = await ds.query(
+      `INSERT INTO tenants (name, slug, is_active) VALUES ($1, $2, true) RETURNING id`,
+      [`E2E Otra Tienda ${ts}`, `e2e-otra-${ts}`],
+    );
+    const hash = await bcrypt.hash('clave-de-la-otra', 10);
+    await ds.query(
+      `INSERT INTO users (tenant_id, email, username, password_hash, first_name, last_name, role, is_active)
+       VALUES ($1, $2, $3, $4, 'Otra', 'Bodega', 'COLABORADOR', true)`,
+      [otra.id, `bodega-otra-${ts}@e2e.co`, compartido, hash],
+    );
+
+    // La misma palabra, en la tienda de la prueba.
+    await request(app.getHttpServer())
+      .patch(`/api/users/${userId}`)
+      .set(auth())
+      .send({ username: compartido })
+      .expect(200);
+
+    // Cada contraseña abre **su** cuenta, y ninguna abre la ajena.
+    const mia = await entrar(compartido, 'clave-nueva-1').expect(201);
+    expect(mia.body.user.email).toBe(correo);
+    const suya = await entrar(compartido, 'clave-de-la-otra').expect(201);
+    expect(suya.body.user.email).toBe(`bodega-otra-${ts}@e2e.co`);
+    await entrar(compartido, 'ninguna-de-las-dos').expect(401);
   }, 60000);
 
   it('el administrador también puede ponerle usuario a alguien', async () => {

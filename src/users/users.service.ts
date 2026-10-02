@@ -80,12 +80,33 @@ export class UsersService {
   }
 
   // Login por email O nombre de usuario (mismo criterio global que findByEmail).
-  async findByEmailOrUsername(identifier: string): Promise<User | null> {
+  /**
+   * Todas las cuentas que responden a ese correo **o** nombre de usuario.
+   *
+   * Devuelve una lista y no una sola porque el nombre de usuario es único
+   * **por tienda**, no en todo el sistema: dos negocios distintos pueden
+   * tener cada uno su «bodega», y así lo permite el índice de la tabla.
+   *
+   * Buscando una sola cuenta, el login tomaba la primera que apareciera: a
+   * la «bodega» de la segunda tienda le decía «credenciales inválidas» con
+   * la contraseña correcta, porque estaba comparando contra la cuenta de la
+   * otra tienda. Pasó de verdad el 2026-10-02 con Distri Amber y AMAWAD.
+   *
+   * Ordenadas por antigüedad para que, con todo lo demás igual, la respuesta
+   * sea siempre la misma y no dependa del plan del motor.
+   */
+  async findCandidatosParaLogin(identifier: string): Promise<User[]> {
     const id = (identifier || '').trim();
-    if (!id) return null;
-    return this.userRepository.findOne({
+    if (!id) return [];
+    return this.userRepository.find({
       where: [{ email: id }, { username: id }],
+      order: { createdAt: 'ASC' },
     });
+  }
+
+  async findByEmailOrUsername(identifier: string): Promise<User | null> {
+    const [primero] = await this.findCandidatosParaLogin(identifier);
+    return primero ?? null;
   }
 
   /**

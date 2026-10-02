@@ -35,6 +35,7 @@ describe('AuthService', () => {
     usersService = {
       findByEmail: jest.fn(),
       findByEmailOrUsername: jest.fn(),
+      findCandidatosParaLogin: jest.fn(),
       create: jest.fn(),
       findOne: jest.fn(),
     };
@@ -76,7 +77,7 @@ describe('AuthService', () => {
 
   describe('login', () => {
     it('should return tokens when credentials are valid', async () => {
-      usersService.findByEmailOrUsername!.mockResolvedValue(mockUser);
+      usersService.findCandidatosParaLogin!.mockResolvedValue([mockUser]);
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
 
       const result = await service.login({
@@ -88,14 +89,14 @@ describe('AuthService', () => {
       expect(result).toHaveProperty('refreshToken');
       expect(result).toHaveProperty('user');
       expect(result.user.email).toBe('admin@mipinta.co');
-      expect(usersService.findByEmailOrUsername).toHaveBeenCalledWith(
+      expect(usersService.findCandidatosParaLogin).toHaveBeenCalledWith(
         'admin@mipinta.co',
       );
       expect(jwtService.sign).toHaveBeenCalled();
     });
 
     it('should throw UnauthorizedException when email is not found', async () => {
-      usersService.findByEmailOrUsername!.mockResolvedValue(null);
+      usersService.findCandidatosParaLogin!.mockResolvedValue([]);
 
       await expect(
         service.login({ email: 'wrong@email.com', password: 'admin123' }),
@@ -103,7 +104,7 @@ describe('AuthService', () => {
     });
 
     it('should throw UnauthorizedException when password is wrong', async () => {
-      usersService.findByEmailOrUsername!.mockResolvedValue(mockUser);
+      usersService.findCandidatosParaLogin!.mockResolvedValue([mockUser]);
       (bcrypt.compare as jest.Mock).mockResolvedValue(false);
 
       await expect(
@@ -112,10 +113,9 @@ describe('AuthService', () => {
     });
 
     it('should throw UnauthorizedException when user is inactive', async () => {
-      usersService.findByEmailOrUsername!.mockResolvedValue({
-        ...mockUser,
-        isActive: false,
-      });
+      usersService.findCandidatosParaLogin!.mockResolvedValue([
+        { ...mockUser, isActive: false },
+      ]);
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
 
       await expect(
