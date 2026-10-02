@@ -5,14 +5,21 @@ import {
   IsOptional,
   IsString,
   MinLength,
+  ValidateIf,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Role } from '../../common/enums/role.enum.js';
 
 export class CreateUserDto {
-  @ApiProperty({ example: 'admin@tomiko.co' })
+  /**
+   * Opcional si viene `username`: «usuarios solo con nombre». El servidor le
+   * pone un correo técnico (`<usuario>@sin-correo.<tienda>`) para que la
+   * columna, que es única por tienda, siga teniendo algo.
+   */
+  @ApiPropertyOptional({ example: 'admin@tomiko.co' })
+  @ValidateIf((o: CreateUserDto) => !o.username || !!o.email)
   @IsEmail()
-  email: string;
+  email?: string;
 
   /**
    * Con qué entra esta persona, además del correo.

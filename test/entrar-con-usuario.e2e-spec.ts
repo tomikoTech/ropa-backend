@@ -132,7 +132,9 @@ describe('Entrar con usuario (e2e)', () => {
     // persona por fuera de la pantalla en la que está.
     expect(r.body.accessToken).toBeTruthy();
 
-    await entrar(`cajamayor${ts.toString().slice(-4)}`, 'clave-nueva-1').expect(201);
+    await entrar(`cajamayor${ts.toString().slice(-4)}`, 'clave-nueva-1').expect(
+      201,
+    );
     // Y la vieja deja de servir, que es para lo que se cambia.
     await entrar(`cajamayor${ts.toString().slice(-4)}`, clave).expect(401);
   }, 60000);
@@ -179,5 +181,34 @@ describe('Entrar con usuario (e2e)', () => {
       .send({ username: puesto })
       .expect(200);
     await entrar(puesto, 'clave-nueva-1').expect(201);
+  }, 60000);
+  it('se puede crear a alguien solo con nombre de usuario, sin correo, y entra', async () => {
+    // «Usuarios solo con nombre»: quien vende no siempre tiene correo. El
+    // servidor le pone uno técnico que nadie ve, y entra con su usuario.
+    const usuario = `soloconnombre${ts.toString().slice(-6)}`;
+    const creado = await request(app.getHttpServer())
+      .post('/api/users')
+      .set(auth())
+      .send({
+        username: usuario,
+        password: 'clave-sin-correo',
+        firstName: 'Solo',
+        lastName: 'Nombre',
+        role: 'COLABORADOR',
+      })
+      .expect(201);
+    expect(creado.body.email).toContain('@sin-correo.');
+    await entrar(usuario, 'clave-sin-correo').expect(201);
+    // Sin usuario ni correo no hay con qué entrar: se rechaza.
+    await request(app.getHttpServer())
+      .post('/api/users')
+      .set(auth())
+      .send({
+        password: 'clave-sin-correo',
+        firstName: 'Nadie',
+        lastName: 'Nada',
+        role: 'COLABORADOR',
+      })
+      .expect(400);
   }, 60000);
 });

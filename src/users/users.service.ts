@@ -8,10 +8,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { User } from './entities/user.entity.js';
-import {
-  normalizarUsuario,
-  porQueNoSirveElUsuario,
-} from './credenciales.js';
+import { normalizarUsuario, porQueNoSirveElUsuario } from './credenciales.js';
 import { CreateUserDto } from './dto/create-user.dto.js';
 import { UpdateUserDto } from './dto/update-user.dto.js';
 
@@ -23,6 +20,15 @@ export class UsersService {
   ) {}
 
   async create(createUserDto: CreateUserDto, tenantId?: string): Promise<User> {
+    if (!createUserDto.email) {
+      if (!createUserDto.username) {
+        throw new BadRequestException(
+          'Pon un nombre de usuario o un correo: con uno basta.',
+        );
+      }
+      // Correo técnico, único por tienda: nadie lo ve ni lo usa para entrar.
+      createUserDto.email = `${normalizarUsuario(createUserDto.username)}@sin-correo.${(tenantId ?? 'mipinta').slice(0, 8)}`;
+    }
     const where = tenantId
       ? { email: createUserDto.email, tenantId }
       : { email: createUserDto.email };
