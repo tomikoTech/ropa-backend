@@ -105,7 +105,13 @@ async function main() {
 
     // ── Productos ──
     const repetidos: { name: string; ids: string[] }[] = await ds.query(
-      `SELECT lower(trim(p.name)) AS name, array_agg(p.id ORDER BY p.created_at) AS ids
+      // La que sobrevive va de última: la de más ventas; a igual ventas, la
+      // de más stock; a igual todo, la más vieja.
+      `SELECT lower(trim(p.name)) AS name,
+              array_agg(p.id ORDER BY
+                (SELECT count(*) FROM sale_items si JOIN product_variants v ON v.id = si.variant_id WHERE v.product_id = p.id),
+                (SELECT coalesce(sum(st.quantity),0) FROM stock st JOIN product_variants v ON v.id = st.variant_id WHERE v.product_id = p.id),
+                p.created_at DESC) AS ids
          FROM products p LEFT JOIN categories c ON c.id = p.category_id
         WHERE p.tenant_id = $1
         GROUP BY lower(trim(p.name)), coalesce(c.type::text, 'STANDARD')
@@ -126,25 +132,46 @@ async function main() {
           [id],
         );
         const vacio = Object.values(uso).every((v) => Number(v) === 0);
+        const esLaUltima = g.ids.indexOf(id) === g.ids.length - 1;
+        const conStock = Number(uso.stock) > 0;
+        // Tres destinos: una copia sin uso se borra; una sin stock pero con
+        // historial se **inactiva** (desaparece del POS y del catálogo, su
+        // historial se queda); una con stock no se toca acá: hay que pasar
+        // esas unidades a la que sobrevive por el ledger (ajuste de salida y
+        // de entrada desde la app) y luego inactivarla, y eso se dice en vez
+        // de hacerse a ciegas.
+        const destino = esLaUltima
+          ? 'sobrevive'
+          : vacio
+            ? 'SIN USO → se borra'
+            : conStock
+              ? 'CON STOCK → trasladar sus unidades a la que sobrevive y luego inactivar'
+              : 'con historial, sin stock → se inactiva';
         console.log(
-          `  ${g.name} ${id.slice(0, 8)}: ${vacio ? 'SIN USO → se borra' : 'con uso → se deja'} ${JSON.stringify(uso)}`,
+          `  ${g.name} ${id.slice(0, 8)}: ${destino} ${JSON.stringify(uso)}`,
         );
-        // Solo se borra una copia vacía y nunca la última del grupo.
-        if (!aplicar || !vacio || g.ids.indexOf(id) === g.ids.length - 1)
-          continue;
-        await ds.transaction(async (m) => {
-          await m.query(
-            `DELETE FROM stock WHERE variant_id IN (SELECT id FROM product_variants WHERE product_id = $1)`,
-            [id],
-          );
-          await m.query(`DELETE FROM product_variants WHERE product_id = $1`, [
-            id,
-          ]);
-          await m.query(
-            `DELETE FROM products WHERE id = $1 AND tenant_id = $2`,
+        if (!aplicar || esLaUltima || conStock) continue;
+        if (vacio) {
+          await ds.transaction(async (m) => {
+            await m.query(
+              `DELETE FROM stock WHERE variant_id IN (SELECT id FROM product_variants WHERE product_id = $1)`,
+              [id],
+            );
+            await m.query(
+              `DELETE FROM product_variants WHERE product_id = $1`,
+              [id],
+            );
+            await m.query(
+              `DELETE FROM products WHERE id = $1 AND tenant_id = $2`,
+              [id, t],
+            );
+          });
+        } else {
+          await ds.query(
+            `UPDATE products SET status = 'INACTIVE', is_published = false, is_available = false WHERE id = $1 AND tenant_id = $2`,
             [id, t],
           );
-        });
+        }
       }
     }
     if (!aplicar)
