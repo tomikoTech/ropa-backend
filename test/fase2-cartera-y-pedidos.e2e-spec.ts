@@ -95,6 +95,8 @@ describe('Cartera completa, recibos y pedidos (e2e)', () => {
       .get('/api/cartera/completa')
       .set(h())
       .expect(200);
+    // El JSON va envuelto como el resto del API.
+    r.body = r.body.data;
     const yo = (
       r.body.clientes as {
         clienteId: string;
