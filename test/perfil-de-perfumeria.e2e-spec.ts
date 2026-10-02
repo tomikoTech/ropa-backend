@@ -157,6 +157,22 @@ describe('Perfil de negocio: perfumería (e2e)', () => {
     expect(await catalogo(tokenPerfumeria, '&type=ESSENCE')).toEqual([
       nombres.ESSENCE,
     ]);
+    // El buscador compartido (compras, ajustes, traslados) pide TODOS y ve
+    // esencias y frascos: es lo que se compra.
+    const todos = await request(app.getHttpServer())
+      .get('/api/products/search?q=E2EPERFIL&limit=50&type=TODOS')
+      .set(con(tokenPerfumeria))
+      .expect(200);
+    const nombresTodos = (todos.body as { product: { name: string } }[]).map(
+      (v) => v.product.name,
+    );
+    expect(nombresTodos).toEqual(
+      expect.arrayContaining([
+        nombres.STANDARD,
+        nombres.ESSENCE,
+        nombres.FRASCO,
+      ]),
+    );
   }, 120000);
 
   it('la zapatería sigue viendo todo lo suyo', async () => {
