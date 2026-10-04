@@ -193,6 +193,17 @@ async function main() {
         continue;
       }
       // Nueva: proveedor (creándolo si no está), orden sin renglones, cuenta por pagar y abono.
+      const numero = `IMP-PROV-${String(f.fila).padStart(3, '0')}`;
+      const [yaCargada] = await ds.query(
+        `SELECT id FROM purchase_orders WHERE tenant_id = $1 AND order_number = $2`,
+        [t, numero],
+      );
+      if (yaCargada) {
+        console.log(
+          `  ${(f.factura ?? '—').padStart(6)} ${nombre.padEnd(22)} ya cargada antes (${numero})`,
+        );
+        continue;
+      }
       nuevas++;
       valorNuevas += f.valor;
       if (f.abonos > 0) {
@@ -206,8 +217,16 @@ async function main() {
       await ds.transaction(async (m) => {
         if (!proveedor) {
           const [p] = await m.query(
-            `INSERT INTO suppliers (tenant_id, name, is_active) VALUES ($1, $2, true) RETURNING id, name`,
-            [t, nombre],
+            // `nit` es obligatorio y Andrea no lo tiene a mano: marcador único
+            // por proveedor hasta que ella lo ponga en la ficha.
+            `INSERT INTO suppliers (tenant_id, name, nit, is_active) VALUES ($1, $2, $3, true) RETURNING id, name`,
+            [
+              t,
+              nombre,
+              `SIN-NIT-${norm(nombre)
+                .replace(/[^A-Z0-9]+/g, '-')
+                .slice(0, 40)}`,
+            ],
           );
           proveedor = p;
           porNombre.set(norm(nombre), p);
@@ -221,7 +240,7 @@ async function main() {
            VALUES ($1, $2, $3, $4, $5, 'RECEIVED', $6, $6, $7, $8, $9, $9) RETURNING id`,
           [
             t,
-            `IMP-PROV-${String(f.fila).padStart(3, '0')}`,
+            numero,
             proveedor!.id,
             bodega,
             admin,
