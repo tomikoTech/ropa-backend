@@ -13,6 +13,8 @@ import {
   IsArray,
   Min,
   Max,
+  Matches,
+  ValidateIf,
 } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -408,6 +410,18 @@ export class UpdateStoreSettingsDto {
   @IsOptional()
   @IsBoolean()
   cierreDeCajaEnabled?: boolean;
+
+  @ApiPropertyOptional({
+    example: '2026-10-01',
+    description:
+      'Día (YYYY-MM-DD) desde el que cuentan Bancos e Ingresos; null = desde siempre',
+  })
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
+    message: 'tesoreriaDesde debe ser YYYY-MM-DD',
+  })
+  tesoreriaDesde?: string | null;
 
   // ─── Reposición automática ───
 

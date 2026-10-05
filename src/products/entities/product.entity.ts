@@ -44,6 +44,14 @@ export class Product extends TenantAwareEntity {
   @Column({ name: 'mano_de_obra', type: 'int', nullable: true })
   manoDeObra: number | null;
 
+  /**
+   * Costo del frasco escrito a mano en «Costo de perfumes», para lociones
+   * cuyo frasco nunca se ha comprado por el sistema. Si hay compra recibida,
+   * manda la compra y esto no se usa.
+   */
+  @Column({ name: 'costo_frasco_manual', type: 'int', nullable: true })
+  costoFrascoManual: number | null;
+
   @Column({
     name: 'cost_price',
     type: 'decimal',

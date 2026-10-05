@@ -54,6 +54,10 @@ import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
 import { Warehouse } from '../inventory/entities/warehouse.entity.js';
 import { mayoreoPorReferencia, precioDelRenglon } from './precio-mayorista.js';
 import { reversarAbono } from './reversar-abono.js';
+import { corregirAbono } from './corregir-abono.js';
+import { Bank } from '../banks/entities/bank.entity.js';
+import { AuditLog } from '../audit/entities/audit-log.entity.js';
+import type { CorregirAbonoDto } from './dto/record-ar-payment.dto.js';
 import {
   explicarOtraBodega,
   faltaEnElLocal,
@@ -3109,6 +3113,87 @@ export class PosService {
         relations: ['sale', 'client', 'payments'],
       });
       return actualizada!;
+    });
+  }
+
+  /**
+   * Corregir **cómo** entró un abono (método, banco, recibo), nunca cuánto.
+   *
+   * Los abonos importados de Distri Amber quedaron todos en efectivo y sin
+   * banco. Tesorería suma `accounts_receivable_payments` por método y banco,
+   * así que corregir esos dos campos basta para que el saldo del banco cuadre
+   * con sus movimientos. La regla vive en `corregir-abono.ts`.
+   */
+  async corregirAbono(
+    paymentId: string,
+    dto: CorregirAbonoDto,
+    tenantId: string,
+    userId?: string,
+  ): Promise<AccountsReceivablePayment> {
+    return this.dataSource.transaction(async (manager) => {
+      const arPayRepo = manager.getRepository(AccountsReceivablePayment);
+      const abono = await arPayRepo.findOne({
+        where: { id: paymentId, tenantId },
+      });
+      if (!abono) throw new NotFoundException('Abono no encontrado');
+      const reversado = await arPayRepo.exists({
+        where: { reversesPaymentId: abono.id, tenantId },
+      });
+      const bancosActivos = await manager
+        .getRepository(Bank)
+        .count({ where: { tenantId, isActive: true } });
+      const decision = corregirAbono({
+        abono: {
+          centavos: Math.round(Number(abono.amount) * 100),
+          reversaA: abono.reversesPaymentId,
+          reversado,
+          metodo: abono.method,
+          bankId: abono.bankId ?? null,
+          reference: abono.reference ?? null,
+          notes: abono.notes ?? null,
+        },
+        correccion: {
+          metodo: dto.method,
+          bankId: dto.bankId,
+          reference: dto.reference,
+          notes: dto.notes,
+        },
+        bancosActivos,
+      });
+      if (!decision.ok) throw new BadRequestException(decision.motivo);
+      if (decision.cambios.bankId) {
+        const banco = await manager
+          .getRepository(Bank)
+          .findOne({ where: { id: decision.cambios.bankId, tenantId } });
+        if (!banco || !banco.isActive) {
+          throw new BadRequestException('Ese banco no existe o está inactivo');
+        }
+      }
+      const antes = {
+        method: abono.method,
+        bankId: abono.bankId ?? null,
+        reference: abono.reference ?? null,
+        notes: abono.notes ?? null,
+      };
+      abono.method = decision.cambios.metodo as PaymentMethod;
+      abono.bankId = decision.cambios.bankId;
+      abono.reference = decision.cambios.reference as string;
+      abono.notes = decision.cambios.notes as string;
+      await arPayRepo.save(abono);
+      // Queda en la bitácora con el antes y el después: es plata que cambia de
+      // columna en tesorería y alguien tiene que poder ver quién la movió.
+      await manager.getRepository(AuditLog).save(
+        manager.getRepository(AuditLog).create({
+          userId: userId ?? undefined,
+          action: 'CORREGIR_ABONO',
+          entityType: 'AccountsReceivablePayment',
+          entityId: abono.id,
+          oldValues: antes,
+          newValues: decision.cambios,
+          tenantId,
+        }),
+      );
+      return abono;
     });
   }
 

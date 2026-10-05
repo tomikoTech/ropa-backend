@@ -27,6 +27,34 @@ import {
   desgloseDelCosto,
   type CostoDelTerminado,
 } from './costo-del-terminado.js';
+import { costoDelPerfume, type CostoDelPerfume } from './costo-de-perfumes.js';
+import { AjusteDeCostoDto } from './dto/ajuste-de-costo.dto.js';
+
+/** Una fila de la página «Costo de perfumes». */
+/** De dónde salió el costo del frasco; `null` si no hay ninguno. */
+export type OrigenDelFrasco = 'compra' | 'manual' | 'ficha' | null;
+
+export interface FilaDeCosto {
+  productId: string;
+  nombre: string;
+  frasco: {
+    variantId: string;
+    nombre: string;
+    costo: number | null;
+    origen: OrigenDelFrasco;
+  } | null;
+  /** `products.mano_de_obra`; `null` = la general. */
+  manoDeObraDelProducto: number | null;
+  costoFrascoManual: number | null;
+  costo: CostoDelPerfume;
+}
+
+export interface CostosDePerfumes {
+  esenciaFijaPorUnidad: number;
+  manoDeObraGeneral: number;
+  presets: number[];
+  perfumes: FilaDeCosto[];
+}
 
 @Injectable()
 export class ProductionService {
@@ -388,7 +416,11 @@ export class ProductionService {
       // El costo, antes de mover nada: si falta algo, se avisa pero no se frena.
       const frascoVariantId = variante.product.frascoVariantId ?? null;
       const costoDelFrasco = frascoVariantId
-        ? await this.ultimoCostoDeCompra(manager, frascoVariantId, tenantId)
+        ? ((await this.ultimoCostoDeCompra(manager, frascoVariantId, tenantId, {
+            soloCompras: true,
+          })) ??
+          variante.product.costoFrascoManual ??
+          (await this.ultimoCostoDeCompra(manager, frascoVariantId, tenantId)))
         : null;
       const costo = costoDelTerminado({
         costoDelFrasco,
@@ -472,11 +504,200 @@ export class ProductionService {
     });
   }
 
+  // ── Costo de perfumes: la página que pidió Andrea ──────────────────────
+  //
+  // «Un lugarcito donde diga costo de perfumes y vaya anclado lo que vale
+  // cada perfume». Es la misma cuenta de `entrarTerminado`, pero para todas
+  // las lociones a la vez y sin mover inventario. De paso deja `cost_price`
+  // al día en cada producto: así Valorización y Balance dejan de decir cero
+  // para las lociones que nunca pasaron por «entrada de terminado».
+
+  async costosDePerfumes(tenantId: string): Promise<CostosDePerfumes> {
+    return this.dataSource.transaction(async (manager) => {
+      const settings = await manager
+        .getRepository(StoreSettings)
+        .findOne({ where: { tenantId } });
+      const filas = await this.filasDeCosto(manager, tenantId, settings);
+      await this.guardarCostos(manager, tenantId, filas);
+      return {
+        esenciaFijaPorUnidad: Number(settings?.costoFijoDeEsencia ?? 0),
+        manoDeObraGeneral: Number(settings?.manoDeObraPorUnidad ?? 0),
+        presets: settings?.descuentosPresets ?? [],
+        perfumes: filas.map((f) => f.fila),
+      };
+    });
+  }
+
+  async ajustarCostoDePerfume(
+    productId: string,
+    dto: AjusteDeCostoDto,
+    tenantId: string,
+  ): Promise<FilaDeCosto> {
+    return this.dataSource.transaction(async (manager) => {
+      const producto = await manager.getRepository(Product).findOne({
+        where: { id: productId, tenantId },
+        relations: ['category'],
+      });
+      if (!producto) throw new NotFoundException('Perfume no encontrado');
+      if (String(producto.category?.type ?? 'STANDARD') !== 'STANDARD') {
+        throw new BadRequestException(
+          `«${producto.name}» no es un perfume terminado.`,
+        );
+      }
+      const cambios: Partial<Product> = {};
+      if (dto.manoDeObra !== undefined) cambios.manoDeObra = dto.manoDeObra;
+      if (dto.costoFrasco !== undefined) {
+        if (dto.costoFrasco !== null && !producto.frascoVariantId) {
+          throw new BadRequestException(
+            `«${producto.name}» no tiene frasco enlazado: enlázalo en la ficha del producto.`,
+          );
+        }
+        if (
+          dto.costoFrasco !== null &&
+          producto.frascoVariantId &&
+          (await this.ultimoCostoDeCompra(
+            manager,
+            producto.frascoVariantId,
+            tenantId,
+            { soloCompras: true },
+          )) !== null
+        ) {
+          throw new BadRequestException(
+            'Ese frasco ya tiene costo de compra: manda la compra, no el valor a mano.',
+          );
+        }
+        cambios.costoFrascoManual = dto.costoFrasco;
+      }
+      if (Object.keys(cambios).length) {
+        await manager
+          .getRepository(Product)
+          .update({ id: productId, tenantId }, cambios);
+      }
+      const settings = await manager
+        .getRepository(StoreSettings)
+        .findOne({ where: { tenantId } });
+      const filas = await this.filasDeCosto(
+        manager,
+        tenantId,
+        settings,
+        productId,
+      );
+      await this.guardarCostos(manager, tenantId, filas);
+      return filas[0].fila;
+    });
+  }
+
+  private async filasDeCosto(
+    manager: EntityManager,
+    tenantId: string,
+    settings: StoreSettings | null,
+    productId?: string,
+  ): Promise<{ fila: FilaDeCosto; costPriceActual: number }[]> {
+    // Una sola consulta: la loción, su frasco y lo que costó el frasco la
+    // última vez que llegó por compra. Con 170 lociones, 170 consultas
+    // hacían esperar la página.
+    const filas: {
+      id: string;
+      name: string;
+      base_price: string;
+      cost_price: string;
+      mano_de_obra: number | null;
+      costo_frasco_manual: number | null;
+      frasco_variant_id: string | null;
+      frasco_nombre: string | null;
+      frasco_ficha: string | null;
+      frasco_compra: string | null;
+    }[] = await manager.query(
+      `SELECT p.id, p.name, p.base_price, p.cost_price, p.mano_de_obra, p.costo_frasco_manual,
+              p.frasco_variant_id, fp.name AS frasco_nombre, fp.cost_price AS frasco_ficha,
+              (SELECT pi.unit_cost FROM purchase_order_items pi
+                 JOIN purchase_orders po ON po.id = pi.purchase_order_id
+                WHERE pi.variant_id = p.frasco_variant_id AND pi.tenant_id = p.tenant_id AND pi.quantity_received > 0
+                ORDER BY po.created_at DESC LIMIT 1) AS frasco_compra
+         FROM products p
+         LEFT JOIN categories c ON c.id = p.category_id
+         LEFT JOIN product_variants fv ON fv.id = p.frasco_variant_id
+         LEFT JOIN products fp ON fp.id = fv.product_id
+        WHERE p.tenant_id = $1 AND p.status = 'ACTIVE'
+          AND COALESCE(c.type, 'STANDARD') = 'STANDARD'
+          AND ($2::uuid IS NULL OR p.id = $2::uuid)
+        ORDER BY p.name ASC`,
+      [tenantId, productId ?? null],
+    );
+    const presets = settings?.descuentosPresets ?? [];
+    return filas.map((f) => {
+      // Mismo orden que al producir: la compra manda; a mano solo si nunca
+      // se compró; y de último el costo de ficha del frasco, si tiene.
+      let origen: OrigenDelFrasco = null;
+      let costoDelFrasco: number | null = null;
+      if (f.frasco_variant_id) {
+        if (f.frasco_compra !== null) {
+          costoDelFrasco = Number(f.frasco_compra);
+          origen = 'compra';
+        } else if (f.costo_frasco_manual !== null) {
+          costoDelFrasco = Number(f.costo_frasco_manual);
+          origen = 'manual';
+        } else if (Number(f.frasco_ficha) > 0) {
+          costoDelFrasco = Number(f.frasco_ficha);
+          origen = 'ficha';
+        }
+      }
+      const costo = costoDelPerfume(
+        {
+          precioDeVenta: Number(f.base_price),
+          costoDelFrasco,
+          esenciaFijaPorUnidad: settings?.costoFijoDeEsencia,
+          manoDeObraGeneral: settings?.manoDeObraPorUnidad,
+          manoDeObraDelProducto: f.mano_de_obra,
+        },
+        presets,
+      );
+      if (!f.frasco_variant_id) {
+        costo.avisos.unshift('La loción no tiene frasco enlazado.');
+      }
+      const fila: FilaDeCosto = {
+        productId: f.id,
+        nombre: f.name,
+        frasco: f.frasco_variant_id
+          ? {
+              variantId: f.frasco_variant_id,
+              nombre: f.frasco_nombre ?? '',
+              costo: costoDelFrasco,
+              origen,
+            }
+          : null,
+        manoDeObraDelProducto: f.mano_de_obra,
+        costoFrascoManual: f.costo_frasco_manual,
+        costo,
+      };
+      return { fila, costPriceActual: Number(f.cost_price) };
+    });
+  }
+
+  /** `cost_price` al día, solo en los que cambió: es lo que congela la venta. */
+  private async guardarCostos(
+    manager: EntityManager,
+    tenantId: string,
+    filas: { fila: FilaDeCosto; costPriceActual: number }[],
+  ): Promise<void> {
+    for (const { fila, costPriceActual } of filas) {
+      if (costPriceActual !== fila.costo.total) {
+        await manager
+          .getRepository(Product)
+          .update(
+            { id: fila.productId, tenantId },
+            { costPrice: fila.costo.total },
+          );
+      }
+    }
+  }
+
   /** Lo que costó el frasco la última vez que se compró; si nunca, su costo de ficha o null. */
   private async ultimoCostoDeCompra(
     manager: EntityManager,
     variantId: string,
     tenantId: string,
+    opts: { soloCompras?: boolean } = {},
   ): Promise<number | null> {
     const [fila]: { unit_cost: string }[] = await manager.query(
       `SELECT pi.unit_cost FROM purchase_order_items pi
@@ -486,6 +707,7 @@ export class ProductionService {
       [variantId, tenantId],
     );
     if (fila) return Number(fila.unit_cost);
+    if (opts.soloCompras) return null;
     const v = await manager
       .getRepository(ProductVariant)
       .findOne({ where: { id: variantId, tenantId }, relations: ['product'] });

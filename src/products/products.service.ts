@@ -37,6 +37,7 @@ import {
   repartirVitrinaYBodega,
 } from '../inventory/exhibicion.js';
 import { bodegaDelFrasco, categoriaDelFrasco } from './donde-va-el-frasco.js';
+import { porQueNoSePublica } from '../storefront/se-vende-en-linea.js';
 
 import {
   avisoDeVariantesConservadas,
@@ -846,6 +847,7 @@ export class ProductsService {
       product.unitTracking = dto.unitTracking;
     }
     if (dto.isPublished !== undefined) {
+      if (dto.isPublished) this.exigirQueSeVendaEnLinea(product);
       product.isPublished = dto.isPublished;
       product.publishedAt = dto.isPublished ? new Date() : null!;
     }
@@ -1045,10 +1047,18 @@ export class ProductsService {
 
   async publish(id: string, tenantId: string): Promise<Product> {
     const product = await this.findOne(id, tenantId);
+    this.exigirQueSeVendaEnLinea(product);
     product.isPublished = true;
     product.publishedAt = new Date();
     await this.productRepository.save(product);
     return this.findOne(id, tenantId);
+  }
+
+  // Un frasco o una esencia publicados aparecen en el catálogo como «Frasco X
+  // $0»: se rechaza al marcar el globo, no se arregla después.
+  private exigirQueSeVendaEnLinea(product: Product) {
+    const motivo = porQueNoSePublica(product.category?.type);
+    if (motivo) throw new BadRequestException(motivo);
   }
 
   async unpublish(id: string, tenantId: string): Promise<Product> {

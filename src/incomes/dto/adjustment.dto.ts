@@ -1,4 +1,10 @@
-import { IsString, IsNumber, IsOptional, IsUUID } from 'class-validator';
+import {
+  IsString,
+  IsNumber,
+  IsOptional,
+  IsUUID,
+  Matches,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 // Ajuste de saldo: sumar (amount > 0) o restar (amount < 0) plata de un
@@ -25,4 +31,14 @@ export class AdjustmentDto {
   @IsOptional()
   @IsString()
   note?: string;
+
+  // Para cargar el saldo inicial «al 1 de octubre», el día desde el que
+  // cuenta la tesorería. Si no viene, hoy.
+  @ApiPropertyOptional({
+    example: '2026-10-01',
+    description: 'Día del ajuste (YYYY-MM-DD); por defecto hoy',
+  })
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'fecha debe ser YYYY-MM-DD' })
+  fecha?: string;
 }

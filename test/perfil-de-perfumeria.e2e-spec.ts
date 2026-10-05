@@ -444,4 +444,53 @@ describe('Perfil de negocio: perfumería (e2e)', () => {
       .set(cesar)
       .expect(403);
   }, 120000);
+
+  it('un frasco o una esencia no se publican ni salen en la tienda online', async () => {
+    const h = con(tokenPerfumeria);
+    await request(app.getHttpServer())
+      .patch('/api/store-settings')
+      .set(h)
+      .send({ catalogoEnabled: true, isStorefrontActive: true })
+      .expect(200);
+    const s = await request(app.getHttpServer())
+      .get('/api/store-settings')
+      .set(h)
+      .expect(200);
+    const slug = s.body.storeSlug as string;
+    const cat = await request(app.getHttpServer())
+      .post('/api/categories')
+      .set(h)
+      .send({ name: `E2E FRASCO pub ${ts}`, type: 'FRASCO' })
+      .expect(201);
+    // Marcar el globo en un frasco se rechaza con el motivo...
+    const frasco = await request(app.getHttpServer())
+      .post('/api/products')
+      .set(h)
+      .send({
+        name: `E2EPERFIL Frasco publicado ${ts}`,
+        basePrice: 0,
+        categoryId: cat.body.id,
+        variants: [{ size: 'U', color: 'Único' }],
+      })
+      .expect(201);
+    const rechazo = await request(app.getHttpServer())
+      .patch(`/api/products/${frasco.body.id}/publish`)
+      .set(h)
+      .expect(400);
+    expect(rechazo.body.message).toMatch(/frascos/i);
+    // ...y aunque alguien lo marque por la base (como pasó en Distri Amber),
+    // el catálogo no lo enseña ni lo encuentra por su slug.
+    await app
+      .get(DataSource)
+      .query(`UPDATE products SET is_published = true WHERE id = $1`, [frasco.body.id]);
+    const lista = await request(app.getHttpServer())
+      .get(`/api/storefront/${slug}/products`)
+      .expect(200);
+    const filas = (Array.isArray(lista.body) ? lista.body : lista.body.products) as { name: string }[];
+    const nombres = filas.map((x) => x.name);
+    expect(nombres).not.toContain(`E2EPERFIL Frasco publicado ${ts}`);
+    await request(app.getHttpServer())
+      .get(`/api/storefront/${slug}/products/${frasco.body.slug as string}`)
+      .expect(404);
+  }, 60000);
 });

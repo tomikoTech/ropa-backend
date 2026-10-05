@@ -26,10 +26,12 @@ import { CambiarMetodoDePagoDto } from './dto/cambiar-metodo-de-pago.dto.js';
 import { MarkSalePaidDto } from './dto/mark-sale-paid.dto.js';
 import {
   CollectAccountsDto,
+  CorregirAbonoDto,
   RecordArPaymentDto,
   ReverseArPaymentDto,
   RecibirReciboDto,
 } from './dto/record-ar-payment.dto.js';
+import { Roles } from '../common/decorators/roles.decorator.js';
 import { SendInvoiceDto } from './dto/send-invoice.dto.js';
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
 import { AccessService } from '../access/access.service.js';
@@ -247,6 +249,24 @@ export class PosController {
       userId,
       dto?.motivo,
     );
+  }
+
+  @Patch('accounts-receivable/payment/:paymentId')
+  @Roles(Role.ADMIN)
+  @ApiOperation({
+    summary: 'Corregir cómo entró un abono: método, banco y número de recibo',
+    description:
+      'El monto no se toca: para eso está deshacer el abono y registrarlo de ' +
+      'nuevo. Tesorería suma los abonos por método y banco, así que con esto ' +
+      'el saldo del banco se mueve solo.',
+  })
+  corregirAbono(
+    @Param('paymentId', ParseUUIDPipe) paymentId: string,
+    @Body() dto: CorregirAbonoDto,
+    @TenantId() tenantId: string,
+    @UserId() userId: string,
+  ) {
+    return this.posService.corregirAbono(paymentId, dto, tenantId, userId);
   }
 
   @Post('accounts-receivable/collect')

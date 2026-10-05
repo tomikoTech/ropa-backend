@@ -12,6 +12,9 @@ import { AdjustmentDto } from './dto/adjustment.dto.js';
 import { TransferDto } from './dto/transfer.dto.js';
 import { Paginated } from '../common/types/paginated.js';
 import { resolverPagina, armarPaginado } from '../common/utils/paginacion.js';
+import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
+import { rangoEfectivo, type RangoEfectivo } from './desde-cuando.js';
+import { rangoUtcDelDia } from '../caja/cuadre.js';
 
 const NONE = '__none__';
 
@@ -35,8 +38,25 @@ export class IncomesService {
     private readonly entryRepository: Repository<IncomeEntry>,
     @InjectRepository(Bank)
     private readonly bankRepository: Repository<Bank>,
+    @InjectRepository(StoreSettings)
+    private readonly settingsRepository: Repository<StoreSettings>,
     private readonly dataSource: DataSource,
   ) {}
+
+  /**
+   * Desde cuándo cuenta la tesorería de esta tienda, recortando el rango que
+   * pidió la pantalla. Ver `desde-cuando.ts`.
+   */
+  private async rango(
+    tenantId: string,
+    pedido: { from?: string; to?: string } = {},
+  ): Promise<RangoEfectivo> {
+    const settings = await this.settingsRepository.findOne({
+      where: { tenantId },
+      select: { id: true, tesoreriaDesde: true },
+    });
+    return rangoEfectivo(settings?.tesoreriaDesde ?? null, pedido);
+  }
 
   createIncome(
     dto: CreateIncomeDto,
@@ -62,18 +82,25 @@ export class IncomesService {
     userId: string,
     tenantId: string,
   ): Promise<IncomeEntry> {
-    return this.entryRepository.save(
-      this.entryRepository.create({
-        type: IncomeType.AJUSTE,
-        category: IncomeCategory.OTROS,
-        amount: dto.amount,
-        method: dto.method,
-        bankId: dto.bankId ?? null,
-        note: dto.note,
-        createdById: userId,
-        tenantId,
-      }),
-    );
+    const entry = this.entryRepository.create({
+      type: IncomeType.AJUSTE,
+      category: IncomeCategory.OTROS,
+      amount: dto.amount,
+      method: dto.method,
+      bankId: dto.bankId ?? null,
+      note: dto.note,
+      createdById: userId,
+      tenantId,
+    });
+    if (dto.fecha) {
+      // El saldo inicial se carga «al 1 de octubre». La tabla solo tiene
+      // `created_at` (timestamptz), así que el día elegido se guarda al
+      // mediodía de Colombia: cae dentro de ese día se mire desde donde se
+      // mire, y queda por encima del piso de `tesoreriaDesde` si es el mismo.
+      const { desde } = rangoUtcDelDia(dto.fecha);
+      entry.createdAt = new Date(desde.getTime() + 12 * 60 * 60 * 1000);
+    }
+    return this.entryRepository.save(entry);
   }
 
   transfer(
@@ -132,12 +159,11 @@ export class IncomesService {
         q: `%${search}%`,
       });
     }
-    if (opts.from && opts.to) {
-      qb.andWhere('e.created_at BETWEEN :from AND :to', {
-        from: opts.from,
-        to: opts.to,
-      });
-    }
+    const rango = await this.rango(tenantId, opts);
+    if (rango.desde)
+      qb.andWhere('e.created_at >= :desde', { desde: rango.desde });
+    if (rango.hasta)
+      qb.andWhere('e.created_at <= :hasta', { hasta: rango.hasta });
 
     const [data, total] = await qb
       .orderBy('e.created_at', 'DESC')
@@ -147,7 +173,6 @@ export class IncomesService {
 
     return armarPaginado(data, total, pagina);
   }
-
 
   async remove(id: string, tenantId: string): Promise<{ success: boolean }> {
     await this.entryRepository.delete({ id, tenantId });
@@ -165,17 +190,30 @@ export class IncomesService {
     const banks = await this.bankRepository.find({ where: { tenantId } });
     const bankName = new Map<string, string>(banks.map((b) => [b.id, b.name]));
 
+    // El rango pedido, recortado a `tesoreriaDesde`: lo anterior no cuenta.
+    const rango = await this.rango(tenantId, { from, to });
     const params: unknown[] = [tenantId];
     let saleDate = '';
     let arDate = '';
     let entryDate = '';
     let expenseDate = '';
-    if (from && to) {
-      params.push(from, to);
-      saleDate = ' AND s.created_at BETWEEN $2 AND $3';
-      arDate = ' AND arp.created_at BETWEEN $2 AND $3';
-      entryDate = ' AND e.created_at BETWEEN $2 AND $3';
-      expenseDate = ' AND ex.expense_date BETWEEN $2::date AND $3::date';
+    if (rango.desde) {
+      params.push(rango.desde);
+      const n = params.length;
+      saleDate += ` AND s.created_at >= $${n}`;
+      arDate += ` AND arp.created_at >= $${n}`;
+      entryDate += ` AND e.created_at >= $${n}`;
+      // Los gastos guardan un día, no un instante: se compara con el día
+      // colombiano del piso, que es el que la tienda configuró.
+      expenseDate += ` AND ex.expense_date >= ($${n}::timestamptz AT TIME ZONE 'America/Bogota')::date`;
+    }
+    if (rango.hasta) {
+      params.push(rango.hasta);
+      const n = params.length;
+      saleDate += ` AND s.created_at <= $${n}`;
+      arDate += ` AND arp.created_at <= $${n}`;
+      entryDate += ` AND e.created_at <= $${n}`;
+      expenseDate += ` AND ex.expense_date <= ($${n}::timestamptz AT TIME ZONE 'America/Bogota')::date`;
     }
 
     // VENTAS: pagos de ventas no anuladas, excluyendo CREDITO (aún no es dinero
@@ -312,6 +350,8 @@ export class IncomesService {
     const methodLabel = (key: string) => (key === NONE ? 'Sin método' : key);
 
     return {
+      desde: rango.tesoreriaDesde,
+      aviso: rango.aviso,
       totals: {
         ventas,
         otros,

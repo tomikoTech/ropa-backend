@@ -1,4 +1,5 @@
 import { perfilDelNegocio } from '../tienda/perfil-del-negocio.js';
+import { diaDeCalendario } from '../common/utils/dia-de-calendario.util.js';
 import {
   Injectable,
   NotFoundException,
@@ -161,6 +162,12 @@ export class StoreSettingsService {
       settings.descuentosPresets = [...new Set(dto.descuentosPresets)].sort(
         (a, b) => a - b,
       );
+    if (dto.tesoreriaDesde !== undefined)
+      // Llega como día (`YYYY-MM-DD`) y se guarda como día: nunca pasa por
+      // `new Date()`, que lo correría al 30 de septiembre en Colombia.
+      settings.tesoreriaDesde = dto.tesoreriaDesde
+        ? diaDeCalendario(dto.tesoreriaDesde)
+        : null;
     if (dto.autoReplenishEnabled !== undefined)
       settings.autoReplenishEnabled = dto.autoReplenishEnabled;
     if (dto.autoReplenishThreshold !== undefined)

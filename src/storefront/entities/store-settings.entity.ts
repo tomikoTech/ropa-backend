@@ -528,6 +528,16 @@ export class StoreSettings extends TenantAwareEntity {
   @Column({ name: 'cierre_de_caja_enabled', default: false })
   cierreDeCajaEnabled: boolean;
 
+  /**
+   * El día desde el que la tesorería (Bancos e Ingresos) cuenta. Antes de
+   * esa fecha no suma nada: Distri Amber tenía 643 abonos históricos en
+   * efectivo que ensuciaban el saldo real. Es un día de calendario guardado
+   * como texto (`YYYY-MM-DD`): «un día no es un instante». `null` = desde
+   * siempre.
+   */
+  @Column({ name: 'tesoreria_desde', type: 'date', nullable: true })
+  tesoreriaDesde: string | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 

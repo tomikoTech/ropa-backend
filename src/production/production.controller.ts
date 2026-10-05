@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { ProductionService } from './production.service.js';
 import { CreateProductionDto } from './dto/create-production.dto.js';
@@ -6,6 +14,7 @@ import {
   EntradaDeTerminadoDto,
   SalidaDeEsenciaDto,
 } from './dto/produccion-simple.dto.js';
+import { AjusteDeCostoDto } from './dto/ajuste-de-costo.dto.js';
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
 import { TenantId } from '../common/decorators/tenant-id.decorator.js';
 import { User } from '../users/entities/user.entity.js';
@@ -55,6 +64,32 @@ export class ProductionController {
     @TenantId() tenantId: string,
   ) {
     return this.productionService.entrarTerminado(dto, user.id, tenantId);
+  }
+
+  // ── Costo de perfumes: cuánto sale cada uno y qué queda con descuento ──
+  @Get('costos')
+  @ApiOperation({
+    summary:
+      'Costo de cada perfume (frasco + esencia + mano de obra) y utilidad con cada descuento',
+  })
+  costos(@TenantId() tenantId: string) {
+    return this.productionService.costosDePerfumes(tenantId);
+  }
+
+  @Patch('costos/:productId')
+  @ApiOperation({
+    summary: 'Mano de obra o costo del frasco a mano de un perfume',
+  })
+  ajustarCosto(
+    @Param('productId') productId: string,
+    @Body() dto: AjusteDeCostoDto,
+    @TenantId() tenantId: string,
+  ) {
+    return this.productionService.ajustarCostoDePerfume(
+      productId,
+      dto,
+      tenantId,
+    );
   }
 
   @Get()

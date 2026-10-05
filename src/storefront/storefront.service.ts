@@ -9,6 +9,10 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import {
+  condicionDeVentaEnLinea,
+  seVendeEnLinea,
+} from './se-vende-en-linea.js';
+import {
   Repository,
   In,
   LessThanOrEqual,
@@ -215,6 +219,7 @@ export class StorefrontService {
       .leftJoinAndSelect('p.category', 'c')
       .where('p.tenant_id IN (:...tenantIds)', { tenantIds })
       .andWhere('p.is_published = true')
+      .andWhere(condicionDeVentaEnLinea('c'))
       .andWhere('p.status = :status', { status: ProductStatus.ACTIVE })
       .orderBy('p.createdAt', 'DESC')
       .getMany();
@@ -318,6 +323,8 @@ export class StorefrontService {
       qb.where('p.tenant_id = :tenantId', { tenantId })
         .andWhere('p.is_published = true')
         .andWhere('p.status = :status', { status: ProductStatus.ACTIVE });
+      // Frascos y esencias no son productos de la tienda: ver se-vende-en-linea.
+      qb.andWhere(condicionDeVentaEnLinea('c'));
 
       if (filters?.category) {
         if (!catIds || catIds.length === 0) {
@@ -529,7 +536,7 @@ export class StorefrontService {
       },
       relations: ['category', 'variants'],
     });
-    if (!product) {
+    if (!product || !seVendeEnLinea(product.category?.type)) {
       throw new NotFoundException('Producto no encontrado');
     }
 
@@ -574,10 +581,12 @@ export class StorefrontService {
     // Count published products per category
     const counts = await this.productRepo
       .createQueryBuilder('p')
+      .leftJoin('p.category', 'c')
       .select('p.category_id', 'categoryId')
       .addSelect('COUNT(p.id)', 'count')
       .where('p.tenant_id = :tenantId', { tenantId })
       .andWhere('p.is_published = true')
+      .andWhere(condicionDeVentaEnLinea('c'))
       .andWhere('p.status = :status', { status: ProductStatus.ACTIVE })
       .groupBy('p.category_id')
       .getRawMany();

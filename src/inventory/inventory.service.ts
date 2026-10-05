@@ -548,7 +548,11 @@ export class InventoryService {
         .leftJoin('v.colorRef', 'col')
         .leftJoin('v.sizeRef', 'sz')
         .leftJoin('p.category', 'cat')
-        .where('s.tenantId = :tenantId', { tenantId });
+        .where('s.tenantId = :tenantId', { tenantId })
+        // Un producto archivado con existencia 0 no es existencia: Andrea
+        // vio «GOOD GIRL VERY 0» y era el duplicado que ya habíamos apagado.
+        // Si aún tiene unidades sí se muestra, porque hay que sacarlas.
+        .andWhere("NOT (p.status <> 'ACTIVE' AND s.quantity = 0)"); // ledger-exento: filtro de lectura
       if (tipo === 'STANDARD') {
         qb.andWhere("(cat.type = 'STANDARD' OR cat.type IS NULL)");
       } else if (tipo) {

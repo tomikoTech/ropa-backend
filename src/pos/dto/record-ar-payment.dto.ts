@@ -11,6 +11,7 @@ import {
   Min,
   ArrayMinSize,
   ValidateNested,
+  IsIn,
 } from 'class-validator';
 import { ApiPropertyOptional, ApiProperty } from '@nestjs/swagger';
 import { PaymentMethod } from '../../common/enums/payment-method.enum.js';
@@ -88,4 +89,34 @@ export class RecibirReciboDto extends RecordArPaymentDto {
   @ValidateNested({ each: true })
   @Type(() => RepartoDelReciboDto)
   reparto: RepartoDelReciboDto[];
+}
+
+/**
+ * Corregir cómo entró un abono: método, banco, número de recibo, nota.
+ *
+ * El monto no viaja a propósito: cambiarlo reescribe el cuadre del día en que
+ * entró la plata. Para eso está deshacer y volver a registrar.
+ */
+export class CorregirAbonoDto {
+  @ApiPropertyOptional({ enum: ['EFECTIVO', 'TARJETA', 'TRANSFERENCIA'] })
+  @IsOptional()
+  @IsIn(['EFECTIVO', 'TARJETA', 'TRANSFERENCIA'])
+  method?: 'EFECTIVO' | 'TARJETA' | 'TRANSFERENCIA';
+
+  @ApiPropertyOptional({ description: 'null quita el banco' })
+  @IsOptional()
+  @IsUUID()
+  bankId?: string | null;
+
+  @ApiPropertyOptional({ description: 'Número del recibo. null lo borra' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  reference?: string | null;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  notes?: string | null;
 }
