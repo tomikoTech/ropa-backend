@@ -7,6 +7,12 @@
  *
  * Esto arma los renglones de la venta a partir del pedido y de lo que la
  * tienda aceptó, y rechaza lo que no cuadra antes de tocar inventario.
+ *
+ * Y lo que el cliente pide después de pedir, también cabe: «ya hizo el
+ * pedido y me está pidiendo que le agregue 6 de Good Girl Blush»; «le estoy
+ * poniendo 20 %, pero a Yum Yum le dieron precio de 50.000: ¿cómo edito el
+ * precio solo de ese perfume para que no tome el 20?» (Andrea, 6 oct 2026).
+ * De ahí los agregados, el precio a mano por renglón y el «sin descuento».
  */
 
 export interface RenglonDelPedido {
@@ -17,9 +23,26 @@ export interface RenglonDelPedido {
   precioUnitario: number;
 }
 
+/** Un renglón que no venía en el pedido y la tienda agrega al aceptar. */
+export interface Agregado {
+  variantId: string;
+  nombre: string;
+  cantidad: number;
+  /** Precio de lista de la variante, por si no se da uno a mano. */
+  precioDeLista: number;
+  precioUnitario?: number | null;
+  sinDescuento?: boolean;
+}
+
 export interface Aceptacion {
   /** Cantidad aceptada por renglón; lo que no esté, va completo. */
   cantidades?: Record<string, number>;
+  /** Precio unitario a mano por renglón (id del renglón → precio). */
+  precios?: Record<string, number>;
+  /** Renglones que van sin el descuento general. */
+  sinDescuento?: string[];
+  /** Lo que se le agrega al pedido (ya con nombre y precio de lista). */
+  agregados?: Agregado[];
   /** Descuento para toda la venta, en porcentaje. */
   descuentoPorcentaje?: number | null;
 }
@@ -35,8 +58,26 @@ export interface VentaArmada {
   renglones: RenglonDeVenta[];
   /** Lo que el cliente pidió y no se le manda, para decírselo. */
   recortes: { nombre: string; pedida: number; aceptada: number }[];
+  /** Lo que se le agregó sin que lo pidiera por el catálogo. */
+  agregados: { nombre: string; cantidad: number }[];
+  /** Renglones a precio cerrado, fuera del descuento general. */
+  aPrecioFijo: { nombre: string; precio: number }[];
   descuentoPorcentaje: number;
   error?: string;
+}
+
+/** El precio de un renglón: el de la mano si lo hay, si no el de lista. */
+function precioDelRenglon(
+  nombre: string,
+  deLista: number,
+  aMano: number | null | undefined,
+): { precio: number } | { error: string } {
+  if (aMano === undefined || aMano === null) return { precio: deLista };
+  const p = Math.round(Number(aMano));
+  if (!Number.isFinite(p) || p < 0)
+    return { error: `«${nombre}»: el precio no puede ser negativo.` };
+  if (p === 0) return { error: `«${nombre}»: el precio no puede ser cero.` };
+  return { precio: p };
 }
 
 export function armarVentaDelPedido(
@@ -47,12 +88,17 @@ export function armarVentaDelPedido(
   const vacio: VentaArmada = {
     renglones: [],
     recortes: [],
+    agregados: [],
+    aPrecioFijo: [],
     descuentoPorcentaje: descuento,
   };
   if (descuento < 0 || descuento > 100)
     return { ...vacio, error: 'El descuento va de 0 a 100.' };
   const renglones: RenglonDeVenta[] = [];
   const recortes: VentaArmada['recortes'] = [];
+  const agregados: VentaArmada['agregados'] = [];
+  const aPrecioFijo: VentaArmada['aPrecioFijo'] = [];
+  const sinDescuento = new Set(a.sinDescuento ?? []);
   for (const r of pedido) {
     const pedida = Math.max(0, Math.round(r.cantidadPedida));
     const aceptada =
@@ -72,11 +118,45 @@ export function armarVentaDelPedido(
     if (aceptada < pedida)
       recortes.push({ nombre: r.nombre, pedida, aceptada });
     if (aceptada === 0) continue;
+    const precio = precioDelRenglon(
+      r.nombre,
+      r.precioUnitario,
+      a.precios?.[r.itemId],
+    );
+    if ('error' in precio) return { ...vacio, error: precio.error };
+    const fijo = sinDescuento.has(r.itemId);
+    if (fijo && descuento > 0)
+      aPrecioFijo.push({ nombre: r.nombre, precio: precio.precio });
     renglones.push({
       variantId: r.variantId,
       quantity: aceptada,
-      unitPrice: r.precioUnitario,
-      discountPercent: descuento,
+      unitPrice: precio.precio,
+      discountPercent: fijo ? 0 : descuento,
+    });
+  }
+  // Lo agregado no se compara con lo pedido (es extra); el inventario lo
+  // frena la venta si no alcanza.
+  for (const g of a.agregados ?? []) {
+    const cantidad = Math.round(Number(g.cantidad) || 0);
+    if (cantidad <= 0)
+      return {
+        ...vacio,
+        error: `«${g.nombre}»: para agregarlo la cantidad tiene que ser mayor que cero.`,
+      };
+    const precio = precioDelRenglon(
+      g.nombre,
+      g.precioDeLista,
+      g.precioUnitario,
+    );
+    if ('error' in precio) return { ...vacio, error: precio.error };
+    if (g.sinDescuento && descuento > 0)
+      aPrecioFijo.push({ nombre: g.nombre, precio: precio.precio });
+    agregados.push({ nombre: g.nombre, cantidad });
+    renglones.push({
+      variantId: g.variantId,
+      quantity: cantidad,
+      unitPrice: precio.precio,
+      discountPercent: g.sinDescuento ? 0 : descuento,
     });
   }
   if (!renglones.length)
@@ -85,7 +165,13 @@ export function armarVentaDelPedido(
       recortes,
       error: 'No queda nada por mandar: si no se le vende, rechaza el pedido.',
     };
-  return { renglones, recortes, descuentoPorcentaje: descuento };
+  return {
+    renglones,
+    recortes,
+    agregados,
+    aPrecioFijo,
+    descuentoPorcentaje: descuento,
+  };
 }
 
 /** El WhatsApp al cliente cuando se acepta. */
@@ -97,6 +183,8 @@ export function mensajeDeAceptacion(p: {
   total: number;
   descuentoPorcentaje: number;
   recortes: VentaArmada['recortes'];
+  agregados?: VentaArmada['agregados'];
+  aPrecioFijo?: VentaArmada['aPrecioFijo'];
   enlaceFactura?: string | null;
 }): string {
   const plata = (n: number) => `$${Math.round(n).toLocaleString('es-CO')}`;
@@ -108,6 +196,18 @@ export function mensajeDeAceptacion(p: {
     lineas.push('', 'Ojo, de esto no pudimos mandarte todo:');
     for (const r of p.recortes)
       lineas.push(`- ${r.nombre}: pediste ${r.pedida}, van ${r.aceptada}`);
+  }
+  if (p.agregados?.length) {
+    lineas.push(
+      '',
+      `Te agregamos: ${p.agregados.map((g) => `${g.nombre} × ${g.cantidad}`).join(', ')}.`,
+    );
+  }
+  if (p.aPrecioFijo?.length && p.descuentoPorcentaje > 0) {
+    for (const f of p.aPrecioFijo)
+      lineas.push(
+        `${f.nombre} queda en ${plata(f.precio)} (sin el ${p.descuentoPorcentaje} %).`,
+      );
   }
   if (p.enlaceFactura) lineas.push('', `Tu factura: ${p.enlaceFactura}`);
   return lineas.join('\n');

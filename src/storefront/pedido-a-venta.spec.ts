@@ -52,6 +52,86 @@ describe('armarVentaDelPedido', () => {
       armarVentaDelPedido(pedido, { descuentoPorcentaje: 120 }).error,
     ).toContain('0 a 100');
   });
+
+  it('un precio a mano reemplaza al del pedido, y «sin descuento» deja ese renglón fuera del %', () => {
+    // «A Yum Yum le dieron precio de 50.000: que no tome el 20».
+    const v = armarVentaDelPedido(pedido, {
+      descuentoPorcentaje: 20,
+      precios: { i2: 50_000 },
+      sinDescuento: ['i2'],
+    });
+    expect(v.error).toBeUndefined();
+    expect(v.renglones).toEqual([
+      { variantId: 'v1', quantity: 6, unitPrice: 40_000, discountPercent: 20 },
+      { variantId: 'v2', quantity: 2, unitPrice: 50_000, discountPercent: 0 },
+    ]);
+    expect(v.aPrecioFijo).toEqual([{ nombre: 'Yara', precio: 50_000 }]);
+    // Sin descuento general no hay nada que contar como «fijo».
+    expect(
+      armarVentaDelPedido(pedido, { sinDescuento: ['i2'] }).aPrecioFijo,
+    ).toEqual([]);
+  });
+
+  it('un precio en cero o negativo no pasa', () => {
+    expect(armarVentaDelPedido(pedido, { precios: { i1: 0 } }).error).toContain(
+      'no puede ser cero',
+    );
+    expect(
+      armarVentaDelPedido(pedido, { precios: { i1: -5 } }).error,
+    ).toContain('negativo');
+  });
+
+  it('lo agregado entra como renglón nuevo, con precio de lista o a mano, y queda dicho', () => {
+    // «Me está pidiendo que le agregue 6 de Good Girl Blush».
+    const v = armarVentaDelPedido(pedido, {
+      descuentoPorcentaje: 20,
+      agregados: [
+        {
+          variantId: 'v3',
+          nombre: 'Good Girl Blush',
+          cantidad: 6,
+          precioDeLista: 35_000,
+        },
+        {
+          variantId: 'v4',
+          nombre: 'Yum Yum',
+          cantidad: 1,
+          precioDeLista: 60_000,
+          precioUnitario: 50_000,
+          sinDescuento: true,
+        },
+      ],
+    });
+    expect(v.error).toBeUndefined();
+    expect(v.renglones.slice(2)).toEqual([
+      { variantId: 'v3', quantity: 6, unitPrice: 35_000, discountPercent: 20 },
+      { variantId: 'v4', quantity: 1, unitPrice: 50_000, discountPercent: 0 },
+    ]);
+    expect(v.agregados).toEqual([
+      { nombre: 'Good Girl Blush', cantidad: 6 },
+      { nombre: 'Yum Yum', cantidad: 1 },
+    ]);
+    expect(v.aPrecioFijo).toEqual([{ nombre: 'Yum Yum', precio: 50_000 }]);
+    expect(
+      armarVentaDelPedido(pedido, {
+        agregados: [
+          { variantId: 'v3', nombre: 'X', cantidad: 0, precioDeLista: 1 },
+        ],
+      }).error,
+    ).toContain('mayor que cero');
+  });
+
+  it('con todo el pedido en cero pero algo agregado, sí hay venta', () => {
+    const v = armarVentaDelPedido(pedido, {
+      cantidades: { i1: 0, i2: 0 },
+      agregados: [
+        { variantId: 'v3', nombre: 'Blush', cantidad: 2, precioDeLista: 1_000 },
+      ],
+    });
+    expect(v.error).toBeUndefined();
+    expect(v.renglones).toHaveLength(1);
+    expect(v.recortes).toHaveLength(2);
+  });
 });
 
 describe('mensajes de WhatsApp', () => {
@@ -69,6 +149,27 @@ describe('mensajes de WhatsApp', () => {
     expect(m).toContain('FAC-700: $204.000 (con 15 % de descuento)');
     expect(m).toContain('pediste 6, van 4');
     expect(m).toContain('https://r2/f.pdf');
+    expect(m).not.toContain('Te agregamos');
+  });
+
+  it('la aceptación cuenta lo agregado y lo que quedó a precio cerrado', () => {
+    const base = {
+      tienda: 'Distri Amber',
+      cliente: 'Perfuar',
+      numeroPedido: 'PED-1',
+      numeroFactura: 'FAC-700',
+      total: 500_000,
+      recortes: [],
+      agregados: [{ nombre: 'Good Girl Blush', cantidad: 6 }],
+      aPrecioFijo: [{ nombre: 'Yum Yum', precio: 50_000 }],
+    };
+    const m = mensajeDeAceptacion({ ...base, descuentoPorcentaje: 20 });
+    expect(m).toContain('Te agregamos: Good Girl Blush × 6.');
+    expect(m).toContain('Yum Yum queda en $50.000 (sin el 20 %).');
+    // Sin descuento general, «sin el %» no tiene sentido y no se dice.
+    expect(
+      mensajeDeAceptacion({ ...base, descuentoPorcentaje: 0 }),
+    ).not.toContain('queda en');
   });
 
   it('el rechazo lleva el motivo si lo hay', () => {

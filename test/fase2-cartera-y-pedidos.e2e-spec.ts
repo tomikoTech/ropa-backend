@@ -181,6 +181,7 @@ describe('Cartera completa, recibos y pedidos (e2e)', () => {
     let tokenP: string;
     let slug: string;
     let locion: string;
+    let whId: string;
     let pedido: { orderId: string };
     const hp = () => ({ Authorization: `Bearer ${tokenP}` });
 
@@ -208,6 +209,7 @@ describe('Cartera completa, recibos y pedidos (e2e)', () => {
           isPosLocation: true,
         })
         .expect(201);
+      whId = wh.body.id;
       await request(app.getHttpServer())
         .patch('/api/store-settings')
         .set(hp())
@@ -308,6 +310,97 @@ describe('Cartera completa, recibos y pedidos (e2e)', () => {
         .set(hp())
         .send({})
         .expect(400);
+    }, 120000);
+
+    it('aceptar con precio a mano sin descuento y un renglón agregado: tres renglones y el WhatsApp lo cuenta', async () => {
+      // Segundo producto para el pedido, y un tercero para agregar.
+      const crear = async (nombre: string, precio: number) => {
+        const p = await request(app.getHttpServer())
+          .post('/api/products')
+          .set(hp())
+          .send({
+            name: nombre,
+            basePrice: precio,
+            isPublished: true,
+            variants: [{ size: 'U', color: 'Único' }],
+          })
+          .expect(201);
+        const variantId = p.body.variants[0].id as string;
+        await request(app.getHttpServer())
+          .post('/api/inventory/adjust')
+          .set(hp())
+          .send({
+            variantId,
+            warehouseId: whId,
+            quantity: 10,
+            movementType: 'IN',
+            notes: 'e2e',
+          })
+          .expect((r) => {
+            if (r.status !== 200 && r.status !== 201) throw new Error(r.text);
+          });
+        return variantId;
+      };
+      const yumYum = await crear(`E2EPED Yum Yum ${ts}`, 60000);
+      const blush = await crear(`E2EPED Good Girl Blush ${ts}`, 35000);
+      const r0 = await request(app.getHttpServer())
+        .post(`/api/storefront/${slug}/orders`)
+        .send({
+          customerName: 'Local La 14',
+          customerPhone: '3009876543',
+          shippingAddress: 'CC Unico local 12',
+          items: [
+            { variantId: locion, quantity: 2 },
+            { variantId: yumYum, quantity: 1 },
+          ],
+        })
+        .expect(201);
+      const items = (
+        await request(app.getHttpServer())
+          .get(`/api/store-settings/orders/${r0.body.orderId}`)
+          .set(hp())
+          .expect(200)
+      ).body.items as { id: string; variantId: string }[];
+      const renglonYum = items.find((i) => i.variantId === yumYum)!;
+      const r = await request(app.getHttpServer())
+        .post(`/api/store-settings/orders/${r0.body.orderId}/aceptar`)
+        .set(hp())
+        .send({
+          descuentoPorcentaje: 20,
+          precios: { [renglonYum.id]: 50000 },
+          sinDescuento: [renglonYum.id],
+          agregados: [{ variantId: blush, cantidad: 2 }],
+          metodoDePago: 'EFECTIVO',
+        })
+        .expect(201);
+      // 2 × 40.000 al 20 % + 1 × 50.000 sin dto + 2 × 35.000 al 20 %
+      expect(r.body.total).toBe(64000 + 50000 + 56000);
+      expect(r.body.agregados).toEqual([
+        { nombre: expect.stringContaining('Blush'), cantidad: 2 },
+      ]);
+      const texto = decodeURIComponent(r.body.whatsappUrl);
+      expect(texto).toContain('Te agregamos');
+      expect(texto).toContain('sin el 20 %');
+      const venta = await request(app.getHttpServer())
+        .get(`/api/pos/sales/${r.body.saleId}`)
+        .set(hp())
+        .expect(200);
+      const porVariante = new Map(
+        (
+          venta.body.items as {
+            variantId: string;
+            unitPrice: string;
+            discountPercent: string;
+            quantity: number;
+          }[]
+        ).map((i) => [i.variantId, i]),
+      );
+      expect(porVariante.size).toBe(3);
+      expect(Number(porVariante.get(yumYum)!.unitPrice)).toBe(50000);
+      expect(Number(porVariante.get(yumYum)!.discountPercent)).toBe(0);
+      expect(Number(porVariante.get(blush)!.discountPercent)).toBe(20);
+      expect(porVariante.get(blush)!.quantity).toBe(2);
+      expect(Number(porVariante.get(locion)!.discountPercent)).toBe(20);
     }, 120000);
 
     it('rechazar cancela el pedido y arma el WhatsApp con el motivo', async () => {

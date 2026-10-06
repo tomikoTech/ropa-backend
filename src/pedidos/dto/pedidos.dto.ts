@@ -1,6 +1,9 @@
 import {
+  IsArray,
+  IsBoolean,
   IsEnum,
   IsInt,
+  IsNumber,
   IsObject,
   IsOptional,
   IsString,
@@ -8,9 +11,32 @@ import {
   Max,
   MaxLength,
   Min,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { PaymentMethod } from '../../common/enums/payment-method.enum.js';
+
+/** «Me está pidiendo que le agregue 6 de Good Girl Blush»: un renglón extra. */
+export class AgregadoDto {
+  @IsUUID()
+  variantId: string;
+
+  @IsInt()
+  @Min(1)
+  cantidad: number;
+
+  @ApiPropertyOptional({ description: 'Precio a mano; si falta, el de lista' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  precioUnitario?: number;
+
+  @ApiPropertyOptional({ description: 'No lleva el descuento general' })
+  @IsOptional()
+  @IsBoolean()
+  sinDescuento?: boolean;
+}
 
 export class AceptarPedidoDto {
   @ApiPropertyOptional({
@@ -20,6 +46,30 @@ export class AceptarPedidoDto {
   @IsOptional()
   @IsObject()
   cantidades?: Record<string, number>;
+
+  @ApiPropertyOptional({
+    description:
+      'Precio unitario a mano por renglón (id del renglón → precio): «a Yum Yum le dieron precio de 50.000»',
+  })
+  @IsOptional()
+  @IsObject()
+  precios?: Record<string, number>;
+
+  @ApiPropertyOptional({
+    description: 'Renglones (ids) que no llevan el descuento general',
+    type: [String],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  sinDescuento?: string[];
+
+  @ApiPropertyOptional({ type: [AgregadoDto] })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => AgregadoDto)
+  agregados?: AgregadoDto[];
 
   @ApiPropertyOptional({ example: 15 })
   @IsOptional()

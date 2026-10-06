@@ -4,11 +4,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { EcommerceOrder } from '../storefront/entities/ecommerce-order.entity.js';
 import { EcommerceOrderItem } from '../storefront/entities/ecommerce-order-item.entity.js';
 import { StoreSettings } from '../storefront/entities/store-settings.entity.js';
 import { Client } from '../clients/entities/client.entity.js';
+import { ProductVariant } from '../products/entities/product-variant.entity.js';
+import { ProductStatus } from '../common/enums/product-status.enum.js';
 import { EcommerceOrderStatus } from '../common/enums/ecommerce-order-status.enum.js';
 import { PaymentMethod } from '../common/enums/payment-method.enum.js';
 import { PosService } from '../pos/pos.service.js';
@@ -17,6 +19,7 @@ import {
   armarVentaDelPedido,
   mensajeDeAceptacion,
   mensajeDeRechazo,
+  type Agregado,
 } from '../storefront/pedido-a-venta.js';
 import { AceptarPedidoDto, RechazarPedidoDto } from './dto/pedidos.dto.js';
 
@@ -43,6 +46,8 @@ export class PedidosService {
     private readonly settingsRepo: Repository<StoreSettings>,
     @InjectRepository(Client)
     private readonly clientRepo: Repository<Client>,
+    @InjectRepository(ProductVariant)
+    private readonly variantRepo: Repository<ProductVariant>,
     private readonly pos: PosService,
     private readonly documentos: DocumentosService,
   ) {}
@@ -107,6 +112,41 @@ export class PedidosService {
     return `https://wa.me/${numero}?text=${encodeURIComponent(texto)}`;
   }
 
+  /**
+   * Los renglones que la tienda agrega al aceptar, con nombre y precio de
+   * lista: lo que el cliente pidió por WhatsApp después de pedir por el
+   * catálogo. Una variante ajena o apagada no se agrega.
+   */
+  private async agregadosConDatos(
+    dto: AceptarPedidoDto,
+    tenantId: string,
+  ): Promise<Agregado[]> {
+    if (!dto.agregados?.length) return [];
+    const variantes = await this.variantRepo.find({
+      where: { id: In(dto.agregados.map((g) => g.variantId)), tenantId },
+      relations: ['product'],
+    });
+    const porId = new Map(variantes.map((v) => [v.id, v]));
+    return dto.agregados.map((g) => {
+      const v = porId.get(g.variantId);
+      if (!v || !v.isActive || v.product?.status !== ProductStatus.ACTIVE)
+        throw new BadRequestException(
+          'Uno de los productos agregados no existe o está inactivo.',
+        );
+      return {
+        variantId: v.id,
+        nombre: v.product.displayName || v.product.name,
+        cantidad: g.cantidad,
+        precioDeLista:
+          v.priceOverride != null && Number(v.priceOverride) > 0
+            ? Number(v.priceOverride)
+            : Number(v.product.basePrice),
+        precioUnitario: g.precioUnitario,
+        sinDescuento: g.sinDescuento,
+      };
+    });
+  }
+
   async aceptar(
     id: string,
     dto: AceptarPedidoDto,
@@ -117,6 +157,7 @@ export class PedidosService {
     const items = await this.itemRepo.find({
       where: { orderId: pedido.id, tenantId },
     });
+    const agregados = await this.agregadosConDatos(dto, tenantId);
     const armada = armarVentaDelPedido(
       items.map((i) => ({
         itemId: i.id,
@@ -127,6 +168,9 @@ export class PedidosService {
       })),
       {
         cantidades: dto.cantidades,
+        precios: dto.precios,
+        sinDescuento: dto.sinDescuento,
+        agregados,
         descuentoPorcentaje: dto.descuentoPorcentaje,
       },
     );
@@ -195,6 +239,8 @@ export class PedidosService {
       total: Number(venta.total),
       descuentoPorcentaje: armada.descuentoPorcentaje,
       recortes: armada.recortes,
+      agregados: armada.agregados,
+      aPrecioFijo: armada.aPrecioFijo,
       enlaceFactura,
     });
     return {
@@ -203,6 +249,7 @@ export class PedidosService {
       numeroFactura: venta.invoiceNumber ?? venta.saleNumber,
       total: Number(venta.total),
       recortes: armada.recortes,
+      agregados: armada.agregados,
       enlaceFactura,
       whatsappUrl: this.enlaceDeWhatsApp(pedido.customerPhone, mensaje),
     };
