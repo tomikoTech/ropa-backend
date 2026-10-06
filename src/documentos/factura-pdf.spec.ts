@@ -1,5 +1,6 @@
 import { pdfDeFactura, plata, type DatosDeLaTienda } from './factura-pdf.js';
 import { pdfDeEstadoDeCuenta } from './estado-de-cuenta-pdf.js';
+import { textoPorPagina } from './texto-del-pdf.js';
 
 /**
  * Los PDF que se mandan por WhatsApp.
@@ -56,6 +57,48 @@ const paginas = (b: Buffer) =>
   (b.toString('latin1').match(/\/Type \/Page[^s]/g) ?? []).length;
 
 describe('pdfDeFactura', () => {
+  it('el total nunca queda partido entre dos hojas (la foto de Andrea, 6 oct 2026)', async () => {
+    // Renglones como los de Distri Amber: con descuento (más altos) y nota.
+    const conDescuento = (n: number) => ({
+      nombre: `PERFUME ${n}`,
+      detalle: null,
+      codigo: null,
+      cantidad: 6,
+      precioUnitario: 38_000,
+      precioDeLista: 38_000,
+      descuentoPorcentaje: 20,
+      total: 6 * 30_400,
+    });
+    for (let n = 8; n <= 40; n++) {
+      const sub = n * 6 * 38_000;
+      const b = await pdfDeFactura(
+        tienda,
+        {
+          ...factura(),
+          renglones: Array.from({ length: n }, (_, i) => conDescuento(i + 1)),
+          subtotal: sub,
+          descuento: sub * 0.2,
+          total: sub * 0.8,
+          pagado: 0,
+          saldo: sub * 0.8,
+          notas: 'DESCUENTO INCLUIDO',
+        },
+        { comprimir: false },
+      );
+      const hojas = textoPorPagina(b);
+      const donde = (t: string) => hojas.findIndex((h) => h.includes(t)) + 1;
+      // «TOTAL» a secas también casa con el encabezado «TOTAL PRODUCTOS»: se
+      // busca el valor, que solo está en la línea del total y en el saldo.
+      const totales = ['Subtotal', 'Descuento', plata(sub * 0.8), 'Saldo pendiente', 'Se te aplic'].map(donde);
+      expect({ n, totales }).toEqual({ n, totales: Array(5).fill(totales[0]) });
+      expect(totales[0]).toBeGreaterThan(0);
+      // Y sin hojas de más (antes, 18 renglones daban cuatro hojas): el
+      // bloque de totales pasa entero a la hoja 2 desde los 14 renglones.
+      expect({ n, hojas: hojas.length }).toEqual({ n, hojas: n <= 13 ? 1 : n <= 38 ? 2 : 3 });
+      expect(donde('¡Gracias por su compra!')).toBe(hojas.length);
+    }
+  });
+
   it('produce un PDF de verdad', async () => {
     const b = await pdfDeFactura(tienda, factura());
     expect(esPdf(b)).toBe(true);

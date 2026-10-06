@@ -106,11 +106,14 @@ const ANCHO_UTIL = ANCHO_CARTA - MARGEN * 2;
 export function pdfDeFactura(
   tienda: DatosDeLaTienda,
   factura: DatosDeFactura,
+  opciones: { comprimir?: boolean } = {},
 ): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({
       size: 'LETTER',
       margin: MARGEN,
+      // Sin comprimir solo en pruebas: así se puede leer qué quedó en cada hoja.
+      compress: opciones.comprimir ?? true,
       info: { Title: `Factura ${factura.numero}`, Author: tienda.nombre },
     });
     const partes: Buffer[] = [];
@@ -235,21 +238,34 @@ export function pdfDeFactura(
     y = filaEncabezado(y);
     doc.font('Helvetica').fontSize(9);
 
+    // Hasta dónde se puede escribir. Pasarse no «corta»: pdfkit abre otra
+    // hoja por su cuenta y sigue escribiendo con la `y` vieja, y la factura
+    // de Distri Amber salió con el subtotal en una hoja, el saldo en otra y
+    // dos hojas en blanco entre medio.
+    const FONDO = doc.page.height - MARGEN;
+
     for (const r of factura.renglones) {
-      // Salto de página con el encabezado repetido: una factura de sesenta
-      // renglones no cabe en una hoja, y sin encabezado la segunda página es
-      // una lista de números sin columnas.
-      if (y > 700) {
-        doc.addPage();
-        y = filaEncabezado(MARGEN);
-        doc.font('Helvetica').fontSize(9);
-      }
       const detalle = [
         r.detalle,
         tienda.muestraCodigos && r.codigo ? r.codigo : null,
       ]
         .filter(Boolean)
         .join(' · ');
+      // Salto de página con el encabezado repetido: una factura de sesenta
+      // renglones no cabe en una hoja, y sin encabezado la segunda página es
+      // una lista de números sin columnas. Se mide el renglón antes de
+      // escribirlo: uno con descuento o con nombre largo es más alto.
+      const altoDelNombre =
+        doc.fontSize(9).heightOfString(r.nombre, { width: 340 }) +
+        (detalle ? doc.fontSize(7.5).heightOfString(detalle, { width: 340 }) : 0);
+      doc.fontSize(9);
+      const altoDelRenglon =
+        Math.max(altoDelNombre, descuentoDelRenglon(r).tieneDescuento ? 22 : 12) + 4;
+      if (y + altoDelRenglon > FONDO) {
+        doc.addPage();
+        y = filaEncabezado(MARGEN);
+        doc.font('Helvetica').fontSize(9);
+      }
       doc.fillColor('#000').text(r.nombre, col.nombre + 4, y, { width: 340 });
       if (detalle) {
         doc
@@ -309,6 +325,24 @@ export function pdfDeFactura(
     }
 
     // ── Totales ──────────────────────────────────────────────────────────
+    // El bloque de totales y la frase del descuento van juntos y enteros: si
+    // no caben en lo que queda de hoja, pasan completos a la siguiente.
+    const resumen = resumenDelDescuento(factura.renglones, factura.descuento);
+    const lineasDeTotales =
+      (resumen.descuento > 0 || factura.iva > 0 ? 1 : 0) +
+      (resumen.descuento > 0 ? 1 : 0) +
+      (factura.iva > 0 ? 1 : 0) +
+      1 +
+      (factura.pagado > 0 && factura.saldo > 0 ? 1 : 0) +
+      (factura.saldo > 0 ? 1 : 0);
+    const altoDeLaFrase = resumen.frase
+      ? doc.font('Helvetica-Bold').fontSize(9).heightOfString(resumen.frase, { width: ANCHO_UTIL }) + 6
+      : 0;
+    const altoDeTotales = 6 + lineasDeTotales * 16 + 8 + altoDeLaFrase;
+    if (y + altoDeTotales > FONDO) {
+      doc.addPage();
+      y = MARGEN;
+    }
     y += 6;
     const linea = (
       rotulo: string,
@@ -328,7 +362,6 @@ export function pdfDeFactura(
     // El subtotal es a precio **real** y el descuento junta las rebajas por
     // renglón con la general, en pesos y en porcentaje: así subtotal menos
     // descuento (más IVA) cuadra con el total que el cliente ve.
-    const resumen = resumenDelDescuento(factura.renglones, factura.descuento);
     if (resumen.descuento > 0 || factura.iva > 0) {
       linea(
         'Subtotal',
@@ -360,28 +393,28 @@ export function pdfDeFactura(
       doc.text(resumen.frase, MARGEN, y, { width: ANCHO_UTIL });
       y = doc.y + 6;
     }
-    doc.font('Helvetica').fontSize(8.5).fillColor('#444');
-    if (factura.notas) {
-      doc.text(factura.notas, MARGEN, y, { width: ANCHO_UTIL });
-      y = doc.y + 6;
-    }
-    if (factura.saldo > 0 && tienda.notaDeVencimiento) {
-      doc.text(tienda.notaDeVencimiento, MARGEN, y, { width: ANCHO_UTIL });
-      y = doc.y + 6;
-    }
-    if (tienda.notaAlPie) {
-      doc.text(tienda.notaAlPie, MARGEN, y, { width: ANCHO_UTIL });
-      y = doc.y + 6;
-    }
-    if (tienda.agradecimiento) {
+    // Las notas del pie, una por una: la que no quepa pasa entera.
+    const nota = (texto: string, negrita = false, extra = 0) => {
       doc
-        .font('Helvetica-Bold')
-        .fillColor('#000')
-        .text(tienda.agradecimiento, MARGEN, y + 4, {
-          width: ANCHO_UTIL,
-          align: 'center',
-        });
-    }
+        .font(negrita ? 'Helvetica-Bold' : 'Helvetica')
+        .fontSize(8.5)
+        .fillColor(negrita ? '#000' : '#444');
+      const alto = doc.heightOfString(texto, { width: ANCHO_UTIL });
+      if (y + extra + alto > FONDO) {
+        doc.addPage();
+        y = MARGEN;
+      }
+      doc.text(texto, MARGEN, y + extra, {
+        width: ANCHO_UTIL,
+        align: negrita ? 'center' : 'left',
+      });
+      y = doc.y + 6;
+    };
+    if (factura.notas) nota(factura.notas);
+    if (factura.saldo > 0 && tienda.notaDeVencimiento)
+      nota(tienda.notaDeVencimiento);
+    if (tienda.notaAlPie) nota(tienda.notaAlPie);
+    if (tienda.agradecimiento) nota(tienda.agradecimiento, true, 4);
 
     doc.end();
   });
