@@ -15,6 +15,12 @@
  *    no hay porcentaje guardado, pero sí hubo rebaja.
  *  - **Descuento general** de la venta (`discount_amount`): va sobre el total.
  *
+ * Ojo: `discount_amount` es **todo** lo que la venta rebajó, renglones
+ * incluidos (`total = subtotal − discount_amount`, y el POS lo llena con la
+ * suma de las líneas). El descuento general es solo lo que esa cifra no
+ * explica con los renglones. La factura FE-000810 de Distri Amber salió con
+ * «DESCUENTO 40 %» por sumar las dos veces el mismo 20 %.
+ *
  * Es la misma regla para el PDF de WhatsApp, la impresión del navegador y la
  * pantalla; su espejo es `ropa-frontend/src/lib/descuento-de-la-factura.ts`.
  * Todo en pesos enteros: lo que se imprime.
@@ -83,6 +89,7 @@ export function descuentoDelRenglon(
 
 export function resumenDelDescuento(
   renglones: RenglonConDescuento[],
+  /** `discount_amount` de la venta: la rebaja total, renglones incluidos. */
   descuentoGeneral: number | null | undefined,
 ): ResumenDelDescuento {
   let subtotalDeLista = 0;
@@ -92,7 +99,10 @@ export function resumenDelDescuento(
     subtotalDeLista += d.lista * Math.max(0, Number(r.cantidad) || 0);
     descuentoDeRenglones += d.ahorro;
   }
-  const general = Math.max(0, entero(descuentoGeneral ?? 0));
+  // Lo que la venta rebajó en total; si lo explican los renglones, no hay
+  // descuento general aparte.
+  const rebajaTotal = Math.max(0, entero(descuentoGeneral ?? 0));
+  const general = Math.max(0, rebajaTotal - descuentoDeRenglones);
   const descuento = descuentoDeRenglones + general;
   const porcentaje =
     subtotalDeLista > 0 ? unDecimal((descuento / subtotalDeLista) * 100) : 0;

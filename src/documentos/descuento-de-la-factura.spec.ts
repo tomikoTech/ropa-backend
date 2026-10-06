@@ -101,12 +101,29 @@ describe('resumenDelDescuento', () => {
         { cantidad: 1, precioUnitario: 27_000, precioDeLista: 30_000 },
         { cantidad: 1, precioUnitario: 10_000 },
       ],
-      5_000,
+      // La venta guarda la rebaja total: 12.000 de los renglones + 5.000 generales.
+      17_000,
     );
     expect(r.subtotalDeLista).toBe(100_000);
     expect(r.descuentoDeRenglones).toBe(12_000);
+    expect(r.descuentoGeneral).toBe(5_000);
     expect(r.descuento).toBe(17_000);
     expect(r.porcentaje).toBe(17);
+  });
+
+  it('el POS guarda en discount_amount la suma de las líneas: no se cuenta dos veces (FE-000810)', () => {
+    const r = resumenDelDescuento(
+      [
+        { cantidad: 8, precioUnitario: 38_000, precioDeLista: 38_000, descuentoPorcentaje: 20 },
+        { cantidad: 6, precioUnitario: 62_400, precioDeLista: 62_400, descuentoPorcentaje: 20 },
+      ],
+      (8 * 38_000 + 6 * 62_400) * 0.2,
+    );
+    expect(r.subtotalDeLista).toBe(678_400);
+    expect(r.descuentoDeRenglones).toBe(135_680);
+    expect(r.descuentoGeneral).toBe(0);
+    expect(r.descuento).toBe(135_680);
+    expect(r.porcentaje).toBe(20);
   });
 
   it('sin descuento no hay frase ni porcentaje', () => {
