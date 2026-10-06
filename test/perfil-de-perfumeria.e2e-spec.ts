@@ -482,15 +482,145 @@ describe('Perfil de negocio: perfumería (e2e)', () => {
     // el catálogo no lo enseña ni lo encuentra por su slug.
     await app
       .get(DataSource)
-      .query(`UPDATE products SET is_published = true WHERE id = $1`, [frasco.body.id]);
+      .query(`UPDATE products SET is_published = true WHERE id = $1`, [
+        frasco.body.id,
+      ]);
     const lista = await request(app.getHttpServer())
       .get(`/api/storefront/${slug}/products`)
       .expect(200);
-    const filas = (Array.isArray(lista.body) ? lista.body : lista.body.products) as { name: string }[];
+    const filas = (
+      Array.isArray(lista.body) ? lista.body : lista.body.products
+    ) as { name: string }[];
     const nombres = filas.map((x) => x.name);
     expect(nombres).not.toContain(`E2EPERFIL Frasco publicado ${ts}`);
     await request(app.getHttpServer())
       .get(`/api/storefront/${slug}/products/${frasco.body.slug as string}`)
       .expect(404);
   }, 60000);
+
+  it('el pedido no pasa de lo que hay, el catálogo dice cuántas quedan, y sin precio no se publica', async () => {
+    const h = con(tokenPerfumeria);
+    await request(app.getHttpServer())
+      .patch('/api/store-settings')
+      .set(h)
+      .send({ catalogoEnabled: true, isStorefrontActive: true })
+      .expect(200);
+    const s = await request(app.getHttpServer())
+      .get('/api/store-settings')
+      .set(h)
+      .expect(200);
+    const slug = s.body.storeSlug as string;
+    const wh = await request(app.getHttpServer())
+      .post('/api/inventory/warehouses')
+      .set(h)
+      .send({
+        name: `E2E Alcanza WH ${ts}`,
+        code: `AL-${ts.toString().slice(-5)}`,
+        isPosLocation: true,
+      })
+      .expect(201);
+    await request(app.getHttpServer())
+      .patch('/api/store-settings')
+      .set(h)
+      .send({ defaultWarehouseId: wh.body.id })
+      .expect(200);
+    const nombre = `E2EPERFIL Vulcan ${ts}`;
+    const p = await request(app.getHttpServer())
+      .post('/api/products')
+      .set(h)
+      .send({
+        name: nombre,
+        basePrice: 50000,
+        isPublished: true,
+        variants: [{ size: 'U', color: 'Único' }],
+      })
+      .expect(201);
+    const variantId = p.body.variants[0].id as string;
+    await request(app.getHttpServer())
+      .post('/api/inventory/adjust')
+      .set(h)
+      .send({
+        variantId,
+        warehouseId: wh.body.id,
+        quantity: 5,
+        movementType: 'IN',
+        notes: 'e2e',
+      })
+      .expect((res) => {
+        if (res.status !== 200 && res.status !== 201) throw new Error(res.text);
+      });
+
+    // (b) el catálogo dice cuántas quedan (solo en perfumería).
+    const cat = await request(app.getHttpServer())
+      .get(`/api/storefront/${slug}/catalogo`)
+      .expect(200);
+    const enCatalogo = (
+      cat.body.productos as { id: string; tallas: { existencias?: number }[] }[]
+    ).find((x) => x.id === p.body.id);
+    expect(enCatalogo?.tallas[0].existencias).toBe(5);
+
+    // (c) un producto a $0 no sale en el catálogo ni se deja publicar.
+    const sinPrecio = await request(app.getHttpServer())
+      .post('/api/products')
+      .set(h)
+      .send({
+        name: `E2EPERFIL Estuche sin precio ${ts}`,
+        basePrice: 0,
+        variants: [{ size: 'U', color: 'Único' }],
+      })
+      .expect(201);
+    const rechazo = await request(app.getHttpServer())
+      .patch(`/api/products/${sinPrecio.body.id}/publish`)
+      .set(h)
+      .expect(400);
+    expect(rechazo.body.message).toMatch(/precio/i);
+    await app
+      .get(DataSource)
+      .query(`UPDATE products SET is_published = true WHERE id = $1`, [
+        sinPrecio.body.id,
+      ]);
+    const cat2 = await request(app.getHttpServer())
+      .get(`/api/storefront/${slug}/catalogo`)
+      .expect(200);
+    expect(
+      (cat2.body.productos as { id: string }[]).some(
+        (x) => x.id === sinPrecio.body.id,
+      ),
+    ).toBe(false);
+
+    // (a) pedir 6 con 5 en stock se rechaza diciendo cuántas quedan; 5 pasa.
+    const pedir = (quantity: number) =>
+      request(app.getHttpServer())
+        .post(`/api/storefront/${slug}/orders`)
+        .send({
+          customerName: 'Local Perfuar',
+          customerPhone: '3001234567',
+          shippingAddress: 'CC Unico local 12',
+          items: [{ variantId, quantity }],
+        });
+    const demasiado = await pedir(6).expect(400);
+    expect(demasiado.body.message).toContain(
+      `${nombre}: pediste 6 y solo quedan 5`,
+    );
+    const ok = await pedir(5);
+    if (ok.status !== 201) throw new Error(`pedido: ${ok.status} ${ok.text}`);
+
+    // (d) en Pedidos cada renglón trae cuántas hay hoy.
+    const pedidos = await request(app.getHttpServer())
+      .get('/api/store-settings/orders')
+      .set(h)
+      .expect(200);
+    const pedido = (
+      pedidos.body as {
+        id: string;
+        items: { disponible: number; sinPrecio: boolean }[];
+      }[]
+    ).find((o) => o.id === ok.body.orderId);
+    expect(pedido?.items[0]).toMatchObject({ disponible: 5, sinPrecio: false });
+    const uno = await request(app.getHttpServer())
+      .get(`/api/store-settings/orders/${ok.body.orderId}`)
+      .set(h)
+      .expect(200);
+    expect(uno.body.items[0].disponible).toBe(5);
+  }, 120000);
 });

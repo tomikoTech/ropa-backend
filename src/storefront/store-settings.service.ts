@@ -31,6 +31,8 @@ export class StoreSettingsService {
     private readonly orderRepo: Repository<EcommerceOrder>,
     @InjectRepository(EcommerceOrderItem)
     private readonly orderItemRepo: Repository<EcommerceOrderItem>,
+    @InjectRepository(Stock)
+    private readonly stockRepository: Repository<Stock>,
     private readonly dataSource: DataSource,
     private readonly invoiceEmailService: InvoiceEmailService,
     private readonly orderNotificationEmailService: OrderNotificationEmailService,
@@ -302,12 +304,14 @@ export class StoreSettingsService {
     const where: Record<string, unknown> = { tenantId };
     if (filters?.status) where.status = filters.status;
 
-    return this.orderRepo.find({
+    const orders = await this.orderRepo.find({
       where,
       relations: ['items'],
       order: { createdAt: 'DESC' },
       take: filters?.limit || 100,
     });
+    await this.anotarDisponible(orders, tenantId);
+    return orders;
   }
 
   async findOneOrder(id: string, tenantId: string): Promise<EcommerceOrder> {
@@ -318,7 +322,44 @@ export class StoreSettingsService {
     if (!order) {
       throw new NotFoundException('Pedido no encontrado');
     }
+    await this.anotarDisponible([order], tenantId);
     return order;
+  }
+
+  /**
+   * A cada renglón del pedido le pone cuántas hay hoy en la bodega de venta
+   * (`disponible`) y si entró sin precio (`sinPrecio`): «¿cómo edito las
+   * cantidades? Se le debe informar al cliente que no hay la cantidad que
+   * pide» (Andrea). Con eso el diálogo de aceptar topa la cantidad y avisa.
+   */
+  private async anotarDisponible(
+    orders: EcommerceOrder[],
+    tenantId: string,
+  ): Promise<void> {
+    const items = orders.flatMap((o) => o.items ?? []);
+    if (!items.length) return;
+    const settings = await this.settingsRepo.findOne({ where: { tenantId } });
+    const bodega =
+      settings?.ecommerceWarehouseId || settings?.defaultWarehouseId || null;
+    const hay = new Map<string, number>();
+    if (bodega) {
+      const filas = await this.stockRepository.find({
+        where: {
+          tenantId,
+          warehouseId: bodega,
+          variantId: In([...new Set(items.map((i) => i.variantId))]),
+        },
+      });
+      for (const f of filas) hay.set(f.variantId, f.quantity);
+    }
+    for (const it of items) {
+      const anotado = it as EcommerceOrderItem & {
+        disponible: number;
+        sinPrecio: boolean;
+      };
+      anotado.disponible = Math.max(0, hay.get(it.variantId) ?? 0);
+      anotado.sinPrecio = (Number(it.unitPrice) || 0) <= 0;
+    }
   }
 
   async updateOrderStatus(

@@ -14,6 +14,8 @@
  * Puro: sin base de datos; el servicio consulta y esto traduce.
  */
 
+import { tienePrecio } from './se-vende-en-linea.js';
+
 export interface TallaDelCatalogo {
   variantId: string;
   talla: string;
@@ -22,6 +24,12 @@ export interface TallaDelCatalogo {
   disponible: boolean;
   /** Solo si esa talla tiene un precio distinto al del producto. */
   precio?: number;
+  /**
+   * Cuántas quedan. Solo en perfumería, para que el carrito no deje pedir
+   * más de lo que hay («por qué les da la opción de 6», Andrea). En una
+   * zapatería sigue sin salir: ahí solo se dice disponible o agotado.
+   */
+  existencias?: number;
 }
 
 export interface ProductoDelCatalogo {
@@ -60,9 +68,18 @@ export interface VarianteFuente {
  */
 export function esParaElPublico(p: {
   category?: { type?: string | null } | null;
+  basePrice?: number | string | null;
+  variants?: { priceOverride?: number | string | null }[] | null;
 }): boolean {
   const tipo = (p.category?.type ?? 'STANDARD').toUpperCase();
-  return tipo !== 'ESSENCE' && tipo !== 'FRASCO';
+  if (tipo === 'ESSENCE' || tipo === 'FRASCO') return false;
+  // Sin precio tampoco sale: «Estuche Yara sale en 0 pesos» (Andrea).
+  // Si no se pasó el precio (llamadas viejas), no se juzga.
+  if (p.basePrice === undefined) return true;
+  return tienePrecio(
+    p.basePrice,
+    (p.variants ?? []).map((v) => v.priceOverride),
+  );
 }
 
 export interface ProductoFuente {
@@ -106,7 +123,10 @@ export function compararTallas(a: string, b: string): number {
   return a.localeCompare(b, 'es');
 }
 
-export function productoDelCatalogo(p: ProductoFuente): ProductoDelCatalogo {
+export function productoDelCatalogo(
+  p: ProductoFuente,
+  opciones: { conExistencias?: boolean } = {},
+): ProductoDelCatalogo {
   const precio = Number(p.basePrice) || 0;
   const fotos = [
     ...(p.imageUrls ?? []),
@@ -124,6 +144,8 @@ export function productoDelCatalogo(p: ProductoFuente): ProductoDelCatalogo {
       };
       if (override != null && override > 0 && override !== precio)
         t.precio = override;
+      if (opciones.conExistencias)
+        t.existencias = Math.max(0, Number(v.stock ?? 0));
       return t;
     })
     .sort(

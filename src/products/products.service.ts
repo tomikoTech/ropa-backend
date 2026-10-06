@@ -1056,8 +1056,13 @@ export class ProductsService {
 
   // Un frasco o una esencia publicados aparecen en el catálogo como «Frasco X
   // $0»: se rechaza al marcar el globo, no se arregla después.
+  // Y sin precio tampoco: el ESTUCHE YARA *4 entró a un pedido en $0.
   private exigirQueSeVendaEnLinea(product: Product) {
-    const motivo = porQueNoSePublica(product.category?.type);
+    const motivo = porQueNoSePublica(
+      product.category?.type,
+      product.basePrice,
+      (product.variants ?? []).map((v) => v.priceOverride),
+    );
     if (motivo) throw new BadRequestException(motivo);
   }
 

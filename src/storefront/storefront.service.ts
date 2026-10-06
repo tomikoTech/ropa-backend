@@ -13,6 +13,10 @@ import {
   seVendeEnLinea,
 } from './se-vende-en-linea.js';
 import {
+  alcanzaParaElPedido,
+  textoDelVeredicto,
+} from './alcanza-para-el-pedido.js';
+import {
   Repository,
   In,
   LessThanOrEqual,
@@ -161,9 +165,11 @@ export class StorefrontService {
     const { products } = await this.getProductsDeTenant(settings.tenantId, {
       onlyAvailable: true,
     });
+    // En perfumería el carrito sabe cuántas quedan; en zapatería no.
+    const conExistencias = perfilDelNegocio(settings).tipo === 'perfumeria';
     const productos = products
       .filter((p) => esParaElPublico(p))
-      .map((p) => productoDelCatalogo(p));
+      .map((p) => productoDelCatalogo(p, { conExistencias }));
     return {
       tienda: {
         nombre: settings.storeName,
@@ -536,7 +542,14 @@ export class StorefrontService {
       },
       relations: ['category', 'variants'],
     });
-    if (!product || !seVendeEnLinea(product.category?.type)) {
+    if (
+      !product ||
+      !seVendeEnLinea(
+        product.category?.type,
+        product.basePrice,
+        product.variants.map((v) => v.priceOverride),
+      )
+    ) {
       throw new NotFoundException('Producto no encontrado');
     }
 
@@ -725,6 +738,31 @@ export class StorefrontService {
       lineCalcs.push(lineCalc);
 
       variantData.push({ variant, quantity: item.quantity, lineCalc });
+    }
+
+    // En perfumería el pedido se arma con lo que hay en la bodega de venta y
+    // nada entra sin precio: el cliente recibe el motivo exacto en vez de
+    // un pedido que la tienda tiene que recortar. Ver alcanza-para-el-pedido.
+    if (perfilDelNegocio(settings).tipo === 'perfumeria') {
+      const existencias = await this.stockRepo.find({
+        where: {
+          warehouseId,
+          variantId: In(variantData.map((d) => d.variant.id)),
+        },
+      });
+      const hay = new Map(existencias.map((s) => [s.variantId, s.quantity]));
+      const veredicto = alcanzaParaElPedido(
+        variantData.map((d) => ({
+          nombre: d.variant.product.displayName || d.variant.product.name,
+          pedida: d.quantity,
+          existencias: hay.get(d.variant.id) ?? 0,
+          precio: d.variant.priceOverride
+            ? Number(d.variant.priceOverride)
+            : Number(d.variant.product.basePrice),
+        })),
+      );
+      if (!veredicto.ok)
+        throw new BadRequestException(textoDelVeredicto(veredicto));
     }
 
     const saleTotals = this.taxService.calculateSaleTotals(lineCalcs);
