@@ -360,6 +360,29 @@ export class StoreSettingsService {
       anotado.disponible = Math.max(0, hay.get(it.variantId) ?? 0);
       anotado.sinPrecio = (Number(it.unitPrice) || 0) <= 0;
     }
+    await this.anotarVenta(orders);
+  }
+
+  /**
+   * Al pedido ya aceptado se le pega su factura (número y total): Andrea
+   * volvía al pedido y «está igual, no sé qué sigue», porque los renglones
+   * que ve son los que pidió el cliente y lo facturado vive en la venta.
+   */
+  private async anotarVenta(orders: EcommerceOrder[]): Promise<void> {
+    const ids = [...new Set(orders.map((o) => o.saleId).filter(Boolean))];
+    if (!ids.length) return;
+    const filas: { id: string; invoice_number: string; total: string }[] =
+      await this.stockRepository.manager.query(
+        `SELECT id, invoice_number, total FROM sales WHERE id = ANY($1::uuid[])`,
+        [ids],
+      );
+    const porId = new Map(filas.map((f) => [f.id, f]));
+    for (const o of orders) {
+      const f = o.saleId ? porId.get(o.saleId) : undefined;
+      (o as EcommerceOrder & { venta: unknown }).venta = f
+        ? { id: f.id, numeroFactura: f.invoice_number, total: Number(f.total) }
+        : null;
+    }
   }
 
   async updateOrderStatus(

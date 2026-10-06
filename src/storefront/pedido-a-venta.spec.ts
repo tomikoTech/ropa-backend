@@ -1,4 +1,5 @@
 import {
+  vencimientoPorDefecto,
   armarVentaDelPedido,
   mensajeDeAceptacion,
   mensajeDeRechazo,
@@ -184,5 +185,18 @@ describe('mensajes de WhatsApp', () => {
     expect(
       mensajeDeRechazo({ tienda: 'D', cliente: 'P', numeroPedido: 'PED-1' }),
     ).not.toContain('Motivo');
+  });
+});
+
+describe('vencimientoPorDefecto', () => {
+  it('usa los días de la tienda, y 30 si no hay', () => {
+    const hoy = new Date('2026-10-06T20:00:00.000Z'); // 3 pm en Colombia
+    expect(vencimientoPorDefecto(15, hoy)).toBe('2026-10-21');
+    expect(vencimientoPorDefecto(null, hoy)).toBe('2026-11-05');
+    expect(vencimientoPorDefecto(0, hoy)).toBe('2026-11-05');
+  });
+  it('cuenta el día en Colombia aunque en UTC ya sea mañana', () => {
+    const noche = new Date('2026-10-07T02:00:00.000Z'); // 9 pm del 6 en Colombia
+    expect(vencimientoPorDefecto(30, noche)).toBe('2026-11-05');
   });
 });

@@ -228,3 +228,26 @@ export function mensajeDeRechazo(p: {
     .filter(Boolean)
     .join('\n');
 }
+
+/**
+ * Cuándo vence el crédito si nadie puso fecha: los días que la tienda
+ * configuró, o 30. «Que en la fecha que sea automático, como en la
+ * facturación» (Andrea): el POS la propone sola y el pedido no la proponía.
+ * Devuelve el día de calendario (YYYY-MM-DD), sin horas.
+ */
+export function vencimientoPorDefecto(
+  diasConfigurados: number | null | undefined,
+  hoy: Date = new Date(),
+): string {
+  const dias = Number(diasConfigurados);
+  const plazo = Number.isFinite(dias) && dias > 0 ? Math.round(dias) : 30;
+  const f = new Date(hoy.getTime() + plazo * 24 * 60 * 60 * 1000);
+  // Día en Colombia: el servidor corre en UTC y a las 7 pm ya es «mañana».
+  const partes = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Bogota',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(f);
+  return partes;
+}

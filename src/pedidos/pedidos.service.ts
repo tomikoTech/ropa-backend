@@ -17,6 +17,7 @@ import { PosService } from '../pos/pos.service.js';
 import { DocumentosService } from '../documentos/documentos.service.js';
 import {
   armarVentaDelPedido,
+  vencimientoPorDefecto,
   mensajeDeAceptacion,
   mensajeDeRechazo,
   type Agregado,
@@ -200,8 +201,13 @@ export class PedidosService {
         warehouseId,
         items: armada.renglones,
         payments: [{ method: metodo, amount: total }],
+        // Sin fecha, vence a los días que la tienda configuró (o 30): el POS
+        // la propone sola y aquí fallaba con «requieren fecha de vencimiento».
         creditDueDate:
-          metodo === PaymentMethod.CREDITO ? dto.creditDueDate : undefined,
+          metodo === PaymentMethod.CREDITO
+            ? dto.creditDueDate ||
+              vencimientoPorDefecto(settings?.creditDefaultDays)
+            : undefined,
         notes: [`Pedido ${pedido.orderNumber}`, dto.notas]
           .filter(Boolean)
           .join(' · '),
