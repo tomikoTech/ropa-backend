@@ -45,6 +45,11 @@ export class UpdateSaleItemDto {
   @Min(0)
   unitPrice: number;
 
+  /** Precio acordado con el cliente: va también como lista, no se tacha. */
+  @IsBoolean()
+  @IsOptional()
+  precioPactado?: boolean;
+
   /**
    * La línea va con el **precio único** de la venta: el mínimo del producto no
    * aplica. Igual que al crearla; si no, corregir una factura hecha con precio

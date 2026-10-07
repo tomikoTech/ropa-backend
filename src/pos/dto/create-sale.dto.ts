@@ -72,6 +72,16 @@ export class SaleItemDto {
   @IsBoolean()
   @IsOptional()
   precioUnico?: boolean;
+
+  /**
+   * El precio que se **acordó** con el cliente («a Yum Yum le dieron precio
+   * de 50.000»): se guarda también como precio de lista, así la factura no
+   * lo tacha ni lo cuenta como rebaja. Sin esto, FE-000815 decía
+   * «Descuento 24,2 %» con un 20 % general.
+   */
+  @IsBoolean()
+  @IsOptional()
+  precioPactado?: boolean;
 }
 
 export class PaymentDto {

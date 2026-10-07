@@ -120,6 +120,14 @@ export class UpdateStoreSettingsDto {
   invoiceFooterNote?: string;
 
   @ApiPropertyOptional({
+    description:
+      'Imprimir la nota al pie solo en facturas sin descuento (pronto pago).',
+  })
+  @IsOptional()
+  @IsBoolean()
+  notaAlPieSoloSinDescuento?: boolean;
+
+  @ApiPropertyOptional({
     example: 'Esta factura tiene fecha de vencimiento a 30 días.',
   })
   @IsOptional()

@@ -114,8 +114,18 @@ describe('resumenDelDescuento', () => {
   it('el POS guarda en discount_amount la suma de las líneas: no se cuenta dos veces (FE-000810)', () => {
     const r = resumenDelDescuento(
       [
-        { cantidad: 8, precioUnitario: 38_000, precioDeLista: 38_000, descuentoPorcentaje: 20 },
-        { cantidad: 6, precioUnitario: 62_400, precioDeLista: 62_400, descuentoPorcentaje: 20 },
+        {
+          cantidad: 8,
+          precioUnitario: 38_000,
+          precioDeLista: 38_000,
+          descuentoPorcentaje: 20,
+        },
+        {
+          cantidad: 6,
+          precioUnitario: 62_400,
+          precioDeLista: 62_400,
+          descuentoPorcentaje: 20,
+        },
       ],
       (8 * 38_000 + 6 * 62_400) * 0.2,
     );
@@ -124,6 +134,50 @@ describe('resumenDelDescuento', () => {
     expect(r.descuentoGeneral).toBe(0);
     expect(r.descuento).toBe(135_680);
     expect(r.porcentaje).toBe(20);
+  });
+
+  it('un precio pactado no diluye el porcentaje (FE-000815: 20 % y Yum Yum a 50.000)', () => {
+    const al20 = (precio: number) => ({
+      cantidad: 6,
+      precioUnitario: precio,
+      precioDeLista: precio,
+      descuentoPorcentaje: 20,
+    });
+    const r = resumenDelDescuento(
+      [
+        al20(40_000),
+        al20(28_900),
+        al20(30_000),
+        al20(35_000),
+        al20(30_000),
+        al20(33_400),
+        // Pactado: la venta guardó 50.000 también como lista.
+        {
+          cantidad: 16,
+          precioUnitario: 50_000,
+          precioDeLista: 50_000,
+          descuentoPorcentaje: 0,
+        },
+      ],
+      236_760,
+    );
+    expect(r.subtotalDeLista).toBe(6 * 197_300 + 16 * 50_000);
+    expect(r.descuento).toBe(236_760);
+    expect(r.descuentoGeneral).toBe(0);
+    expect(r.porcentaje).toBe(20);
+    expect(rotuloDelDescuento(r)).toBe('Descuento 20 %');
+    expect(r.frase).toBe('Se te aplicó un descuento total de $236.760 (20 %)');
+  });
+
+  it('con porcentajes distintos por renglón, el del pie vuelve a ser el global', () => {
+    const r = resumenDelDescuento(
+      [
+        { cantidad: 1, precioUnitario: 100_000, descuentoPorcentaje: 20 },
+        { cantidad: 1, precioUnitario: 100_000, descuentoPorcentaje: 10 },
+      ],
+      30_000,
+    );
+    expect(r.porcentaje).toBe(15);
   });
 
   it('sin descuento no hay frase ni porcentaje', () => {

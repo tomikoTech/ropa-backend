@@ -398,6 +398,10 @@ describe('Cartera completa, recibos y pedidos (e2e)', () => {
       expect(porVariante.size).toBe(3);
       expect(Number(porVariante.get(yumYum)!.unitPrice)).toBe(50000);
       expect(Number(porVariante.get(yumYum)!.discountPercent)).toBe(0);
+      // Precio pactado: la lista también queda en 50.000 (no se tacha).
+      expect(
+        Number((porVariante.get(yumYum) as { listUnitPrice?: string }).listUnitPrice),
+      ).toBe(50000);
       expect(Number(porVariante.get(blush)!.discountPercent)).toBe(20);
       expect(porVariante.get(blush)!.quantity).toBe(2);
       expect(Number(porVariante.get(locion)!.discountPercent)).toBe(20);

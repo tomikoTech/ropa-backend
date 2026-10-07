@@ -57,6 +57,38 @@ const paginas = (b: Buffer) =>
   (b.toString('latin1').match(/\/Type \/Page[^s]/g) ?? []).length;
 
 describe('pdfDeFactura', () => {
+  it('la nota al pie se puede reservar para facturas sin descuento', async () => {
+    const conDescuento = {
+      ...factura(2),
+      renglones: [
+        {
+          ...renglon(1),
+          precioDeLista: 38_900,
+          descuentoPorcentaje: 20,
+          total: 31_120,
+        },
+        {
+          ...renglon(2),
+          precioDeLista: 38_900,
+          descuentoPorcentaje: 20,
+          total: 31_120,
+        },
+      ],
+      descuento: 15_560,
+      total: 62_240,
+      pagado: 62_240,
+    };
+    const texto = async (t: DatosDeLaTienda, f: typeof conDescuento) =>
+      textoPorPagina(await pdfDeFactura(t, f, { comprimir: false })).join(' ');
+    // Por defecto sale siempre.
+    expect(await texto(tienda, conDescuento)).toContain('Garantía de 30 días');
+    const reservada = { ...tienda, notaAlPieSoloSinDescuento: true };
+    expect(await texto(reservada, conDescuento)).not.toContain(
+      'Garantía de 30 días',
+    );
+    expect(await texto(reservada, factura(2))).toContain('Garantía de 30 días');
+  });
+
   it('el total nunca queda partido entre dos hojas (la foto de Andrea, 6 oct 2026)', async () => {
     // Renglones como los de Distri Amber: con descuento (más altos) y nota.
     const conDescuento = (n: number) => ({
@@ -89,12 +121,21 @@ describe('pdfDeFactura', () => {
       const donde = (t: string) => hojas.findIndex((h) => h.includes(t)) + 1;
       // «TOTAL» a secas también casa con el encabezado «TOTAL PRODUCTOS»: se
       // busca el valor, que solo está en la línea del total y en el saldo.
-      const totales = ['Subtotal', 'Descuento', plata(sub * 0.8), 'Saldo pendiente', 'Se te aplic'].map(donde);
+      const totales = [
+        'Subtotal',
+        'Descuento',
+        plata(sub * 0.8),
+        'Saldo pendiente',
+        'Se te aplic',
+      ].map(donde);
       expect({ n, totales }).toEqual({ n, totales: Array(5).fill(totales[0]) });
       expect(totales[0]).toBeGreaterThan(0);
       // Y sin hojas de más (antes, 18 renglones daban cuatro hojas): el
       // bloque de totales pasa entero a la hoja 2 desde los 14 renglones.
-      expect({ n, hojas: hojas.length }).toEqual({ n, hojas: n <= 13 ? 1 : n <= 38 ? 2 : 3 });
+      expect({ n, hojas: hojas.length }).toEqual({
+        n,
+        hojas: n <= 13 ? 1 : n <= 38 ? 2 : 3,
+      });
       expect(donde('¡Gracias por su compra!')).toBe(hojas.length);
     }
   });

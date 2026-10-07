@@ -52,6 +52,8 @@ export interface RenglonDeVenta {
   quantity: number;
   unitPrice: number;
   discountPercent: number;
+  /** El precio se puso a mano: es el acordado, no una rebaja sobre la lista. */
+  precioPactado?: boolean;
 }
 
 export interface VentaArmada {
@@ -132,6 +134,7 @@ export function armarVentaDelPedido(
       quantity: aceptada,
       unitPrice: precio.precio,
       discountPercent: fijo ? 0 : descuento,
+      ...(a.precios?.[r.itemId] != null ? { precioPactado: true } : {}),
     });
   }
   // Lo agregado no se compara con lo pedido (es extra); el inventario lo
@@ -157,6 +160,7 @@ export function armarVentaDelPedido(
       quantity: cantidad,
       unitPrice: precio.precio,
       discountPercent: g.sinDescuento ? 0 : descuento,
+      ...(g.precioUnitario != null ? { precioPactado: true } : {}),
     });
   }
   if (!renglones.length)

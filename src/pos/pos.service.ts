@@ -203,6 +203,8 @@ export class PosService {
           quantity: number;
           discountPercent: number;
           lineCalc: LineCalculation;
+          /** Precio acordado: va también como precio de lista (no se tacha). */
+          precioPactado?: boolean;
           /** Bulto etiquetado del que salió la línea, si vino de escanearlo. */
           stockUnitId?: string;
           /** Las cajas que el carrito anunció; una preferencia, no un requisito. */
@@ -438,6 +440,7 @@ export class PosService {
             quantity: item.quantity,
             discountPercent,
             lineCalc,
+            precioPactado: item.precioPactado === true,
             stockUnitId: item.stockUnitId,
             preferredStockUnitIds: item.preferredStockUnitIds,
             promoter: promoter ?? null,
@@ -648,8 +651,10 @@ export class PosService {
             // Precio de lista (catálogo) al momento de la venta: override de la
             // variante o precio base. Snapshot para el "descuento incluido" de
             // la factura. null si no hay precio de lista → no se calcula.
-            listUnitPrice:
-              data.variant.priceOverride != null
+            // Un precio pactado es el precio: no hay lista que tachar.
+            listUnitPrice: data.precioPactado
+              ? data.lineCalc.unitPrice
+              : data.variant.priceOverride != null
                 ? Number(data.variant.priceOverride)
                 : Number(data.variant.product.basePrice) || null,
             unitCost,
@@ -1766,6 +1771,8 @@ export class PosService {
               );
             }
             pair.previous.unitPrice = Number(pair.input.unitPrice);
+            if (pair.input.precioPactado)
+              pair.previous.listUnitPrice = Number(pair.input.unitPrice);
             if (pair.input.discountPercent !== undefined) {
               pair.previous.discountPercent = Number(
                 pair.input.discountPercent,
@@ -1978,8 +1985,10 @@ export class PosService {
                     : Number(variant.product.costPrice) || 0,
                 // Precio de lista: conservar el snapshot si la línea ya existía;
                 // si es nueva, el del catálogo (override o base).
-                listUnitPrice:
-                  previous?.listUnitPrice != null
+                listUnitPrice: (item as { precioPactado?: boolean })
+                  .precioPactado
+                  ? unitPrice
+                  : previous?.listUnitPrice != null
                     ? Number(previous.listUnitPrice)
                     : variant.priceOverride != null
                       ? Number(variant.priceOverride)

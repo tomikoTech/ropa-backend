@@ -336,6 +336,11 @@ export class StoreSettings extends TenantAwareEntity {
   @Column({ name: 'invoice_footer_note', type: 'text', nullable: true })
   invoiceFooterNote: string | null;
 
+  // La nota al pie solo cuando la factura NO lleva descuento: sirve para
+  // «sujeta a descuento a los 30 días», que con el descuento aplicado sobra.
+  @Column({ name: 'nota_al_pie_solo_sin_descuento', default: false })
+  notaAlPieSoloSinDescuento: boolean;
+
   // Nota que SIEMPRE se muestra en la factura (p. ej. "vencimiento a 30 días").
   @Column({ name: 'invoice_due_note', type: 'text', nullable: true })
   invoiceDueNote: string | null;

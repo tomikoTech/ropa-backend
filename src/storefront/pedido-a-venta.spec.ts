@@ -64,7 +64,13 @@ describe('armarVentaDelPedido', () => {
     expect(v.error).toBeUndefined();
     expect(v.renglones).toEqual([
       { variantId: 'v1', quantity: 6, unitPrice: 40_000, discountPercent: 20 },
-      { variantId: 'v2', quantity: 2, unitPrice: 50_000, discountPercent: 0 },
+      {
+        variantId: 'v2',
+        quantity: 2,
+        unitPrice: 50_000,
+        discountPercent: 0,
+        precioPactado: true,
+      },
     ]);
     expect(v.aPrecioFijo).toEqual([{ nombre: 'Yara', precio: 50_000 }]);
     // Sin descuento general no hay nada que contar como «fijo».
@@ -106,7 +112,13 @@ describe('armarVentaDelPedido', () => {
     expect(v.error).toBeUndefined();
     expect(v.renglones.slice(2)).toEqual([
       { variantId: 'v3', quantity: 6, unitPrice: 35_000, discountPercent: 20 },
-      { variantId: 'v4', quantity: 1, unitPrice: 50_000, discountPercent: 0 },
+      {
+        variantId: 'v4',
+        quantity: 1,
+        unitPrice: 50_000,
+        discountPercent: 0,
+        precioPactado: true,
+      },
     ]);
     expect(v.agregados).toEqual([
       { nombre: 'Good Girl Blush', cantidad: 6 },
@@ -198,5 +210,51 @@ describe('vencimientoPorDefecto', () => {
   it('cuenta el día en Colombia aunque en UTC ya sea mañana', () => {
     const noche = new Date('2026-10-07T02:00:00.000Z'); // 9 pm del 6 en Colombia
     expect(vencimientoPorDefecto(30, noche)).toBe('2026-11-05');
+  });
+});
+
+describe('precio pactado', () => {
+  it('un precio puesto a mano sale como pactado; el de lista no', () => {
+    const pedido = [
+      {
+        itemId: 'i1',
+        variantId: 'v1',
+        nombre: 'Yum Yum',
+        cantidadPedida: 1,
+        precioUnitario: 70_000,
+      },
+      {
+        itemId: 'i2',
+        variantId: 'v2',
+        nombre: 'Light Blue',
+        cantidadPedida: 1,
+        precioUnitario: 30_000,
+      },
+    ];
+    const r = armarVentaDelPedido(pedido, {
+      precios: { i1: 50_000 },
+      sinDescuento: ['i1'],
+      descuentoPorcentaje: 20,
+    });
+    const porVariante = new Map(r.renglones.map((x) => [x.variantId, x]));
+    expect(porVariante.get('v1')?.precioPactado).toBe(true);
+    expect(porVariante.get('v2')?.precioPactado).toBeUndefined();
+  });
+  it('un agregado con precio a mano también es pactado', () => {
+    const r = armarVentaDelPedido([], {
+      agregados: [
+        {
+          variantId: 'v9',
+          cantidad: 2,
+          precioUnitario: 45_000,
+          nombre: 'Blush',
+          precioDeLista: 35_000,
+        },
+        { variantId: 'v8', cantidad: 1, nombre: 'Otro', precioDeLista: 20_000 },
+      ],
+    });
+    const porVariante = new Map(r.renglones.map((x) => [x.variantId, x]));
+    expect(porVariante.get('v9')?.precioPactado).toBe(true);
+    expect(porVariante.get('v8')?.precioPactado).toBeUndefined();
   });
 });

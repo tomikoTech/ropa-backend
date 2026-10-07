@@ -260,6 +260,7 @@ export class DocumentosService {
       whatsapp: s?.whatsappNumber ?? null,
       lema: s?.invoiceTagline ?? null,
       notaAlPie: s?.invoiceFooterNote ?? null,
+      notaAlPieSoloSinDescuento: s?.notaAlPieSoloSinDescuento ?? false,
       notaDeVencimiento: s?.invoiceDueNote ?? null,
       agradecimiento: s?.invoiceThankYouNote ?? null,
       muestraCodigos: s?.invoiceShowCodes ?? true,

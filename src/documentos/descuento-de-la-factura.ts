@@ -94,18 +94,31 @@ export function resumenDelDescuento(
 ): ResumenDelDescuento {
   let subtotalDeLista = 0;
   let descuentoDeRenglones = 0;
+  const porcentajesDeLinea = new Set<number>();
   for (const r of renglones) {
     const d = descuentoDelRenglon(r);
     subtotalDeLista += d.lista * Math.max(0, Number(r.cantidad) || 0);
     descuentoDeRenglones += d.ahorro;
+    if (d.tieneDescuento) porcentajesDeLinea.add(d.porcentaje);
   }
   // Lo que la venta rebajó en total; si lo explican los renglones, no hay
   // descuento general aparte.
   const rebajaTotal = Math.max(0, entero(descuentoGeneral ?? 0));
   const general = Math.max(0, rebajaTotal - descuentoDeRenglones);
   const descuento = descuentoDeRenglones + general;
+  // El porcentaje que se **aplicó**: si toda rebaja fue el mismo %, es ese.
+  // Un renglón a precio pactado (sin rebaja) no lo diluye: FE-000815 decía
+  // «24,2 %» con un 20 % general porque Yum Yum iba a 50.000 sobre 70.000.
+  const unico =
+    general === 0 && porcentajesDeLinea.size === 1
+      ? [...porcentajesDeLinea][0]
+      : null;
   const porcentaje =
-    subtotalDeLista > 0 ? unDecimal((descuento / subtotalDeLista) * 100) : 0;
+    unico != null && unico > 0
+      ? unico
+      : subtotalDeLista > 0
+        ? unDecimal((descuento / subtotalDeLista) * 100)
+        : 0;
   return {
     subtotalDeLista,
     descuento,

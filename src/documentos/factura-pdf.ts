@@ -35,6 +35,8 @@ export interface DatosDeLaTienda {
   lema?: string | null;
   /** «Garantía de 30 días…», siempre al pie. */
   notaAlPie?: string | null;
+  /** La nota al pie solo si la factura no lleva descuento (pronto pago). */
+  notaAlPieSoloSinDescuento?: boolean;
   /** Solo si hay saldo: «Pague antes del…». */
   notaDeVencimiento?: string | null;
   /** «¡Gracias por su compra!». */
@@ -257,10 +259,15 @@ export function pdfDeFactura(
       // escribirlo: uno con descuento o con nombre largo es más alto.
       const altoDelNombre =
         doc.fontSize(9).heightOfString(r.nombre, { width: 340 }) +
-        (detalle ? doc.fontSize(7.5).heightOfString(detalle, { width: 340 }) : 0);
+        (detalle
+          ? doc.fontSize(7.5).heightOfString(detalle, { width: 340 })
+          : 0);
       doc.fontSize(9);
       const altoDelRenglon =
-        Math.max(altoDelNombre, descuentoDelRenglon(r).tieneDescuento ? 22 : 12) + 4;
+        Math.max(
+          altoDelNombre,
+          descuentoDelRenglon(r).tieneDescuento ? 22 : 12,
+        ) + 4;
       if (y + altoDelRenglon > FONDO) {
         doc.addPage();
         y = filaEncabezado(MARGEN);
@@ -336,7 +343,10 @@ export function pdfDeFactura(
       (factura.pagado > 0 && factura.saldo > 0 ? 1 : 0) +
       (factura.saldo > 0 ? 1 : 0);
     const altoDeLaFrase = resumen.frase
-      ? doc.font('Helvetica-Bold').fontSize(9).heightOfString(resumen.frase, { width: ANCHO_UTIL }) + 6
+      ? doc
+          .font('Helvetica-Bold')
+          .fontSize(9)
+          .heightOfString(resumen.frase, { width: ANCHO_UTIL }) + 6
       : 0;
     const altoDeTotales = 6 + lineasDeTotales * 16 + 8 + altoDeLaFrase;
     if (y + altoDeTotales > FONDO) {
@@ -413,7 +423,11 @@ export function pdfDeFactura(
     if (factura.notas) nota(factura.notas);
     if (factura.saldo > 0 && tienda.notaDeVencimiento)
       nota(tienda.notaDeVencimiento);
-    if (tienda.notaAlPie) nota(tienda.notaAlPie);
+    // «Sujeta a descuento a los 30 días» con el descuento ya aplicado sobra
+    // (Andrea): la tienda decide si la nota va solo en facturas sin rebaja.
+    const notaSobra =
+      tienda.notaAlPieSoloSinDescuento === true && resumen.descuento > 0;
+    if (tienda.notaAlPie && !notaSobra) nota(tienda.notaAlPie);
     if (tienda.agradecimiento) nota(tienda.agradecimiento, true, 4);
 
     doc.end();
