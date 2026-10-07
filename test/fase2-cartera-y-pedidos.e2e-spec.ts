@@ -420,4 +420,14 @@ describe('Cartera completa, recibos y pedidos (e2e)', () => {
       );
     }, 60000);
   });
+
+  it('el ajuste «nota al pie solo sin descuento» se guarda', async () => {
+    await request(app.getHttpServer())
+      .patch('/api/store-settings')
+      .set(h())
+      .send({ notaAlPieSoloSinDescuento: true })
+      .expect(200);
+    const s = await request(app.getHttpServer()).get('/api/store-settings').set(h()).expect(200);
+    expect(s.body.notaAlPieSoloSinDescuento).toBe(true);
+  });
 });

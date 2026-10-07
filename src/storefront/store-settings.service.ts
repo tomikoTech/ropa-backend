@@ -164,6 +164,8 @@ export class StoreSettingsService {
       settings.descuentosPresets = [...new Set(dto.descuentosPresets)].sort(
         (a, b) => a - b,
       );
+    if (dto.notaAlPieSoloSinDescuento !== undefined)
+      settings.notaAlPieSoloSinDescuento = dto.notaAlPieSoloSinDescuento;
     if (dto.tesoreriaDesde !== undefined)
       // Llega como día (`YYYY-MM-DD`) y se guarda como día: nunca pasa por
       // `new Date()`, que lo correría al 30 de septiembre en Colombia.
