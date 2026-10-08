@@ -259,11 +259,14 @@ describe('Cartera completa, recibos y pedidos (e2e)', () => {
           .set(hp())
           .expect(200)
       ).body.items as { id: string }[];
-      await request(app.getHttpServer())
+      // Más de lo que hay sí se rechaza (la venta frena el stock); más de lo
+      // pedido ya no: «quiero agregar 10 dúo postre y no me deja más de 1».
+      const mucho = await request(app.getHttpServer())
         .post(`/api/store-settings/orders/${pedido.orderId}/aceptar`)
         .set(hp())
-        .send({ cantidades: { [items[0].id]: 7 } })
+        .send({ cantidades: { [items[0].id]: 999 } })
         .expect(400);
+      expect(mucho.body.message).toMatch(/insuficiente/i);
       const r = await request(app.getHttpServer())
         .post(`/api/store-settings/orders/${pedido.orderId}/aceptar`)
         .set(hp())
