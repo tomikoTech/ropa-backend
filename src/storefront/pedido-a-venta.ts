@@ -112,12 +112,10 @@ export function armarVentaDelPedido(
         ...vacio,
         error: `«${r.nombre}»: la cantidad no puede ser negativa.`,
       };
-    if (aceptada > pedida)
-      return {
-        ...vacio,
-        error: `«${r.nombre}»: pidió ${pedida} y se le quieren mandar ${aceptada}.`,
-      };
-    if (aceptada < pedida)
+    // Más de lo pedido también vale: «quiero agregar 10 dúo postre y no me
+    // deja más de 1» (Andrea). El cliente lo ve en el WhatsApp como cambio;
+    // el stock lo frena la venta.
+    if (aceptada !== pedida)
       recortes.push({ nombre: r.nombre, pedida, aceptada });
     if (aceptada === 0) continue;
     const precio = precioDelRenglon(
@@ -196,9 +194,16 @@ export function mensajeDeAceptacion(p: {
     `Hola ${p.cliente}, soy ${p.tienda}. Tu pedido ${p.numeroPedido} quedó confirmado.`,
     `Factura ${p.numeroFactura}: ${plata(p.total)}${p.descuentoPorcentaje > 0 ? ` (con ${p.descuentoPorcentaje} % de descuento)` : ''}.`,
   ];
-  if (p.recortes.length) {
+  const menos = p.recortes.filter((r) => r.aceptada < r.pedida);
+  const mas = p.recortes.filter((r) => r.aceptada > r.pedida);
+  if (menos.length) {
     lineas.push('', 'Ojo, de esto no pudimos mandarte todo:');
-    for (const r of p.recortes)
+    for (const r of menos)
+      lineas.push(`- ${r.nombre}: pediste ${r.pedida}, van ${r.aceptada}`);
+  }
+  if (mas.length) {
+    lineas.push('', 'Y de esto va más de lo que pediste:');
+    for (const r of mas)
       lineas.push(`- ${r.nombre}: pediste ${r.pedida}, van ${r.aceptada}`);
   }
   if (p.agregados?.length) {

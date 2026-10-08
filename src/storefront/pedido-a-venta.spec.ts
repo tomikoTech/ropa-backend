@@ -42,10 +42,14 @@ describe('armarVentaDelPedido', () => {
     ]);
   });
 
-  it('no se puede mandar más de lo pedido, ni dejar todo en cero, ni descuento fuera de rango', () => {
+  it('se puede mandar más de lo pedido (se avisa), pero no dejar todo en cero ni descuento fuera de rango', () => {
+    const mas = armarVentaDelPedido(pedido, { cantidades: { i1: 10 } });
+    expect(mas.error).toBeUndefined();
+    expect(mas.renglones[0].quantity).toBe(10);
+    expect(mas.recortes).toEqual([{ nombre: expect.any(String), pedida: 6, aceptada: 10 }]);
     expect(
-      armarVentaDelPedido(pedido, { cantidades: { i1: 7 } }).error,
-    ).toContain('pidió 6');
+      mensajeDeAceptacion({ tienda: 'T', cliente: 'C', numeroPedido: 'P', numeroFactura: 'F', total: 1, descuentoPorcentaje: 0, recortes: mas.recortes }),
+    ).toContain('va más de lo que pediste');
     expect(
       armarVentaDelPedido(pedido, { cantidades: { i1: 0, i2: 0 } }).error,
     ).toContain('rechaza');
