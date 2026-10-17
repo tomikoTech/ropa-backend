@@ -11,7 +11,8 @@ import {
   ValidateNested,
   IsInt,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
+import { limpiarNombre } from './limpiar-nombre.js';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Gender } from '../../common/enums/gender.enum.js';
 import { ProductStatus } from '../../common/enums/product-status.enum.js';
@@ -47,6 +48,7 @@ export class UpdateVariantDto {
 export class UpdateProductDto {
   @ApiPropertyOptional({ example: 'Camiseta Polo Premium' })
   @IsOptional()
+  @Transform(limpiarNombre)
   @IsString()
   name?: string;
 

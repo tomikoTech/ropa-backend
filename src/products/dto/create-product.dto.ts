@@ -12,7 +12,8 @@ import {
   ValidateIf,
   IsInt,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
+import { limpiarNombre } from './limpiar-nombre.js';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Gender } from '../../common/enums/gender.enum.js';
 import { RecipeItemDto, UsedInItemDto } from './recipe-item.dto.js';
@@ -36,6 +37,7 @@ export class CreateVariantDto {
 
 export class CreateProductDto {
   @ApiProperty({ example: 'Camiseta Polo Classic' })
+  @Transform(limpiarNombre)
   @IsString()
   @IsNotEmpty()
   name: string;
