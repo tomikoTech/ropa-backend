@@ -1,4 +1,11 @@
-import { Body, Controller, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Post,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PedidosService } from './pedidos.service.js';
 import { AceptarPedidoDto, RechazarPedidoDto } from './dto/pedidos.dto.js';
@@ -11,6 +18,18 @@ import { UserId } from '../common/decorators/user-id.decorator.js';
 @Controller('store-settings/orders')
 export class PedidosController {
   constructor(private readonly pedidos: PedidosService) {}
+
+  @Get(':id/cliente')
+  @ApiOperation({
+    summary:
+      'Con qué cliente se facturaría el pedido (por teléfono o nombre) y los parecidos',
+  })
+  cliente(
+    @Param('id', ParseUUIDPipe) id: string,
+    @TenantId() tenantId: string,
+  ) {
+    return this.pedidos.clienteSugerido(id, tenantId);
+  }
 
   @Post(':id/aceptar')
   @ApiOperation({

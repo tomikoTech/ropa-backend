@@ -101,6 +101,21 @@ export class AceptarPedidoDto {
   @IsString()
   @MaxLength(300)
   notas?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'El cliente al que se factura, elegido a mano. Si no tiene teléfono, se le guarda el del pedido.',
+  })
+  @IsOptional()
+  @IsUUID()
+  clienteId?: string;
+
+  @ApiPropertyOptional({
+    description: 'No es ninguno de los clientes que hay: crear uno nuevo',
+  })
+  @IsOptional()
+  @IsBoolean()
+  clienteNuevo?: boolean;
 }
 
 export class RechazarPedidoDto {

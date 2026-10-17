@@ -170,8 +170,9 @@ export class DocumentosService {
   async enlaceDeEstadoDeCuenta(
     clientId: string,
     tenantId: string,
+    opts?: { soloPendientes?: boolean },
   ): Promise<{ url: string }> {
-    const estado = await this.pos.getClientStatement(clientId, tenantId);
+    const estado = await this.pos.getClientStatement(clientId, tenantId, opts);
     if (!estado.client) throw new NotFoundException('Cliente no encontrado');
     const tienda = await this.datosDeLaTienda(tenantId);
 
@@ -200,10 +201,14 @@ export class DocumentosService {
       totalFacturado: estado.totals.totalCredit,
       totalPagado: estado.totals.totalPaid,
       deuda: estado.totals.totalDebt,
+      soloPendientes: estado.soloPendientes,
     });
 
+    // Nombre aparte: si no, mandar el de cobro pisaba el enlace del completo
+    // que ya se había mandado a ese mismo cliente.
+    const archivo = estado.soloPendientes ? `${clientId}-pendiente` : clientId;
     return {
-      url: await this.subir(tenantId, `estados-de-cuenta/${clientId}.pdf`, pdf),
+      url: await this.subir(tenantId, `estados-de-cuenta/${archivo}.pdf`, pdf),
     };
   }
 

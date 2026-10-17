@@ -1,4 +1,4 @@
-import { Body, Controller, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { Body, Controller, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { TenantId } from '../common/decorators/tenant-id.decorator.js';
 import { DocumentosService } from './documentos.service.js';
@@ -44,7 +44,11 @@ export class DocumentosController {
   estadoDeCuenta(
     @Param('clientId', ParseUUIDPipe) clientId: string,
     @TenantId() tenantId: string,
+    // `?soloPendientes=1`: el de cobro, solo con lo que debe.
+    @Query('soloPendientes') soloPendientes?: string,
   ) {
-    return this.documentos.enlaceDeEstadoDeCuenta(clientId, tenantId);
+    return this.documentos.enlaceDeEstadoDeCuenta(clientId, tenantId, {
+      soloPendientes: soloPendientes === '1' || soloPendientes === 'true',
+    });
   }
 }

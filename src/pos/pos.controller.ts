@@ -44,6 +44,9 @@ import { TenantId } from '../common/decorators/tenant-id.decorator.js';
 import { UserId } from '../common/decorators/user-id.decorator.js';
 import { SaleStatus } from '../common/enums/sale-status.enum.js';
 
+/** Un interruptor por query string: `?x=1` o `?x=true`. */
+const esVerdadero = (v?: string) => v === '1' || v === 'true';
+
 @ApiTags('pos')
 @ApiBearerAuth()
 @Controller('pos')
@@ -338,11 +341,19 @@ export class PosController {
 
   @Get('clients/:clientId/statement')
   @ApiOperation({ summary: 'Estado de cuenta del cliente' })
+  @ApiQuery({
+    name: 'soloPendientes',
+    required: false,
+    description: '1 = solo las facturas con saldo (lo que debe)',
+  })
   getClientStatement(
     @Param('clientId', ParseUUIDPipe) clientId: string,
     @TenantId() tenantId: string,
+    @Query('soloPendientes') soloPendientes?: string,
   ) {
-    return this.posService.getClientStatement(clientId, tenantId);
+    return this.posService.getClientStatement(clientId, tenantId, {
+      soloPendientes: esVerdadero(soloPendientes),
+    });
   }
 
   @Get('clients/:clientId/statement/export')
@@ -352,8 +363,11 @@ export class PosController {
     @TenantId() tenantId: string,
     @Res() res: Response,
     @Query('format') format?: string,
+    @Query('soloPendientes') soloPendientes?: string,
   ) {
-    const st = await this.posService.getClientStatement(clientId, tenantId);
+    const st = await this.posService.getClientStatement(clientId, tenantId, {
+      soloPendientes: esVerdadero(soloPendientes),
+    });
     const name = st.client?.name || 'cliente';
     const wb = buildStatementWorkbook({
       kind: 'client',
@@ -392,11 +406,12 @@ export class PosController {
     });
 
     const safe = name.replace(/[^a-zA-Z0-9]/g, '_');
+    const archivo = `${st.soloPendientes ? 'saldo-pendiente' : 'estado-cuenta'}-${safe}`;
     if (format === 'csv') {
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader(
         'Content-Disposition',
-        `attachment; filename=estado-cuenta-${safe}.csv`,
+        `attachment; filename=${archivo}.csv`,
       );
       res.write('﻿');
       await wb.csv.write(res);
@@ -409,7 +424,7 @@ export class PosController {
     );
     res.setHeader(
       'Content-Disposition',
-      `attachment; filename=estado-cuenta-${safe}.xlsx`,
+      `attachment; filename=${archivo}.xlsx`,
     );
     await wb.xlsx.write(res);
     res.end();

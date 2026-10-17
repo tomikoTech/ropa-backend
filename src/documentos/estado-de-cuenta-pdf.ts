@@ -43,6 +43,8 @@ export interface DatosDelEstadoDeCuenta {
   totalFacturado: number;
   totalPagado: number;
   deuda: number;
+  /** Solo trae facturas con saldo: el título lo dice para que nadie busque las pagadas. */
+  soloPendientes?: boolean;
 }
 
 const fecha = (iso: string): string => {
@@ -74,7 +76,10 @@ export function pdfDeEstadoDeCuenta(
     const doc = new PDFDocument({
       size: 'LETTER',
       margin: MARGEN,
-      info: { Title: `Estado de cuenta · ${estado.cliente}`, Author: tienda.nombre },
+      info: {
+        Title: `${estado.soloPendientes ? 'Facturas pendientes' : 'Estado de cuenta'} · ${estado.cliente}`,
+        Author: tienda.nombre,
+      },
     });
     const partes: Buffer[] = [];
     doc.on('data', (c: Buffer) => partes.push(c));
@@ -99,7 +104,10 @@ export function pdfDeEstadoDeCuenta(
 
     doc.moveTo(MARGEN, y).lineTo(ANCHO_CARTA - MARGEN, y).strokeColor('#bbb').stroke();
     y += 10;
-    doc.font('Helvetica-Bold').fontSize(13).text('Estado de cuenta', MARGEN, y);
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(13)
+      .text(estado.soloPendientes ? 'Facturas pendientes de pago' : 'Estado de cuenta', MARGEN, y);
     doc.font('Helvetica').fontSize(9).fillColor('#444');
     doc.text(`Al ${fecha(estado.generadoEl)}`, ANCHO_CARTA - MARGEN - 200, y, {
       width: 200,

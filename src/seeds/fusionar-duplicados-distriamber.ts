@@ -16,7 +16,9 @@
  *     node dist/seeds/fusionar-duplicados-distriamber.js
  *     MODE=apply node dist/seeds/fusionar-duplicados-distriamber.js
  *
- * `TENANT` cambia la tienda (por defecto `distriamber`).
+ * `TENANT` cambia la tienda (por defecto `distriamber`). `SOLO=clientes` deja
+ * los productos sin tocar (lo de los pedidos web del 7–13 de octubre: el
+ * cliente viejo no tenía teléfono y el pedido creó otro).
  */
 import 'dotenv/config';
 import { AppDataSource } from '../config/data-source.js';
@@ -102,6 +104,10 @@ async function main() {
       });
     }
     console.log(`Ventas que cambian de ficha: ${movidas}`);
+    if (process.env.SOLO === 'clientes') {
+      console.log('SOLO=clientes: los productos no se tocan.');
+      return;
+    }
 
     // ── Productos ──
     const repetidos: { name: string; ids: string[] }[] = await ds.query(

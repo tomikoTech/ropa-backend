@@ -177,6 +177,43 @@ describe('Cartera completa, recibos y pedidos (e2e)', () => {
       .expect(400);
   }, 60000);
 
+  it('«solo lo que debe»: la factura saldada no sale y los totales son de las que quedan', async () => {
+    // cuentas[1] (40.000) ya tiene 20.000 del recibo: se salda.
+    await request(app.getHttpServer())
+      .post(`/api/pos/accounts-receivable/clients/${clientId}/recibo`)
+      .set(h())
+      .send({
+        amount: 20000,
+        method: 'EFECTIVO',
+        reparto: [{ accountReceivableId: cuentas[1], amount: 20000 }],
+      })
+      .expect(201);
+    const todo = await request(app.getHttpServer())
+      .get(`/api/pos/clients/${clientId}/statement`)
+      .set(h())
+      .expect(200);
+    const solo = await request(app.getHttpServer())
+      .get(`/api/pos/clients/${clientId}/statement?soloPendientes=1`)
+      .set(h())
+      .expect(200);
+    expect(todo.body.invoices).toHaveLength(2);
+    expect(solo.body.soloPendientes).toBe(true);
+    expect(solo.body.invoices).toHaveLength(1);
+    expect(solo.body.invoices[0].id).toBe(cuentas[0]);
+    expect(solo.body.totals).toEqual({
+      totalCredit: 60000,
+      totalPaid: 30000,
+      totalDebt: 30000,
+    });
+    expect(Number(todo.body.totals.totalDebt)).toBe(30000);
+    // El Excel también sale filtrado, con su propio nombre de archivo.
+    const xlsx = await request(app.getHttpServer())
+      .get(`/api/pos/clients/${clientId}/statement/export?format=csv&soloPendientes=1`)
+      .set(h())
+      .expect(200);
+    expect(xlsx.headers['content-disposition']).toContain('saldo-pendiente');
+  }, 60000);
+
   describe('pedidos del catálogo', () => {
     let tokenP: string;
     let slug: string;
@@ -409,6 +446,75 @@ describe('Cartera completa, recibos y pedidos (e2e)', () => {
       expect(porVariante.get(blush)!.quantity).toBe(2);
       expect(Number(porVariante.get(locion)!.discountPercent)).toBe(20);
     }, 120000);
+
+    it('«Miller» por la página: se sugiere el Miller sin teléfono, se le ancla el número y la próxima vez lo reconoce solo', async () => {
+      // El de siempre, de la carga inicial: sin teléfono.
+      const miller = await request(app.getHttpServer())
+        .post('/api/clients')
+        .set(hp())
+        .send({ firstName: 'Miller', lastName: 'Gomez' })
+        .expect(201);
+      const telefono = `320${ts.toString().slice(-7)}`;
+      const pedirComo = async (customerName: string, customerPhone: string) =>
+        (
+          await request(app.getHttpServer())
+            .post(`/api/storefront/${slug}/orders`)
+            .send({
+              customerName,
+              customerPhone,
+              shippingAddress: 'Calle 5',
+              items: [{ variantId: locion, quantity: 1 }],
+            })
+            .expect(201)
+        ).body.orderId as string;
+
+      const primero = await pedirComo('Miller', telefono);
+      const s1 = await request(app.getHttpServer())
+        .get(`/api/store-settings/orders/${primero}/cliente`)
+        .set(hp())
+        .expect(200);
+      // «Miller» solo no se decide: se ofrece, no se toma.
+      expect(s1.body.sugerido).toBeNull();
+      expect(s1.body.parecidos.map((c: { id: string }) => c.id)).toContain(
+        miller.body.id,
+      );
+
+      await request(app.getHttpServer())
+        .post(`/api/store-settings/orders/${primero}/aceptar`)
+        .set(hp())
+        .send({ clienteId: miller.body.id })
+        .expect(201);
+      const ficha = await request(app.getHttpServer())
+        .get(`/api/clients/${miller.body.id}`)
+        .set(hp())
+        .expect(200);
+      expect(ficha.body.phone).toBe(telefono);
+
+      // La segunda vez, con indicativo y espacios: lo reconoce por teléfono.
+      const segundo = await pedirComo(
+        'Miller',
+        `+57 ${telefono.slice(0, 3)} ${telefono.slice(3)}`,
+      );
+      const s2 = await request(app.getHttpServer())
+        .get(`/api/store-settings/orders/${segundo}/cliente`)
+        .set(hp())
+        .expect(200);
+      expect(s2.body.sugerido).toMatchObject({
+        id: miller.body.id,
+        motivo: 'telefono',
+      });
+      await request(app.getHttpServer())
+        .post(`/api/store-settings/orders/${segundo}/aceptar`)
+        .set(hp())
+        .send({})
+        .expect(201);
+      const millers = await request(app.getHttpServer())
+        .get('/api/clients?search=Miller&limit=20')
+        .set(hp())
+        .expect(200);
+      // No nació ningún Miller nuevo.
+      expect(millers.body.data ?? millers.body).toHaveLength(1);
+    }, 60000);
 
     it('rechazar cancela el pedido y arma el WhatsApp con el motivo', async () => {
       const otro = await pedir(2);

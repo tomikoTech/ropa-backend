@@ -44,6 +44,7 @@ import {
 } from '../common/cartera/repartir-abono.js';
 import { cubreElTotal, sePasaDe } from './el-pago-cubre-el-total.js';
 import { precioDeLinea, type ReglaDePrecio } from './precio-de-linea.js';
+import { soloConSaldo, totalesDelEstado } from './estado-de-cuenta.js';
 import { ordenarParaDescuento } from '../inventory/exhibicion.js';
 import { TaxService, LineCalculation } from './services/tax.service.js';
 import { InvoiceService } from './services/invoice.service.js';
@@ -3594,7 +3595,15 @@ export class PosService {
    * antes obligaba a cruzar Ventas ↔ Cuentas por Cobrar. Genérico para todos
    * los tenants.
    */
-  async getClientStatement(clientId: string, tenantId: string) {
+  //
+  // `soloPendientes`: solo las facturas con saldo, y los totales de esas.
+  // «El informe se va con las facturas que ya pagaron, eso me gusta, pero
+  // necesitamos uno donde solo envíe lo que nos deben» (Andrea, Distri Amber).
+  async getClientStatement(
+    clientId: string,
+    tenantId: string,
+    opts?: { soloPendientes?: boolean },
+  ) {
     const accounts = await this.arRepository.find({
       // Sin las ventas anuladas: su cartera se saldó al anularlas y mostrarla
       // aquí inflaría la deuda histórica del cliente.
@@ -3607,13 +3616,9 @@ export class PosService {
       order: { createdAt: 'DESC' },
     });
 
-    let totalCredit = 0;
-    let totalPaid = 0;
-    let totalDebt = 0;
-
     const client = accounts[0]?.client;
 
-    const invoices = accounts.map((ar) => {
+    const todas = accounts.map((ar) => {
       const total = Number(ar.totalAmount);
       const paid = Number(ar.paidAmount);
       const balance = Math.max(0, total - paid);
@@ -3623,10 +3628,6 @@ export class PosService {
           : paid > 0
             ? 'PARTIAL'
             : 'PENDING';
-
-      totalCredit += total;
-      totalPaid += paid;
-      totalDebt += balance;
 
       return {
         id: ar.id,
@@ -3654,7 +3655,11 @@ export class PosService {
       };
     });
 
+    const invoices = opts?.soloPendientes ? soloConSaldo(todas) : todas;
+    const { totalCredit, totalPaid, totalDebt } = totalesDelEstado(invoices);
+
     return {
+      soloPendientes: !!opts?.soloPendientes,
       client: client
         ? {
             id: client.id,
