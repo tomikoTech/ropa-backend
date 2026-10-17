@@ -11,6 +11,7 @@ import {
   SelectQueryBuilder,
   EntityManager,
   In,
+  Not,
 } from 'typeorm';
 import { PurchaseOrder } from './entities/purchase-order.entity.js';
 import { Paginated } from '../common/types/paginated.js';
@@ -115,7 +116,14 @@ export class PurchasesService {
     if (!supplier) throw new NotFoundException('Proveedor no encontrado');
 
     const orders = await this.poRepository.find({
-      where: { supplierId, tenantId },
+      // Sin las anuladas: sin cuenta por pagar se leían como «pagada de
+      // contado» e inflaban lo comprado y lo pagado (las copias del Excel de
+      // proveedores de Distri Amber, anuladas el 16-oct).
+      where: {
+        supplierId,
+        tenantId,
+        status: Not(PurchaseOrderStatus.CANCELLED),
+      },
       relations: [
         'items',
         'items.variant',
