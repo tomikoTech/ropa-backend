@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Raw, Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { User } from './entities/user.entity.js';
 import { normalizarUsuario, porQueNoSirveElUsuario } from './credenciales.js';
@@ -104,8 +104,11 @@ export class UsersService {
   async findCandidatosParaLogin(identifier: string): Promise<User[]> {
     const id = (identifier || '').trim();
     if (!id) return [];
+    // Sin distinguir mayúsculas: «Jefferson@…» guardado y «jefferson@…»
+    // escrito son el mismo correo. La contraseña sí las distingue.
+    const igual = Raw((col) => `LOWER(${col}) = LOWER(:id)`, { id });
     return this.userRepository.find({
-      where: [{ email: id }, { username: id }],
+      where: [{ email: igual }, { username: igual }],
       order: { createdAt: 'ASC' },
     });
   }

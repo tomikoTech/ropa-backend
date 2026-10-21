@@ -62,8 +62,10 @@ describe('Entrar con usuario (e2e)', () => {
     suToken = r.body.accessToken;
   }, 60000);
 
-  it('y con el correo también: son las dos puertas', async () => {
-    await entrar(correo, clave).expect(201);
+  it('y con el correo también, sin importar mayúsculas', async () => {
+    // Distri Amber: guardado «Jefferson@…», escrito «jefferson@…», y no
+    // entraba. Mismo intento, no uno más: el login admite diez por minuto.
+    await entrar(correo.toUpperCase(), clave).expect(201);
   }, 60000);
 
   it('cada quien cambia su propio usuario, sin ser administrador', async () => {
