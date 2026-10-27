@@ -21,6 +21,7 @@ import { EcommerceOrderStatus } from '../common/enums/ecommerce-order-status.enu
 import { ShippingStatus } from '../common/enums/shipping-status.enum.js';
 import { MovementType } from '../common/enums/movement-type.enum.js';
 import { StockLedgerService } from '../inventory/ledger/stock-ledger.service.js';
+import { sinBodegasPrivadas } from '../inventory/bodega-privada.js';
 
 @Injectable()
 export class StoreSettingsService {
@@ -499,9 +500,23 @@ export class StoreSettingsService {
 
       // Batch load all stocks for order variants (1 query instead of N)
       const variantIds = o.items.map((i) => i.variantId);
-      const allStocksFlat = await stockRepo.find({
-        where: { variantId: In(variantIds), tenantId },
-      });
+      // La bodega «solo nosotros» no se toca, salvo que el pedido salga de
+      // ella (ver bodega-privada.ts).
+      const privadas = new Set(
+        (
+          await manager.query<{ id: string }[]>(
+            `SELECT id FROM warehouses WHERE tenant_id = $1 AND is_private = true`,
+            [tenantId],
+          )
+        ).map((f) => f.id),
+      );
+      const allStocksFlat = sinBodegasPrivadas(
+        await stockRepo.find({
+          where: { variantId: In(variantIds), tenantId },
+        }),
+        effectiveWarehouseId,
+        (wid) => privadas.has(wid),
+      );
       const stocksByVariant = new Map<string, Stock[]>();
       for (const s of allStocksFlat) {
         const arr = stocksByVariant.get(s.variantId);
@@ -780,6 +795,8 @@ export class StoreSettingsService {
          SELECT DISTINCT pv.product_id
            FROM stock s
            JOIN product_variants pv ON pv.id = s.variant_id
+           -- Lo de la bodega «solo nosotros» no se ofrece.
+           JOIN warehouses w ON w.id = s.warehouse_id AND NOT w.is_private
           WHERE s.tenant_id = $1 AND s.quantity > 0
        )
        UPDATE products p

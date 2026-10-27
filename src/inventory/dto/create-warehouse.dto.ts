@@ -44,6 +44,15 @@ export class CreateWarehouseDto {
 
   @ApiPropertyOptional({
     example: false,
+    description:
+      'Solo nosotros: la página web no la ve y otras bodegas no la toman al vender',
+  })
+  @IsOptional()
+  @IsBoolean()
+  isPrivate?: boolean;
+
+  @ApiPropertyOptional({
+    example: false,
     description: 'Esta bodega es la vitrina: lo que está a la vista',
   })
   @IsOptional()

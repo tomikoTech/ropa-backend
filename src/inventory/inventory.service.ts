@@ -301,6 +301,23 @@ export class InventoryService {
     if (dto.isPosLocation !== undefined)
       warehouse.isPosLocation = dto.isPosLocation;
     if (dto.isActive !== undefined) warehouse.isActive = dto.isActive;
+    if (dto.isPrivate !== undefined) warehouse.isPrivate = dto.isPrivate;
+    if (dto.isPrivate) {
+      // La web despacha de su bodega: si esa fuera «solo nosotros», no
+      // vendería nada por la página.
+      const [web] = await this.warehouseRepository.manager.query<
+        { id: string }[]
+      >(
+        `SELECT id FROM store_settings WHERE tenant_id = $1
+            AND COALESCE(ecommerce_warehouse_id, default_warehouse_id) = $2`,
+        [tenantId, warehouse.id],
+      );
+      if (web) {
+        throw new BadRequestException(
+          'Esta es la bodega de la página web: no puede ser «solo nosotros». Cambia primero la bodega de la web en la configuración de la tienda.',
+        );
+      }
+    }
     if (dto.isExhibition !== undefined)
       warehouse.isExhibition = dto.isExhibition;
     if (dto.exhibitionOfWarehouseId !== undefined)

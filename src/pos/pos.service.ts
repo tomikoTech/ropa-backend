@@ -46,6 +46,7 @@ import { cubreElTotal, sePasaDe } from './el-pago-cubre-el-total.js';
 import { precioDeLinea, type ReglaDePrecio } from './precio-de-linea.js';
 import { soloConSaldo, totalesDelEstado } from './estado-de-cuenta.js';
 import { ordenarParaDescuento } from '../inventory/exhibicion.js';
+import { sinBodegasPrivadas } from '../inventory/bodega-privada.js';
 import { TaxService, LineCalculation } from './services/tax.service.js';
 import { InvoiceService } from './services/invoice.service.js';
 import { ProductStatus } from '../common/enums/product-status.enum.js';
@@ -127,6 +128,18 @@ export class PosService {
   ): Promise<Set<string>> {
     const filas = await manager.query<{ id: string }[]>(
       `SELECT id FROM warehouses WHERE tenant_id = $1 AND is_exhibition = true`,
+      [tenantId],
+    );
+    return new Set(filas.map((f) => f.id));
+  }
+
+  /** Las bodegas «solo nosotros»: no las toma la cascada de otra bodega. */
+  private async privadasDelTenant(
+    manager: EntityManager,
+    tenantId: string,
+  ): Promise<Set<string>> {
+    const filas = await manager.query<{ id: string }[]>(
+      `SELECT id FROM warehouses WHERE tenant_id = $1 AND is_private = true`,
       [tenantId],
     );
     return new Set(filas.map((f) => f.id));
@@ -282,6 +295,7 @@ export class PosService {
         // Cuáles de esas bodegas son la vitrina. Se leen una sola vez para
         // toda la factura: son pocas y no cambian a mitad de una venta.
         const vitrinas = await this.vitrinasDelTenant(manager, tenantId);
+      const privadas = await this.privadasDelTenant(manager, tenantId);
 
         // Separados / apartados (F6): si el tenant lo tiene habilitado, el stock
         // reservado para OTROS clientes no está disponible para esta venta. Los
@@ -349,7 +363,11 @@ export class PosService {
           // muestra teniendo pares en la bodega deja el local sin qué
           // mostrar—. La regla vive en `exhibicion.ts`, probada aparte.
           const itemStocks = ordenarParaDescuento(
-            stocksByVariant.get(item.variantId) || [],
+            sinBodegasPrivadas(
+              stocksByVariant.get(item.variantId) || [],
+              dto.warehouseId,
+              (id) => privadas.has(id),
+            ),
             dto.warehouseId,
             (id) => vitrinas.has(id),
           );
@@ -1597,6 +1615,7 @@ export class PosService {
       }
 
       const vitrinas = await this.vitrinasDelTenant(manager, tenantId);
+      const privadas = await this.privadasDelTenant(manager, tenantId);
       const originalTotal = Number(sale.total);
       const roundMoney = (value: number) => Math.round(value * 100) / 100;
 
@@ -1870,9 +1889,13 @@ export class PosService {
             // factura no puede descontar por un criterio distinto del que usó
             // la venta original.
             const itemStocks = ordenarParaDescuento(
-              await stockRepo.find({
-                where: { variantId: item.variantId, tenantId },
-              }),
+              sinBodegasPrivadas(
+                await stockRepo.find({
+                  where: { variantId: item.variantId, tenantId },
+                }),
+                sale.warehouseId,
+                (id) => privadas.has(id),
+              ),
               sale.warehouseId,
               (id) => vitrinas.has(id),
             );

@@ -393,6 +393,8 @@ export class StorefrontService {
           ? `EXISTS (SELECT 1 FROM product_variants pv ` +
             sizeJoin +
             `JOIN stock st ON st.variant_id = pv.id AND st.tenant_id = p.tenant_id ` +
+            // La bodega «solo nosotros» no se ofrece (ver bodega-privada.ts).
+            `JOIN warehouses wh ON wh.id = st.warehouse_id AND NOT wh.is_private ` +
             `WHERE ${variantConds.join(' AND ')} ` +
             `GROUP BY pv.id HAVING COALESCE(SUM(st.quantity), 0) > 0)`
           : `EXISTS (SELECT 1 FROM product_variants pv ` +
@@ -460,8 +462,13 @@ export class StorefrontService {
     if (products.length > 0) {
       const variantIds = products.flatMap((p) => p.variants.map((v) => v.id));
       if (variantIds.length > 0) {
+        // Sin la bodega «solo nosotros»: no se ofrece (ver bodega-privada.ts).
         const stocks = await this.stockRepo.find({
-          where: { variantId: In(variantIds), tenantId },
+          where: {
+            variantId: In(variantIds),
+            tenantId,
+            warehouse: { isPrivate: false },
+          },
         });
 
         // Sum stock across all warehouses per variant
@@ -559,8 +566,13 @@ export class StorefrontService {
     // Load stock — sum across ALL warehouses (cascade deduction logic)
     if (product.variants.length > 0) {
       const variantIds = product.variants.map((v) => v.id);
+      // Sin la bodega «solo nosotros»: no se ofrece (ver bodega-privada.ts).
       const stocks = await this.stockRepo.find({
-        where: { variantId: In(variantIds), tenantId },
+        where: {
+          variantId: In(variantIds),
+          tenantId,
+          warehouse: { isPrivate: false },
+        },
       });
 
       const stockMap = new Map<string, number>();

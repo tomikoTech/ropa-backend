@@ -35,6 +35,15 @@ export class UpdateWarehouseDto {
   @IsBoolean()
   isMain?: boolean;
 
+  @ApiPropertyOptional({
+    example: false,
+    description:
+      'Solo nosotros: la página web no la ve y otras bodegas no la toman al vender',
+  })
+  @IsOptional()
+  @IsBoolean()
+  isPrivate?: boolean;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsBoolean()

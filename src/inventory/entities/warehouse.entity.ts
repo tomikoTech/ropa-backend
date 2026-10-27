@@ -62,6 +62,18 @@ export class Warehouse extends TenantAwareEntity {
   @Column({ name: 'is_main', default: false })
   isMain: boolean;
 
+  /**
+   * **Solo nosotros**: mercancía apartada que no se ofrece a nadie más.
+   *
+   * «Necesito reservar mercancía para nuestros locales […] se termina la
+   * mercancía y a veces los locales se quedan sin» (Andrea, Distri Amber).
+   * La página web no la cuenta ni despacha de ella, y una venta hecha en otra
+   * bodega no la toma en la cascada. Solo sale si se vende **en** ella. Quién
+   * puede vender ahí lo deciden las bodegas por usuario. Ver `bodega-privada.ts`.
+   */
+  @Column({ name: 'is_private', default: false })
+  isPrivate: boolean;
+
   @Column({ name: 'is_active', default: true })
   isActive: boolean;
 
