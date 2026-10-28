@@ -155,15 +155,20 @@ export class StorefrontService {
    * productos publicados con precio al detal y tallas «disponible/agotado».
    * Qué sale de cada producto lo decide `catalogo.ts`.
    */
-  async getCatalogo(tenantSlug: string) {
+  async getCatalogo(tenantSlug: string, codigoDeBodega?: string) {
     const settings = await this.settingsRepo.findOne({
       where: { storeSlug: tenantSlug },
     });
     if (!settings || !settings.catalogoEnabled) {
       throw new NotFoundException('Ese catálogo no existe o está apagado');
     }
+    const bodega = await this.bodegaDelEnlace(
+      settings.tenantId,
+      codigoDeBodega,
+    );
     const { products } = await this.getProductsDeTenant(settings.tenantId, {
       onlyAvailable: true,
+      bodegaId: bodega?.id ?? null,
     });
     // En perfumería el carrito sabe cuántas quedan; en zapatería no.
     const conExistencias = perfilDelNegocio(settings).tipo === 'perfumeria';
@@ -182,10 +187,37 @@ export class StorefrontService {
         // Para que el carrito pida dirección y avise que la tienda confirma.
         pedidoSiempreADomicilio:
           perfilDelNegocio(settings).pedidoSiempreADomicilio,
+        // Entró por el enlace privado: el catálogo avisa de qué bodega pide.
+        bodega: bodega?.name ?? null,
       },
       productos,
       filtros: filtrosDelCatalogo(productos),
     };
+  }
+
+  /**
+   * La bodega «solo nosotros» de un enlace privado (`?bodega=<código>`), o
+   * `null` si no vino código. Un código que no es de esta tienda, o de una
+   * bodega que ya no es privada, se rechaza: seguir con el catálogo público
+   * haría que el local pidiera de la bodega equivocada sin enterarse.
+   */
+  private async bodegaDelEnlace(
+    tenantId: string,
+    codigo: string | undefined,
+  ): Promise<{ id: string; name: string } | null> {
+    if (!codigo?.trim()) return null;
+    const [bodega] = await this.stockRepo.manager.query<
+      { id: string; name: string }[]
+    >(
+      `SELECT id, name FROM warehouses
+        WHERE tenant_id = $1 AND codigo_web = $2 AND is_private AND is_active`,
+      [tenantId, codigo.trim()],
+    );
+    if (!bodega)
+      throw new NotFoundException(
+        'Ese enlace de bodega ya no sirve. Pídele el enlace nuevo a la tienda.',
+      );
+    return bodega;
   }
 
   async getActiveStores() {
@@ -306,6 +338,8 @@ export class StorefrontService {
       search?: string;
       inStock?: boolean;
       onlyAvailable?: boolean;
+      /** Solo las existencias de esta bodega (la del enlace privado). */
+      bodegaId?: string | null;
       sizes?: string[];
       sort?: string;
       page?: number;
@@ -374,6 +408,7 @@ export class StorefrontService {
       if (sizes.length > 0 || wantInStock) {
         const variantConds = ['pv.product_id = p.id', 'pv.is_active = true'];
         const subParams: Record<string, string> = {};
+        if (filters?.bodegaId) subParams.bodegaId = filters.bodegaId;
         if (sizes.length > 0) {
           // El nombre de la talla vive en el catálogo (`sizes`), no en la
           // variante: se compara contra el JOIN, no contra la columna heredada.
@@ -393,8 +428,10 @@ export class StorefrontService {
           ? `EXISTS (SELECT 1 FROM product_variants pv ` +
             sizeJoin +
             `JOIN stock st ON st.variant_id = pv.id AND st.tenant_id = p.tenant_id ` +
-            // La bodega «solo nosotros» no se ofrece (ver bodega-privada.ts).
-            `JOIN warehouses wh ON wh.id = st.warehouse_id AND NOT wh.is_private ` +
+            // La bodega «solo nosotros» no se ofrece (ver bodega-privada.ts),
+            // salvo por su enlace, que ve solo esa.
+            `JOIN warehouses wh ON wh.id = st.warehouse_id AND ` +
+            (filters?.bodegaId ? `wh.id = :bodegaId ` : `NOT wh.is_private `) +
             `WHERE ${variantConds.join(' AND ')} ` +
             `GROUP BY pv.id HAVING COALESCE(SUM(st.quantity), 0) > 0)`
           : `EXISTS (SELECT 1 FROM product_variants pv ` +
@@ -463,11 +500,14 @@ export class StorefrontService {
       const variantIds = products.flatMap((p) => p.variants.map((v) => v.id));
       if (variantIds.length > 0) {
         // Sin la bodega «solo nosotros»: no se ofrece (ver bodega-privada.ts).
+        // Por su enlace privado se ve solo ella.
         const stocks = await this.stockRepo.find({
           where: {
             variantId: In(variantIds),
             tenantId,
-            warehouse: { isPrivate: false },
+            ...(filters?.bodegaId
+              ? { warehouseId: filters.bodegaId }
+              : { warehouse: { isPrivate: false } }),
           },
         });
 
@@ -699,8 +739,13 @@ export class StorefrontService {
       dto.deliveryMethod = 'shipping';
     }
     const tenantId = settings.tenantId;
+    // Por el enlace privado el pedido sale de esa bodega, y con ella se
+    // valida si alcanza; al aceptarlo, la venta también (ver pedidos).
+    const bodegaDelEnlace = await this.bodegaDelEnlace(tenantId, dto.bodega);
     const warehouseId =
-      settings.ecommerceWarehouseId || settings.defaultWarehouseId;
+      bodegaDelEnlace?.id ||
+      settings.ecommerceWarehouseId ||
+      settings.defaultWarehouseId;
     if (!warehouseId) {
       throw new BadRequestException('La tienda no tiene bodega configurada');
     }

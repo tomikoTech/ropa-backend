@@ -342,26 +342,36 @@ export class StoreSettingsService {
     const items = orders.flatMap((o) => o.items ?? []);
     if (!items.length) return;
     const settings = await this.settingsRepo.findOne({ where: { tenantId } });
-    const bodega =
+    const deLaWeb =
       settings?.ecommerceWarehouseId || settings?.defaultWarehouseId || null;
+    // Cada pedido en **su** bodega: el que entró por el enlace privado de
+    // LOCALES se mira contra LOCALES, no contra la bodega de la web.
+    const bodegaDe = (o: EcommerceOrder) => o.warehouseId || deLaWeb;
+    const bodegas = [...new Set(orders.map(bodegaDe).filter(Boolean))];
     const hay = new Map<string, number>();
-    if (bodega) {
+    if (bodegas.length) {
       const filas = await this.stockRepository.find({
         where: {
           tenantId,
-          warehouseId: bodega,
+          warehouseId: In(bodegas as string[]),
           variantId: In([...new Set(items.map((i) => i.variantId))]),
         },
       });
-      for (const f of filas) hay.set(f.variantId, f.quantity);
+      for (const f of filas)
+        hay.set(`${f.warehouseId}:${f.variantId}`, f.quantity);
     }
-    for (const it of items) {
-      const anotado = it as EcommerceOrderItem & {
-        disponible: number;
-        sinPrecio: boolean;
-      };
-      anotado.disponible = Math.max(0, hay.get(it.variantId) ?? 0);
-      anotado.sinPrecio = (Number(it.unitPrice) || 0) <= 0;
+    for (const o of orders) {
+      for (const it of o.items ?? []) {
+        const anotado = it as EcommerceOrderItem & {
+          disponible: number;
+          sinPrecio: boolean;
+        };
+        anotado.disponible = Math.max(
+          0,
+          hay.get(`${bodegaDe(o)}:${it.variantId}`) ?? 0,
+        );
+        anotado.sinPrecio = (Number(it.unitPrice) || 0) <= 0;
+      }
     }
     await this.anotarVenta(orders);
   }

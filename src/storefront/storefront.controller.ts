@@ -50,8 +50,16 @@ export class StorefrontController {
     summary:
       'El catálogo público: tienda, productos publicados con precio al detal y tallas disponible/agotado',
   })
-  getCatalogo(@Param('tenantSlug') tenantSlug: string) {
-    return this.storefrontService.getCatalogo(tenantSlug);
+  @ApiQuery({
+    name: 'bodega',
+    required: false,
+    description: 'Código del enlace privado de una bodega «solo nosotros»',
+  })
+  getCatalogo(
+    @Param('tenantSlug') tenantSlug: string,
+    @Query('bodega') bodega?: string,
+  ) {
+    return this.storefrontService.getCatalogo(tenantSlug, bodega);
   }
 
   @Public()

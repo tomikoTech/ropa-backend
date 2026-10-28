@@ -9,6 +9,7 @@ import {
   ValidateNested,
   IsEmail,
   ArrayMinSize,
+  MaxLength,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -43,6 +44,15 @@ export class CreateOrderDto {
   @IsOptional()
   @IsString()
   customerNotes?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Código del enlace privado de una bodega «solo nosotros» (`?bodega=`): el pedido sale de ella.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  bodega?: string;
 
   @ApiPropertyOptional({ example: 'https://mipinta.com' })
   @IsOptional()

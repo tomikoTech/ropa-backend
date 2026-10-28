@@ -33,7 +33,7 @@ import { AdjustStockDto } from './dto/adjust-stock.dto.js';
 import { TransferStockDto } from './dto/transfer-stock.dto.js';
 import { TrasladoEnLoteDto } from './dto/traslado-en-lote.dto.js';
 import { bultosRepetidos, numerosDeLosRenglones } from './remision-en-lote.js';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { MovementType } from '../common/enums/movement-type.enum.js';
 import { ProductVariant } from '../products/entities/product-variant.entity.js';
 import { Product } from '../products/entities/product.entity.js';
@@ -218,6 +218,7 @@ export class InventoryService {
         ...dto,
         code,
         tenantId,
+        codigoWeb: dto.isPrivate ? codigoWebNuevo() : null,
       });
       return this.warehouseRepository.save(warehouse);
     });
@@ -318,6 +319,11 @@ export class InventoryService {
         );
       }
     }
+    // Su enlace privado del catálogo (ver `Warehouse.codigoWeb`). Se conserva
+    // si se desmarca y se vuelve a marcar: el enlace que ya tienen los locales
+    // sigue sirviendo.
+    if (warehouse.isPrivate && !warehouse.codigoWeb)
+      warehouse.codigoWeb = codigoWebNuevo();
     if (dto.isExhibition !== undefined)
       warehouse.isExhibition = dto.isExhibition;
     if (dto.exhibitionOfWarehouseId !== undefined)
@@ -2526,4 +2532,9 @@ export class InventoryService {
     );
     return { updated: res.affected ?? 0 };
   }
+}
+
+/** 12 caracteres al azar: el enlace privado no se adivina. */
+function codigoWebNuevo(): string {
+  return randomBytes(6).toString('hex');
 }

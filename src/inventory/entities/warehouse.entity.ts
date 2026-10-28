@@ -74,6 +74,18 @@ export class Warehouse extends TenantAwareEntity {
   @Column({ name: 'is_private', default: false })
   isPrivate: boolean;
 
+  /**
+   * El enlace privado de una bodega «solo nosotros»: `/catalogo/<tienda>?bodega=<código>`.
+   *
+   * «¿Cómo los locales de nosotros pueden hacer los pedidos por la página?»
+   * (Andrea). El público no ve la bodega; quien entra por este enlace ve
+   * **solo** lo que hay en ella y su pedido sale de ella. Nadie pide con
+   * cuenta en la página —los pedidos llegan con nombre y teléfono—, por eso
+   * es un enlace y no un usuario. Se genera al marcarla «solo nosotros».
+   */
+  @Column({ name: 'codigo_web', type: 'varchar', length: 32, nullable: true })
+  codigoWeb: string | null;
+
   @Column({ name: 'is_active', default: true })
   isActive: boolean;
 
