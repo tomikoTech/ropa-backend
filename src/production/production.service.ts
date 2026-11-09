@@ -57,6 +57,7 @@ export interface FilaDeCosto {
   /** `products.mano_de_obra`; `null` = la general. */
   manoDeObraDelProducto: number | null;
   costoFrascoManual: number | null;
+  esenciaDelProducto: number | null;
   costo: CostoDelPerfume;
 }
 
@@ -489,12 +490,13 @@ export class ProductionService {
           })) ??
           variante.product.costoFrascoManual ??
           (await this.ultimoCostoDeCompra(manager, frascoVariantId, tenantId)))
-        : null;
+        : (variante.product.costoFrascoManual ?? null);
       const costo = costoDelTerminado({
         costoDelFrasco,
         esenciaFijaPorUnidad: settings?.costoFijoDeEsencia,
         manoDeObraGeneral: settings?.manoDeObraPorUnidad,
         manoDeObraDelProducto: variante.product.manoDeObra,
+        esenciaDelProducto: variante.product.costoEsencia,
       });
       if (!frascoVariantId)
         costo.avisos.unshift(
@@ -614,12 +616,9 @@ export class ProductionService {
       }
       const cambios: Partial<Product> = {};
       if (dto.manoDeObra !== undefined) cambios.manoDeObra = dto.manoDeObra;
+      if (dto.costoEsencia !== undefined)
+        cambios.costoEsencia = dto.costoEsencia;
       if (dto.costoFrasco !== undefined) {
-        if (dto.costoFrasco !== null && !producto.frascoVariantId) {
-          throw new BadRequestException(
-            `«${producto.name}» no tiene frasco enlazado: enlázalo en la ficha del producto.`,
-          );
-        }
         if (
           dto.costoFrasco !== null &&
           producto.frascoVariantId &&
@@ -671,12 +670,13 @@ export class ProductionService {
       cost_price: string;
       mano_de_obra: number | null;
       costo_frasco_manual: number | null;
+      costo_esencia: number | null;
       frasco_variant_id: string | null;
       frasco_nombre: string | null;
       frasco_ficha: string | null;
       frasco_compra: string | null;
     }[] = await manager.query(
-      `SELECT p.id, p.name, p.base_price, p.cost_price, p.mano_de_obra, p.costo_frasco_manual,
+      `SELECT p.id, p.name, p.base_price, p.cost_price, p.mano_de_obra, p.costo_frasco_manual, p.costo_esencia,
               p.frasco_variant_id, fp.name AS frasco_nombre, fp.cost_price AS frasco_ficha,
               (SELECT pi.unit_cost FROM purchase_order_items pi
                  JOIN purchase_orders po ON po.id = pi.purchase_order_id
@@ -709,6 +709,11 @@ export class ProductionService {
           costoDelFrasco = Number(f.frasco_ficha);
           origen = 'ficha';
         }
+      } else if (f.costo_frasco_manual !== null) {
+        // Sin frasco enlazado, el valor a mano: «poner el valor de los frascos
+        // al que le falte» no debería exigir enlazar primero.
+        costoDelFrasco = Number(f.costo_frasco_manual);
+        origen = 'manual';
       }
       const costo = costoDelPerfume(
         {
@@ -717,10 +722,11 @@ export class ProductionService {
           esenciaFijaPorUnidad: settings?.costoFijoDeEsencia,
           manoDeObraGeneral: settings?.manoDeObraPorUnidad,
           manoDeObraDelProducto: f.mano_de_obra,
+          esenciaDelProducto: f.costo_esencia,
         },
         presets,
       );
-      if (!f.frasco_variant_id) {
+      if (!f.frasco_variant_id && f.costo_frasco_manual === null) {
         costo.avisos.unshift('La loción no tiene frasco enlazado.');
       }
       const fila: FilaDeCosto = {
@@ -736,6 +742,7 @@ export class ProductionService {
           : null,
         manoDeObraDelProducto: f.mano_de_obra,
         costoFrascoManual: f.costo_frasco_manual,
+        esenciaDelProducto: f.costo_esencia,
         costo,
       };
       return { fila, costPriceActual: Number(f.cost_price) };

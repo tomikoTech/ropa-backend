@@ -20,7 +20,7 @@ export class AjusteDeCostoDto {
   @ApiPropertyOptional({
     example: 30000,
     description:
-      'Costo del frasco escrito a mano; solo vale mientras no haya una compra recibida del frasco',
+      'Costo del frasco escrito a mano; solo vale mientras no haya una compra recibida del frasco (o si no tiene frasco enlazado)',
     nullable: true,
   })
   @IsOptional()
@@ -28,4 +28,16 @@ export class AjusteDeCostoDto {
   @IsInt()
   @Min(0)
   costoFrasco?: number | null;
+
+  @ApiPropertyOptional({
+    example: 8000,
+    description:
+      'Costo de la esencia de este perfume; null = la general de la tienda',
+    nullable: true,
+  })
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsInt()
+  @Min(0)
+  costoEsencia?: number | null;
 }

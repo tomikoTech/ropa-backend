@@ -210,12 +210,18 @@ describe('Costo de perfumes (e2e)', () => {
       .set(h())
       .send({ costoFrasco: 25000 })
       .expect(400);
-    // Sin frasco enlazado tampoco tiene a qué pegarse.
-    await request(app.getHttpServer())
+    // Sin frasco enlazado también se puede escribir: «poner el valor de los
+    // frascos al que le falte» (Andrea) no debería exigir enlazar primero.
+    const sinEnlace = await request(app.getHttpServer())
       .patch(`/api/production/costos/${sinFrascoProduct}`)
       .set(h())
       .send({ costoFrasco: 25000 })
-      .expect(400);
+      .expect(200);
+    expect(sinEnlace.body.frasco).toBeNull();
+    expect(sinEnlace.body.costoFrascoManual).toBe(25000);
+    expect(sinEnlace.body.costo.frasco).toBe(25000);
+    expect(sinEnlace.body.costo.total).toBe(39000);
+    expect(sinEnlace.body.costo.avisos).toEqual([]);
     // Un frasco nuevo, nunca comprado: el valor a mano manda.
     const catFrasco = (
       await request(app.getHttpServer())
@@ -247,5 +253,29 @@ describe('Costo de perfumes (e2e)', () => {
     expect(r.body.frasco).toMatchObject({ costo: 25000, origen: 'manual' });
     expect(r.body.costo.total).toBe(39000);
     expect(r.body.costo.avisos).toEqual([]);
+  }, 60000);
+
+  it('la esencia de un perfume se cambia en su fila; null vuelve a la general', async () => {
+    const r = await request(app.getHttpServer())
+      .patch(`/api/production/costos/${locionProduct}`)
+      .set(h())
+      .send({ costoEsencia: 9000 })
+      .expect(200);
+    expect(r.body.esenciaDelProducto).toBe(9000);
+    expect(r.body.costo.esencia).toBe(9000);
+    expect(r.body.costo.total).toBe(46000);
+    const prod = await request(app.getHttpServer())
+      .get(`/api/products/${locionProduct}`)
+      .set(h())
+      .expect(200);
+    expect(Number(prod.body.costPrice)).toBe(46000);
+
+    const back = await request(app.getHttpServer())
+      .patch(`/api/production/costos/${locionProduct}`)
+      .set(h())
+      .send({ costoEsencia: null })
+      .expect(200);
+    expect(back.body.esenciaDelProducto).toBeNull();
+    expect(back.body.costo.total).toBe(44000);
   }, 60000);
 });

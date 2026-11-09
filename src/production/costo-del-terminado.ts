@@ -31,6 +31,8 @@ export interface InsumosDelCosto {
   manoDeObraGeneral: number | null | undefined;
   /** `products.mano_de_obra`: manda sobre el general cuando está puesto. */
   manoDeObraDelProducto?: number | null;
+  /** `products.costo_esencia`: manda sobre la esencia fija cuando está puesto. */
+  esenciaDelProducto?: number | null;
 }
 
 export interface CostoDelTerminado {
@@ -53,8 +55,12 @@ export function costoDelTerminado(i: InsumosDelCosto): CostoDelTerminado {
       'El frasco no tiene costo: no se ha comprado o la compra no trae costo.',
     );
   }
-  const esencia = entero(i.esenciaFijaPorUnidad);
-  if (!esencia)
+  const propia =
+    i.esenciaDelProducto !== null && i.esenciaDelProducto !== undefined;
+  const esencia = propia
+    ? entero(i.esenciaDelProducto)
+    : entero(i.esenciaFijaPorUnidad);
+  if (!esencia && !propia)
     avisos.push(
       'La esencia por unidad está en cero: ponla en Configuración → Producción.',
     );

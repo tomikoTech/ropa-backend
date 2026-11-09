@@ -39,6 +39,25 @@ describe('costoDelTerminado', () => {
     ).toBe(0);
   });
 
+  it('la esencia del producto manda sobre la fija, aunque sea cero', () => {
+    const c = costoDelTerminado({
+      costoDelFrasco: 30_000,
+      esenciaFijaPorUnidad: 7_000,
+      manoDeObraGeneral: 7_000,
+      esenciaDelProducto: 12_000,
+    });
+    expect(c.esencia).toBe(12_000);
+    expect(c.total).toBe(49_000);
+    const sinEsencia = costoDelTerminado({
+      costoDelFrasco: 30_000,
+      esenciaFijaPorUnidad: 7_000,
+      manoDeObraGeneral: 7_000,
+      esenciaDelProducto: 0,
+    });
+    expect(sinEsencia.esencia).toBe(0);
+    expect(sinEsencia.avisos).toEqual([]);
+  });
+
   it('sin costo de frasco o sin esencia configurada, el costo sale pero avisa', () => {
     const c = costoDelTerminado({
       costoDelFrasco: null,

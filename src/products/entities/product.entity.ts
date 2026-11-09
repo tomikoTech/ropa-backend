@@ -52,6 +52,14 @@ export class Product extends TenantAwareEntity {
   @Column({ name: 'costo_frasco_manual', type: 'int', nullable: true })
   costoFrascoManual: number | null;
 
+  /**
+   * Costo de la esencia de este perfume por unidad, si no es el general de la
+   * tienda: «quiero poder poner el valor de la esencia» (Andrea). `null` = el
+   * general (`store_settings.costo_fijo_de_esencia`).
+   */
+  @Column({ name: 'costo_esencia', type: 'int', nullable: true })
+  costoEsencia: number | null;
+
   @Column({
     name: 'cost_price',
     type: 'decimal',
