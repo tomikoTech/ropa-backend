@@ -27,6 +27,7 @@ const GROUPS = [
   'venta',
   'dia',
   'vendedor',
+  'cliente',
   'producto',
   'categoria',
   'marca',
@@ -339,6 +340,12 @@ export class ProfitReportService {
       vendedor: {
         sql: "NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), '')",
         label: 'Vendedor',
+      },
+      // «¿Cuántas unidades se le venden a los clientes en el mes?» (Andrea,
+      // Distri Amber). La de mostrador suele ir a Consumidor Final.
+      cliente: {
+        sql: "COALESCE(NULLIF(TRIM(COALESCE(cl.first_name, '') || ' ' || COALESCE(cl.last_name, '')), ''), 'Sin cliente')",
+        label: 'Cliente',
       },
       producto: { sql: 'si.product_name', label: 'Producto' },
       categoria: {

@@ -122,7 +122,10 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
           { value: 'categoria', label: 'Categoría' },
           { value: 'marca', label: 'Marca' },
           { value: 'ubicacion', label: 'Ubicación física (cajas y pares)' },
-          { value: 'lote', label: 'Lote / costo (separa por costo y proveedor)' },
+          {
+            value: 'lote',
+            label: 'Lote / costo (separa por costo y proveedor)',
+          },
         ],
       },
       fBodega,
@@ -197,7 +200,8 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     group: 'Ventas',
     description:
       'Lo vendido contra lo que costó, con la utilidad y el margen. Se agrupa ' +
-      'por línea, venta, día, vendedor, producto, categoría, marca o bodega — ' +
+      'por línea, venta, día, vendedor, cliente, producto, categoría, marca o ' +
+      'bodega — ' +
       'de ahí salen tanto el cierre diario como el desempeño por vendedor.',
     absorbs: [
       'Utilidad',
@@ -226,6 +230,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
           { value: 'venta', label: 'Venta / factura' },
           { value: 'dia', label: 'Día' },
           { value: 'vendedor', label: 'Vendedor' },
+          { value: 'cliente', label: 'Cliente' },
           { value: 'producto', label: 'Producto' },
           { value: 'categoria', label: 'Categoría' },
           { value: 'marca', label: 'Marca' },

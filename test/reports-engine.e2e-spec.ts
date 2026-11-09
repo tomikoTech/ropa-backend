@@ -392,8 +392,8 @@ describe('Reportes parametrizables (e2e)', () => {
     // momentos, y sin el filtro cualquier otra suite que cree una venta en medio
     // hace fallar la comparación por el valor de esa venta. Lo que se comprueba
     // es la coherencia del reporte, no que la base esté quieta.
-    const [porDia, porProducto] = await Promise.all(
-      ['dia', 'producto'].map((g) =>
+    const [porDia, porProducto, porCliente] = await Promise.all(
+      ['dia', 'producto', 'cliente'].map((g) =>
         request(app.getHttpServer())
           .get(
             `/api/reports/run/utilidad?groupBy=${g}&from=2020-01-01` +
@@ -408,6 +408,24 @@ describe('Reportes parametrizables (e2e)', () => {
       body: { totals: { key: string; value: number }[] };
     }) => res.body.totals.find((t) => t.key === 'venta')?.value;
     expect(vendido(porDia)).toBe(vendido(porProducto));
+    expect(vendido(porCliente)).toBe(vendido(porProducto));
+  });
+
+  it('por cliente: las unidades del periodo de cada cliente', async () => {
+    // «¿Cómo hago para saber cuántas unidades se le vende a los clientes en el mes?»
+    const res = await request(app.getHttpServer())
+      .get(
+        `/api/reports/run/utilidad?groupBy=cliente&from=${today()}&to=${today()}` +
+          `&warehouseId=${warehouseId}`,
+      )
+      .set(auth())
+      .expect(200);
+    expect(res.body.columns[0].label).toBe('Cliente');
+    // La venta de la suite va a Consumidor Final, el cliente por defecto del POS.
+    const fila = res.body.rows.find(
+      (r: { grupo: string }) => r.grupo === 'Consumidor Final',
+    );
+    expect(fila.unidades).toBeGreaterThanOrEqual(QTY);
   });
 
   it('el inventario cuadra: la referencia queda con lo que no se vendió', async () => {
