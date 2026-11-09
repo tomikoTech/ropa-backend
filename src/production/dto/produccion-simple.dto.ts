@@ -23,6 +23,15 @@ export class SalidaDeEsenciaDto {
   @IsUUID()
   warehouseId?: string;
 
+  @ApiPropertyOptional({
+    example: 50,
+    description: 'Lociones que salieron de esta tanda',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  unidades?: number;
+
   @ApiPropertyOptional({ example: 'Para 50 Good Girl' })
   @IsOptional()
   @IsString()

@@ -98,8 +98,15 @@ export class ProductionController {
     @TenantId() tenantId: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('desde') desde?: string,
+    @Query('hasta') hasta?: string,
   ) {
-    return this.productionService.findAllPaginado(tenantId, { page, limit });
+    return this.productionService.findAllPaginado(tenantId, {
+      page,
+      limit,
+      desde,
+      hasta,
+    });
   }
 
   @Get(':id')

@@ -9,6 +9,16 @@ import { Production } from './entities/production.entity.js';
 import { ProductionItem } from './entities/production-item.entity.js';
 import { Paginated } from '../common/types/paginated.js';
 import { resolverPagina, armarPaginado } from '../common/utils/paginacion.js';
+import { rangoUtcDelDia } from '../caja/cuadre.js';
+
+export interface ResumenDeProduccion {
+  /** Registros en el filtro: tandas de esencia y entradas de terminado. */
+  tandas: number;
+  /** Lociones fabricadas. */
+  unidades: number;
+  /** Tandas de esencia que no dicen cuántas salieron. */
+  sinAnotar: number;
+}
 import { Stock } from '../inventory/entities/stock.entity.js';
 import { StockMovement } from '../inventory/entities/stock-movement.entity.js';
 import { ProductVariant } from '../products/entities/product-variant.entity.js';
@@ -236,19 +246,72 @@ export class ProductionService {
   }
 
   /** El historial por página, sin traer las 200 de un golpe. */
+  /**
+   * El historial, con el resumen de lo fabricado en el filtro: «¿cuántos
+   * productos se fabricaron el mes pasado?» (Andrea, 2026-11-08). Cuenta la
+   * entrada de terminado y las tandas de esencia que dicen cuántas salieron;
+   * las que no lo dicen se cuentan aparte, para que el total no mienta por lo
+   * bajo sin avisar.
+   */
   async findAllPaginado(
     tenantId: string,
-    opts: { page?: string | number | null; limit?: string | number | null },
-  ): Promise<Paginated<Production>> {
+    opts: {
+      page?: string | number | null;
+      limit?: string | number | null;
+      desde?: string | null;
+      hasta?: string | null;
+    },
+  ): Promise<Paginated<Production> & { resumen?: ResumenDeProduccion }> {
     const pagina = resolverPagina(opts, { limitDefault: 50, limitMax: 200 });
-    const [data, total] = await this.productionRepo.findAndCount({
-      where: { tenantId },
-      relations: ['items'],
-      order: { createdAt: 'DESC' },
-      skip: pagina.offset,
-      take: pagina.limit,
+    for (const dia of [opts.desde, opts.hasta]) {
+      if (dia && !/^\d{4}-\d{2}-\d{2}$/.test(dia)) {
+        throw new BadRequestException(
+          `Fecha inválida: «${dia}». Usa AAAA-MM-DD.`,
+        );
+      }
+    }
+    const qb = this.productionRepo
+      .createQueryBuilder('p')
+      .where('p.tenant_id = :tenantId', { tenantId });
+    if (opts.desde) {
+      qb.andWhere('p.created_at >= :desde', {
+        desde: rangoUtcDelDia(opts.desde).desde,
+      });
+    }
+    if (opts.hasta) {
+      qb.andWhere('p.created_at < :hasta', {
+        hasta: rangoUtcDelDia(opts.hasta).hasta,
+      });
+    }
+    const resumenQb = qb
+      .clone()
+      .select('COUNT(*)', 'tandas')
+      .addSelect(
+        `COALESCE(SUM(COALESCE(p.unidades_fabricadas, NULLIF(p.produced_quantity, 0))), 0)`,
+        'unidades',
+      )
+      .addSelect(
+        `COUNT(*) FILTER (WHERE p.unidades_fabricadas IS NULL AND p.produced_quantity = 0)`,
+        'sinAnotar',
+      );
+    const [[data, total], fila] = await Promise.all([
+      qb
+        .leftJoinAndSelect('p.items', 'items')
+        .orderBy('p.createdAt', 'DESC')
+        .skip(pagina.offset)
+        .take(pagina.limit)
+        .getManyAndCount(),
+      resumenQb.getRawOne<{
+        tandas: string;
+        unidades: string;
+        sinAnotar: string;
+      }>(),
+    ]);
+    return armarPaginado(data, total, pagina, {
+      tandas: Number(fila?.tandas ?? 0),
+      unidades: Number(fila?.unidades ?? 0),
+      sinAnotar: Number(fila?.sinAnotar ?? 0),
     });
-    return armarPaginado(data, total, pagina);
   }
 
   async findOne(id: string, tenantId: string): Promise<Production> {
@@ -350,6 +413,7 @@ export class ProductionService {
           tenantId,
           warehouseId: fila.warehouseId,
           producedQuantity: 0,
+          unidadesFabricadas: dto.unidades ?? null,
           notes: dto.notes ?? undefined,
           createdById: userId,
           items: [

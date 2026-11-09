@@ -24,6 +24,12 @@ export class Production extends TenantAwareEntity {
   @Column({ name: 'produced_quantity', type: 'int', default: 0 })
   producedQuantity: number;
 
+  // Lociones que salieron de una tanda de «sacar esencia». La entrada de
+  // terminado ya las cuenta en `producedQuantity`; César, que solo saca
+  // esencia, las anotaba en la nota («136 unidades»).
+  @Column({ name: 'unidades_fabricadas', type: 'int', nullable: true })
+  unidadesFabricadas: number | null;
+
   @Column({ nullable: true })
   notes: string;
 

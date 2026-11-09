@@ -280,4 +280,38 @@ describe('Producción simple (e2e)', () => {
     expect(await stockDe(locionVariant, bodegaVenta)).toBe(antes + 3);
     expect(await stockDe(frascoVariant, bodegaInsumos)).toBe(84);
   }, 60000);
+
+  it('el historial dice cuántas se fabricaron en el mes, y avisa las tandas sin anotar', async () => {
+    // «¿Cómo hago para saber cuántos productos se fabricaron el mes pasado?»
+    await request(app.getHttpServer())
+      .post('/api/production/salida-de-esencia')
+      .set(h())
+      .send({ variantId: esenciaVariant, gramos: 1500, unidades: 50 })
+      .expect(201);
+    const hoy = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Bogota',
+    }).format(new Date());
+    const r = await request(app.getHttpServer())
+      .get(`/api/production?desde=${hoy}&hasta=${hoy}`)
+      .set(h())
+      .expect(200);
+    // 50 de la tanda anotada + 10 y 5 de las entradas de terminado. La
+    // primera tanda («Para 50 Good Girl») no dice cuántas salieron.
+    expect(r.body.resumen).toEqual({ tandas: 4, unidades: 65, sinAnotar: 1 });
+    expect(r.body.data[0].unidadesFabricadas).toBe(50);
+
+    const antes = await request(app.getHttpServer())
+      .get('/api/production?desde=2020-01-01&hasta=2020-01-31')
+      .set(h())
+      .expect(200);
+    expect(antes.body.resumen).toEqual({
+      tandas: 0,
+      unidades: 0,
+      sinAnotar: 0,
+    });
+    await request(app.getHttpServer())
+      .get('/api/production?desde=octubre')
+      .set(h())
+      .expect(400);
+  }, 60000);
 });
