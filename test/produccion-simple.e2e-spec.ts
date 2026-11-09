@@ -314,4 +314,38 @@ describe('Producción simple (e2e)', () => {
       .set(h())
       .expect(400);
   }, 60000);
+
+  it('la tanda registrada tarde cuenta en el mes en que se produjo, no en el del registro', async () => {
+    // «Si lo ingresa ahora no saldrá con fecha de octubre» (Andrea).
+    const r = await request(app.getHttpServer())
+      .post('/api/production/salida-de-esencia')
+      .set(h())
+      .send({
+        variantId: esenciaVariant,
+        gramos: 300,
+        unidades: 10,
+        fecha: '2026-01-20',
+      })
+      .expect(201);
+    expect(r.body.fechaDeProduccion).toBe('2026-01-20');
+    const enero = await request(app.getHttpServer())
+      .get('/api/production?desde=2026-01-01&hasta=2026-01-31')
+      .set(h())
+      .expect(200);
+    expect(enero.body.resumen).toEqual({
+      tandas: 1,
+      unidades: 10,
+      sinAnotar: 0,
+    });
+
+    const manana = new Date(Date.now() + 2 * 86400000)
+      .toISOString()
+      .slice(0, 10);
+    const futura = await request(app.getHttpServer())
+      .post('/api/production/salida-de-esencia')
+      .set(h())
+      .send({ variantId: esenciaVariant, gramos: 10, fecha: manana })
+      .expect(400);
+    expect(futura.body.message).toMatch(/después de hoy/);
+  }, 60000);
 });

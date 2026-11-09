@@ -30,6 +30,12 @@ export class Production extends TenantAwareEntity {
   @Column({ name: 'unidades_fabricadas', type: 'int', nullable: true })
   unidadesFabricadas: number | null;
 
+  // El día en que se produjo, cuando se registra después: «si lo ingresa
+  // ahora no saldrá con fecha de octubre» (Andrea). Sin él, el del registro.
+  // Texto y no instante: ver `diaDeCalendario`.
+  @Column({ name: 'fecha_de_produccion', type: 'date', nullable: true })
+  fechaDeProduccion: string | null;
+
   @Column({ nullable: true })
   notes: string;
 

@@ -1,4 +1,11 @@
-import { IsInt, IsOptional, IsString, IsUUID, Min } from 'class-validator';
+import {
+  IsInt,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Matches,
+  Min,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 /**
@@ -31,6 +38,14 @@ export class SalidaDeEsenciaDto {
   @IsInt()
   @Min(1)
   unidades?: number;
+
+  @ApiPropertyOptional({
+    example: '2026-10-20',
+    description: 'Día en que se produjo, si se registra después; sin él, hoy',
+  })
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'La fecha va como AAAA-MM-DD' })
+  fecha?: string;
 
   @ApiPropertyOptional({ example: 'Para 50 Good Girl' })
   @IsOptional()

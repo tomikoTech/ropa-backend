@@ -9,7 +9,8 @@ import { Production } from './entities/production.entity.js';
 import { ProductionItem } from './entities/production-item.entity.js';
 import { Paginated } from '../common/types/paginated.js';
 import { resolverPagina, armarPaginado } from '../common/utils/paginacion.js';
-import { rangoUtcDelDia } from '../caja/cuadre.js';
+import { diaLocal, ZONA_DE_LA_TIENDA } from '../caja/cuadre.js';
+import { diaDeCalendario } from '../common/utils/dia-de-calendario.util.js';
 
 export interface ResumenDeProduccion {
   /** Registros en el filtro: tandas de esencia y entradas de terminado. */
@@ -273,16 +274,11 @@ export class ProductionService {
     const qb = this.productionRepo
       .createQueryBuilder('p')
       .where('p.tenant_id = :tenantId', { tenantId });
-    if (opts.desde) {
-      qb.andWhere('p.created_at >= :desde', {
-        desde: rangoUtcDelDia(opts.desde).desde,
-      });
-    }
-    if (opts.hasta) {
-      qb.andWhere('p.created_at < :hasta', {
-        hasta: rangoUtcDelDia(opts.hasta).hasta,
-      });
-    }
+    // El día que cuenta es el de la producción; si no se dijo, el del registro.
+    const dia = `COALESCE(p.fecha_de_produccion, (p.created_at AT TIME ZONE :zona)::date)`;
+    if (opts.desde || opts.hasta) qb.setParameter('zona', ZONA_DE_LA_TIENDA);
+    if (opts.desde) qb.andWhere(`${dia} >= :desde`, { desde: opts.desde });
+    if (opts.hasta) qb.andWhere(`${dia} <= :hasta`, { hasta: opts.hasta });
     const resumenQb = qb
       .clone()
       .select('COUNT(*)', 'tandas')
@@ -388,6 +384,13 @@ export class ProductionService {
         relations: ['product', 'product.category'],
       });
       if (!variante) throw new NotFoundException('Esencia no encontrada');
+      const hoy = diaLocal(new Date());
+      const fecha = dto.fecha ? diaDeCalendario(dto.fecha) : null;
+      if (fecha && fecha > hoy) {
+        throw new BadRequestException(
+          'La fecha de producción no puede ser después de hoy.',
+        );
+      }
       if (variante.product.category?.type !== 'ESSENCE') {
         throw new BadRequestException(
           `«${variante.product.name}» no es una esencia.`,
@@ -414,6 +417,7 @@ export class ProductionService {
           warehouseId: fila.warehouseId,
           producedQuantity: 0,
           unidadesFabricadas: dto.unidades ?? null,
+          fechaDeProduccion: fecha && fecha !== hoy ? fecha : null,
           notes: dto.notes ?? undefined,
           createdById: userId,
           items: [
@@ -431,7 +435,7 @@ export class ProductionService {
         cantidad: -dto.gramos,
         motivo: 'PRODUCTION',
         referenciaId: saved.id,
-        notas: `Salida de esencia (producción)${dto.notes ? `: ${dto.notes}` : ''}`,
+        notas: `Salida de esencia (producción${fecha && fecha !== hoy ? ` del ${fecha}` : ''})${dto.notes ? `: ${dto.notes}` : ''}`,
         usuarioId: userId,
         tenantId,
       });
