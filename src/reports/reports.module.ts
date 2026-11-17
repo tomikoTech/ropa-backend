@@ -81,6 +81,6 @@ import { MovementsReportService } from './data/movements-report.service.js';
     ReceivablesReportService,
     MovementsReportService,
   ],
-  exports: [ReportsService, BalanceService],
+  exports: [ReportsService, BalanceService, ReportEngineService],
 })
 export class ReportsModule {}

@@ -32,6 +32,8 @@ const GROUPS = [
   'categoria',
   'marca',
   'bodega',
+  'talla',
+  'color',
 ] as const;
 type Group = (typeof GROUPS)[number];
 
@@ -93,6 +95,10 @@ export class ProfitReportService {
     if (categoryId) qb.andWhere('p.category_id = :categoryId', { categoryId });
     const brand = query.text('brand');
     if (brand) qb.andWhere('p.brand = :brand', { brand });
+    const sizeId = query.uuid('sizeId');
+    if (sizeId) qb.andWhere('v.size_id = :sizeId', { sizeId });
+    const colorId = query.uuid('colorId');
+    if (colorId) qb.andWhere('v.color_id = :colorId', { colorId });
     const channel = query.text('channel');
     if (channel) qb.andWhere('s.sale_channel = :channel', { channel });
 
@@ -357,6 +363,15 @@ export class ProfitReportService {
         label: 'Marca',
       },
       bodega: { sql: 'w.name', label: 'Bodega' },
+      // La talla y el color que tenía la línea al venderse, no los de hoy.
+      talla: {
+        sql: "COALESCE(NULLIF(si.variant_size, ''), 'Sin talla')",
+        label: 'Talla',
+      },
+      color: {
+        sql: "COALESCE(NULLIF(si.variant_color, ''), 'Sin color')",
+        label: 'Color',
+      },
     };
     const d = dims[groupBy];
 

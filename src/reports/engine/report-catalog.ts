@@ -63,6 +63,20 @@ const fCategoria: ReportFilterDef = {
   source: 'categories',
   placeholder: 'Todas',
 };
+const fTalla: ReportFilterDef = {
+  kind: 'lookup',
+  key: 'sizeId',
+  label: 'Talla',
+  source: 'sizes',
+  placeholder: 'Todas',
+};
+const fColor: ReportFilterDef = {
+  kind: 'lookup',
+  key: 'colorId',
+  label: 'Color',
+  source: 'colors',
+  placeholder: 'Todos',
+};
 const fMarca: ReportFilterDef = {
   kind: 'lookup',
   key: 'brand',
@@ -131,20 +145,8 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       fBodega,
       fCategoria,
       fMarca,
-      {
-        kind: 'lookup',
-        key: 'sizeId',
-        label: 'Talla',
-        source: 'sizes',
-        placeholder: 'Todas',
-      },
-      {
-        kind: 'lookup',
-        key: 'colorId',
-        label: 'Color',
-        source: 'colors',
-        placeholder: 'Todos',
-      },
+      fTalla,
+      fColor,
       {
         kind: 'toggle',
         key: 'includeZero',
@@ -235,12 +237,16 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
           { value: 'categoria', label: 'Categoría' },
           { value: 'marca', label: 'Marca' },
           { value: 'bodega', label: 'Bodega' },
+          { value: 'talla', label: 'Talla' },
+          { value: 'color', label: 'Color' },
         ],
       },
       fBodega,
       fVendedor,
       fCategoria,
       fMarca,
+      fTalla,
+      fColor,
       {
         kind: 'lookup',
         key: 'channel',
@@ -335,6 +341,25 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
         key: 'onlyOpen',
         label: 'Solo con saldo pendiente',
         appliesTo: { key: 'mode', values: ['cobrar', 'pagar'] },
+      },
+      // «¿Quién me debe vencido?» es la pregunta, y la respuesta es una lista
+      // corta: sin esto había que mirar la columna de mora factura por factura.
+      {
+        kind: 'toggle',
+        key: 'onlyOverdue',
+        label: 'Solo vencidas',
+        appliesTo: { key: 'mode', values: ['cobrar', 'pagar'] },
+      },
+      {
+        kind: 'select',
+        key: 'groupBy',
+        label: 'Agrupar por',
+        appliesTo: { key: 'mode', values: ['cobrar'] },
+        options: [
+          { value: 'factura', label: 'Factura' },
+          { value: 'cliente', label: 'Cliente' },
+        ],
+        placeholder: 'Factura',
       },
       {
         kind: 'lookup',

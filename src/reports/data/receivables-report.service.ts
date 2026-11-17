@@ -93,7 +93,11 @@ export class ReceivablesReportService {
     dueDate: string | number | boolean | null | undefined,
     saldo: number,
   ): number {
-    if (saldo <= 0 || typeof dueDate === 'boolean' || typeof dueDate === 'number')
+    if (
+      saldo <= 0 ||
+      typeof dueDate === 'boolean' ||
+      typeof dueDate === 'number'
+    )
       return 0;
     return diasDeMora(dueDate, diaDeCalendario());
   }
@@ -170,7 +174,7 @@ export class ReceivablesReportService {
       .limit(MAX_ROWS)
       .getRawMany<RawRow>();
 
-    const rows = raw.map((r) => {
+    const todas = raw.map((r) => {
       const total = money(r.total);
       const abonado = money(r.abonado);
       const saldo = money(total - abonado);
@@ -188,13 +192,18 @@ export class ReceivablesReportService {
         mora: this.overdueDays(r.vence, saldo),
       };
     });
+    // La mora se calcula aquí, con el día del negocio, así que el filtro va
+    // después y no en el SQL.
+    const rows = query.flag('onlyOverdue')
+      ? todas.filter((r) => r.mora > 0)
+      : todas;
 
     const saldo = money(rows.reduce((s, r) => s + r.saldo, 0));
     const vencido = money(
       rows.filter((r) => r.mora > 0).reduce((s, r) => s + r.saldo, 0),
     );
 
-    return {
+    const resultado: ReportResult = {
       columns: [
         { key: 'fecha', label: 'Fecha', type: 'date' },
         { key: 'vence', label: 'Vence', type: 'date' },
@@ -245,6 +254,81 @@ export class ReceivablesReportService {
       title: `Cuentas por cobrar ${query.from} a ${query.to}`,
       warnings: [],
     };
+    if (
+      query.pick('groupBy', ['factura', 'cliente'] as const, 'factura') ===
+      'cliente'
+    ) {
+      return { ...resultado, ...this.porCliente(rows) };
+    }
+    return resultado;
+  }
+
+  /**
+   * Una fila por cliente: cuántas facturas, cuánto debe y cuánto de eso está
+   * vencido. Es la respuesta a «¿quién me debe?», que la lista de facturas no
+   * da de un vistazo. Los totales de arriba no cambian: son los mismos.
+   */
+  private porCliente(
+    rows: {
+      cliente: string;
+      documento: string;
+      total: number;
+      abonado: number;
+      saldo: number;
+      mora: number;
+    }[],
+  ): Pick<ReportResult, 'columns' | 'rows'> {
+    const grupos = new Map<
+      string,
+      {
+        cliente: string;
+        documento: string;
+        facturas: number;
+        total: number;
+        abonado: number;
+        saldo: number;
+        vencido: number;
+        mora: number;
+      }
+    >();
+    for (const r of rows) {
+      const clave = `${r.cliente}|${r.documento}`;
+      const g = grupos.get(clave) ?? {
+        cliente: r.cliente,
+        documento: r.documento,
+        facturas: 0,
+        total: 0,
+        abonado: 0,
+        saldo: 0,
+        vencido: 0,
+        mora: 0,
+      };
+      g.facturas += 1;
+      g.total = money(g.total + r.total);
+      g.abonado = money(g.abonado + r.abonado);
+      g.saldo = money(g.saldo + r.saldo);
+      if (r.mora > 0) g.vencido = money(g.vencido + r.saldo);
+      g.mora = Math.max(g.mora, r.mora);
+      grupos.set(clave, g);
+    }
+    return {
+      columns: [
+        { key: 'cliente', label: 'Cliente', type: 'text' },
+        { key: 'documento', label: 'Documento', type: 'text' },
+        { key: 'facturas', label: 'Facturas', type: 'number' },
+        { key: 'total', label: 'Total', type: 'money' },
+        { key: 'abonado', label: 'Abonado', type: 'money' },
+        { key: 'saldo', label: 'Saldo', type: 'money' },
+        { key: 'vencido', label: 'Vencido', type: 'money' },
+        {
+          key: 'mora',
+          label: 'Mora máxima',
+          type: 'number',
+          hint: 'Días de la factura más atrasada',
+        },
+      ],
+      rows: [...grupos.values()].sort((a, b) => b.saldo - a.saldo),
+    };
   }
 
   // ── Por pagar ────────────────────────────────────────────────────────────
@@ -287,7 +371,7 @@ export class ReceivablesReportService {
       .limit(MAX_ROWS)
       .getRawMany<RawRow>();
 
-    const rows = raw.map((r) => {
+    const todas = raw.map((r) => {
       const total = money(r.total);
       const abonado = money(r.abonado);
       const saldo = money(total - abonado);
@@ -304,6 +388,9 @@ export class ReceivablesReportService {
         mora: this.overdueDays(r.vence, saldo),
       };
     });
+    const rows = query.flag('onlyOverdue')
+      ? todas.filter((r) => r.mora > 0)
+      : todas;
 
     // Cuánto se le debe a cada proveedor, que es la pregunta real de este
     // reporte: la lista de facturas no la responde de un vistazo.

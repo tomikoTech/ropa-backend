@@ -119,7 +119,7 @@ describe('Costo de perfumes (e2e)', () => {
   });
 
   const filaDe = (body: { perfumes: { productId: string }[] }, id: string) =>
-    body.perfumes.find((p) => p.productId === id) as {
+    body.perfumes.find((p) => p.productId === id) as unknown as {
       frasco: { costo: number; origen: string } | null;
       manoDeObraDelProducto: number | null;
       costo: {
