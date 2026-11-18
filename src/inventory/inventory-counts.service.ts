@@ -23,10 +23,12 @@ import {
   StockUnitEventType,
 } from './entities/stock-unit-event.entity.js';
 import { ProductVariant } from '../products/entities/product-variant.entity.js';
+import { clasificarConteo, diferenciaDeUnidades } from './conteo-novedades.js';
 
 export interface CountDifference {
   variantId: string;
   sku: string;
+  reference: string;
   productName: string;
   size: string;
   color: string;
@@ -399,6 +401,8 @@ export class InventoryCountsService {
         return {
           variantId: variant.id,
           sku: variant.sku,
+          /** La referencia del producto (`sku_prefix`), la que se busca en la bodega. */
+          reference: variant.product?.skuPrefix ?? '',
           productName: variant.product?.name ?? '',
           size: variant.sizeName,
           color: variant.colorName,
@@ -411,54 +415,53 @@ export class InventoryCountsService {
       .sort((a, b) => Math.abs(b.difference) - Math.abs(a.difference));
   }
 
+  /**
+   * Cada código del conteo en su grupo, con la misma cuenta que el resumen
+   * (`clasificarConteo`): tocar una tarjeta muestra exactamente sus filas.
+   */
   async getPhysicalDifferences(countId: string, tenantId: string) {
     const count = await this.countRepo.findOne({
       where: { id: countId, tenantId },
     });
     if (!count) throw new NotFoundException('Conteo no encontrado');
+    const bulto = {
+      stockUnit: { product: true, warehouse: true, size: true, color: true },
+    };
     const [expected, scans] = await Promise.all([
       this.expectedUnitRepo.find({
         where: { countId, tenantId },
-        relations: {
-          stockUnit: {
-            product: true,
-            warehouse: true,
-            size: true,
-            color: true,
-          },
-        },
+        relations: bulto,
         order: { barcode: 'ASC' },
       }),
       this.scanRepo.find({
         where: { countId, tenantId },
-        relations: {
-          stockUnit: {
-            product: true,
-            warehouse: true,
-            size: true,
-            color: true,
-          },
-        },
+        relations: bulto,
         order: { createdAt: 'DESC' },
       }),
     ]);
-    const countedIds = new Set(
-      scans
-        .filter((scan) => SUCCESS_RESULTS.includes(scan.result))
-        .map((scan) => scan.stockUnitId),
-    );
-    const expectedIds = new Set(expected.map((row) => row.stockUnitId));
+    const r = clasificarConteo(expected, scans, {
+      bodegaId: count.warehouseId,
+      enVivo: count.status === InventoryCountStatus.OPEN,
+    });
     return {
-      missing: expected.filter((row) => !countedIds.has(row.stockUnitId)),
-      surplus: scans.filter(
-        (scan) =>
-          SUCCESS_RESULTS.includes(scan.result) &&
-          scan.stockUnitId &&
-          !expectedIds.has(scan.stockUnitId),
-      ),
-      exceptions: scans.filter(
-        (scan) => !SUCCESS_RESULTS.includes(scan.result),
-      ),
+      counted: r.contados,
+      missing: r.faltantes,
+      leftDuringCount: r.salieron,
+      surplus: r.sobrantes,
+      issues: r.novedades.map((n) => ({
+        type: n.tipo,
+        barcode: n.barcode,
+        readings: n.lecturas,
+        lastReadAt: n.ultima.createdAt,
+        message: n.ultima.message,
+        stockUnit: n.ultima.stockUnit,
+      })),
+      repeated: r.repetidos.map((g) => ({
+        barcode: g.barcode,
+        readings: g.lecturas,
+        lastReadAt: g.ultima.createdAt,
+        stockUnit: g.ultima.stockUnit,
+      })),
     };
   }
 
@@ -485,24 +488,33 @@ export class InventoryCountsService {
       }),
       this.getPhysicalDifferences(countId, tenantId),
     ]);
+    const unidades = diferenciaDeUnidades(lines);
+    const encontrados = physical.counted.length;
     return {
       count,
       summary: {
-        expectedQuantity: lines.reduce(
-          (sum, line) => sum + line.expectedQuantity,
-          0,
-        ),
-        countedQuantity: lines.reduce(
-          (sum, line) => sum + line.countedQuantity,
-          0,
-        ),
+        expectedQuantity: unidades.esperadas,
+        countedQuantity: unidades.contadas,
+        /** Unidades por referencia: faltan y sobran no se cancelan entre sí. */
+        missingQuantity: unidades.faltan,
+        surplusQuantity: unidades.sobran,
+        referencesWithDifference: unidades.referencias,
         expectedCodes: expected.length,
+        /** De la foto de apertura, cuántos aparecieron. */
+        foundCodes: encontrados,
         // No usar `recentScans`: está limitado a 100 para la pantalla.
-        countedCodes:
-          expected.length - physical.missing.length + physical.surplus.length,
+        countedCodes: encontrados + physical.surplus.length,
         missingCodes: physical.missing.length,
+        /** Salieron de la bodega mientras se contaba: no se pueden encontrar. */
+        leftDuringCountCodes: physical.leftDuringCount.length,
         surplusCodes: physical.surplus.length,
-        exceptions: physical.exceptions.length,
+        /** Códigos con novedad (uno por código, no por lectura). */
+        exceptions: physical.issues.length,
+        /** Lecturas de códigos ya contados: no suman ni restan. */
+        repeatedReadings: physical.repeated.reduce(
+          (sum, row) => sum + row.readings,
+          0,
+        ),
         // Referencias con existencia en el sistema que nadie ha contado: si se
         // cierra ajustando, quedan en cero. La pantalla lo advierte antes.
         zeroedReferences: lines.filter(
@@ -533,22 +545,18 @@ export class InventoryCountsService {
           `Escribe ${count.countNumber} para confirmar el cierre irreversible.`,
         );
       }
-      const exceptionCount = await manager
-        .getRepository(InventoryCountScan)
-        .count({
-          where: {
-            countId,
-            tenantId,
-            result: In([
-              InventoryCountScanResult.UNKNOWN,
-              InventoryCountScanResult.WRONG_WAREHOUSE,
-              InventoryCountScanResult.NOT_AVAILABLE,
-            ]),
-          },
-        });
+      // Las mismas novedades que ve la pantalla: una por código, sin contar
+      // las lecturas repetidas de lo ya contado ni las que se resolvieron.
+      const exceptionCount = clasificarConteo(
+        [],
+        await manager
+          .getRepository(InventoryCountScan)
+          .find({ where: { countId, tenantId } }),
+        { bodegaId: count.warehouseId, enVivo: true },
+      ).novedades.length;
       if (exceptionCount > 0 && !acknowledgeExceptions) {
         throw new BadRequestException(
-          `Hay ${exceptionCount} novedad(es). Revísalas y confirma que deseas cerrar.`,
+          `Hay ${exceptionCount} código(s) con novedad. Revísalos y confirma que deseas cerrar.`,
         );
       }
 
@@ -724,7 +732,12 @@ export class InventoryCountsService {
     const physical = await this.getPhysicalDifferences(countId, tenantId);
     const quote = (value: string | number | null | undefined) =>
       `"${String(value ?? '').replaceAll('"', '""')}"`;
-    const rows: string[][] = [
+    const TIPO_DE_NOVEDAD: Record<string, string> = {
+      UNKNOWN: 'NO REGISTRADO',
+      WRONG_WAREHOUSE: 'DE OTRA BODEGA',
+      NOT_AVAILABLE: 'NO DISPONIBLE',
+    };
+    const rows: (string | number)[][] = [
       [
         'conteo',
         'tipo',
@@ -732,38 +745,84 @@ export class InventoryCountsService {
         'producto',
         'talla',
         'color',
-        'bodega',
+        'bodega del sistema',
         'estado',
+        'lecturas',
+        'detalle',
         'fecha',
       ],
     ];
+    type Bulto = (typeof physical.missing)[number]['stockUnit'] | null;
+    const fila = (
+      tipo: string,
+      codigo: string,
+      bulto: Bulto | undefined,
+      lecturas: number | string,
+      detalle: string,
+      fecha: Date | null,
+    ) => [
+      count.countNumber,
+      tipo,
+      codigo,
+      bulto?.product?.name ?? '',
+      bulto?.size?.name ?? '',
+      bulto?.color?.name ?? '',
+      bulto?.warehouse?.name ?? '',
+      bulto?.status ?? '',
+      lecturas,
+      detalle,
+      fecha?.toISOString() ?? '',
+    ];
     for (const row of physical.missing) {
-      rows.push([
-        count.countNumber,
-        'FALTANTE',
-        row.barcode,
-        row.stockUnit?.product?.name ?? '',
-        row.stockUnit?.size?.name ?? '',
-        row.stockUnit?.color?.name ?? '',
-        row.stockUnit?.warehouse?.name ?? '',
-        row.stockUnit?.status ?? '',
-        '',
-      ]);
+      rows.push(fila('FALTANTE', row.barcode, row.stockUnit, '', '', null));
     }
-    for (const scan of [...physical.surplus, ...physical.exceptions]) {
-      rows.push([
-        count.countNumber,
-        scan.result === InventoryCountScanResult.SURPLUS
-          ? 'SOBRANTE'
-          : 'NOVEDAD',
-        scan.barcode,
-        scan.stockUnit?.product?.name ?? '',
-        scan.stockUnit?.size?.name ?? '',
-        scan.stockUnit?.color?.name ?? '',
-        scan.stockUnit?.warehouse?.name ?? '',
-        scan.message,
-        scan.createdAt?.toISOString() ?? '',
-      ]);
+    for (const row of physical.leftDuringCount) {
+      rows.push(
+        fila(
+          'SALIO DURANTE EL CONTEO',
+          row.barcode,
+          row.stockUnit,
+          '',
+          'Ya no está disponible en la bodega: no se puede encontrar',
+          null,
+        ),
+      );
+    }
+    for (const scan of physical.surplus) {
+      rows.push(
+        fila(
+          'SOBRANTE',
+          scan.barcode,
+          scan.stockUnit,
+          1,
+          scan.message,
+          scan.createdAt,
+        ),
+      );
+    }
+    for (const issue of physical.issues) {
+      rows.push(
+        fila(
+          `NOVEDAD: ${TIPO_DE_NOVEDAD[issue.type] ?? issue.type}`,
+          issue.barcode,
+          issue.stockUnit,
+          issue.readings,
+          issue.message,
+          issue.lastReadAt,
+        ),
+      );
+    }
+    for (const row of physical.repeated) {
+      rows.push(
+        fila(
+          'LECTURA REPETIDA',
+          row.barcode,
+          row.stockUnit,
+          row.readings,
+          'Ya estaba contado; no suma ni resta',
+          row.lastReadAt,
+        ),
+      );
     }
     return `\uFEFF${rows.map((row) => row.map(quote).join(',')).join('\n')}`;
   }

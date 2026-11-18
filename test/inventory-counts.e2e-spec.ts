@@ -334,7 +334,52 @@ describe('Conteo físico de inventario (e2e)', () => {
     expect(session.body.summary.countedQuantity).toBe(3);
     // Los dos que se escanearon dejan cinco sin aparecer.
     expect(session.body.summary.missingCodes).toBe(5);
-    expect(session.body.summary.exceptions).toBe(2); // duplicado + desconocido
+    expect(session.body.summary.foundCodes).toBe(2);
+    // Novedad es un código, no una lectura, y releer lo ya contado no lo es:
+    // el desconocido es la única. El duplicado se cuenta aparte.
+    expect(session.body.summary.exceptions).toBe(1);
+    expect(session.body.summary.repeatedReadings).toBe(1);
+
+    // Tocar cada tarjeta muestra exactamente las filas que cuenta.
+    const detalle = await request(app.getHttpServer())
+      .get(`/api/inventory-counts/${physicalCountId}/physical-differences`)
+      .set(auth())
+      .expect(200);
+    expect(detalle.body.counted).toHaveLength(2);
+    expect(detalle.body.missing).toHaveLength(5);
+    expect(detalle.body.leftDuringCount).toHaveLength(0);
+    expect(detalle.body.issues).toEqual([
+      expect.objectContaining({
+        type: 'UNKNOWN',
+        barcode: `DESCONOCIDO-${ts}`,
+        readings: 1,
+      }),
+    ]);
+    expect(detalle.body.repeated).toEqual([
+      expect.objectContaining({ barcode: physicalBarcodes[0], readings: 1 }),
+    ]);
+    expect(
+      detalle.body.counted.length +
+        detalle.body.missing.length +
+        detalle.body.leftDuringCount.length,
+    ).toBe(session.body.summary.expectedCodes);
+
+    // Un par de la foto que se vende mientras se cuenta no es faltante: ya
+    // no se puede encontrar, y el cierre tampoco lo daría de baja.
+    await unitRepo.update(
+      { barcode: physicalBarcodes[1] },
+      { status: StockUnitStatus.SOLD },
+    );
+    const conVenta = await request(app.getHttpServer())
+      .get(`/api/inventory-counts/${physicalCountId}/session`)
+      .set(auth())
+      .expect(200);
+    expect(conVenta.body.summary.missingCodes).toBe(4);
+    expect(conVenta.body.summary.leftDuringCountCodes).toBe(1);
+    await unitRepo.update(
+      { barcode: physicalBarcodes[1] },
+      { status: StockUnitStatus.IN_STOCK },
+    );
 
     await request(app.getHttpServer())
       .post(`/api/inventory-counts/${physicalCountId}/close`)
