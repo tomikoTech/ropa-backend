@@ -141,11 +141,21 @@ describe('Solicitudes internas SO- (e2e)', () => {
       .send({ items: [{ itemId, quantity: 2 }] })
       .expect(201);
     expect(completed.body.status).toBe('REMITTED');
-    await request(app.getHttpServer())
+    const recibida = await request(app.getHttpServer())
       .post(`/api/internal-requests/${id}/receive`)
       .set(auth())
       .send({})
       .expect(201);
+    // Remitida completa y recibida: terminó. Antes se quedaba «Remitida»
+    // para siempre y el menú la contaba como pendiente.
+    expect(recibida.body.status).toBe('RECEIVED');
+    expect(recibida.body.closedAt).toBeTruthy();
+    const otraVez = await request(app.getHttpServer())
+      .post(`/api/internal-requests/${id}/return`)
+      .set(auth())
+      .send({})
+      .expect(400);
+    expect(otraVez.body.message).toMatch(/ya está cerrada/);
 
     const stock = await request(app.getHttpServer())
       .get('/api/inventory/stock')

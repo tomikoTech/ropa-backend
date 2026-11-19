@@ -17,6 +17,8 @@ export enum InternalRequestStatus {
   CREATED = 'CREATED',
   PREPARED = 'PREPARED',
   REMITTED = 'REMITTED',
+  /** Remitida completa y recibida en el punto: ya no espera nada de nadie. */
+  RECEIVED = 'RECEIVED',
   RETURNED = 'RETURNED',
   CANCELLED = 'CANCELLED',
 }

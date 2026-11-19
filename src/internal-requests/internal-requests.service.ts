@@ -24,6 +24,13 @@ import { AccessService } from '../access/access.service.js';
 import { StockLedgerService } from '../inventory/ledger/stock-ledger.service.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
 
+/** Las que ya no esperan nada: no se cancelan, no se devuelven, no se cuentan. */
+const CERRADAS: InternalRequestStatus[] = [
+  InternalRequestStatus.RECEIVED,
+  InternalRequestStatus.CANCELLED,
+  InternalRequestStatus.RETURNED,
+];
+
 interface CreateInput {
   destinationWarehouseId: string;
   notes?: string;
@@ -450,6 +457,14 @@ export class InternalRequestsService {
         shipment.receivedAt = new Date();
         await manager.getRepository(InternalRequestShipment).save(shipment);
       }
+      // Se remitió todo y ya llegó todo: la solicitud terminó. Antes se
+      // quedaba en «Remitida» para siempre, el menú la contaba como pendiente
+      // y al abrirla no había nada que hacer (AMAWAD, SO-00001).
+      if (request.status === InternalRequestStatus.REMITTED) {
+        request.status = InternalRequestStatus.RECEIVED;
+        request.closedAt = new Date();
+        await manager.getRepository(InternalRequest).save(request);
+      }
       return this.findOne(id, tenantId, manager);
     });
   }
@@ -462,6 +477,10 @@ export class InternalRequestsService {
   ) {
     return this.dataSource.transaction(async (manager) => {
       const request = await this.lock(manager, id, tenantId);
+      if (CERRADAS.includes(request.status))
+        throw new BadRequestException(
+          `La solicitud ${request.requestNumber} ya está cerrada`,
+        );
       const shipments = await manager
         .getRepository(InternalRequestShipment)
         .find({
