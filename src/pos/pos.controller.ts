@@ -27,6 +27,7 @@ import { MarkSalePaidDto } from './dto/mark-sale-paid.dto.js';
 import {
   CollectAccountsDto,
   CorregirAbonoDto,
+  CambiarVencimientoDto,
   RecordArPaymentDto,
   ReverseArPaymentDto,
   RecibirReciboDto,
@@ -251,6 +252,25 @@ export class PosController {
       tenantId,
       userId,
       dto?.motivo,
+    );
+  }
+
+  @Patch('accounts-receivable/:id/vencimiento')
+  @Roles(Role.ADMIN)
+  @ApiOperation({
+    summary: 'Cambiar la fecha de pago de una factura a crédito',
+  })
+  cambiarVencimiento(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CambiarVencimientoDto,
+    @TenantId() tenantId: string,
+    @UserId() userId: string,
+  ) {
+    return this.posService.cambiarVencimiento(
+      id,
+      dto.dueDate,
+      tenantId,
+      userId,
     );
   }
 

@@ -1,6 +1,8 @@
 import {
+  Body,
   Controller,
   Get,
+  Post,
   Query,
   Res,
   UseGuards,
@@ -15,6 +17,15 @@ import { Roles } from '../common/decorators/roles.decorator.js';
 import { RolesGuard } from '../common/guards/roles.guard.js';
 import { Role } from '../common/enums/role.enum.js';
 import ExcelJS from 'exceljs';
+import { UserId } from '../common/decorators/user-id.decorator.js';
+import { ArrayMaxSize, ArrayMinSize, IsUUID } from 'class-validator';
+
+class CargarCostoDto {
+  @ArrayMinSize(1)
+  @ArrayMaxSize(500)
+  @IsUUID('4', { each: true })
+  saleItemIds: string[];
+}
 
 @ApiTags('Reportes')
 @ApiBearerAuth()
@@ -59,6 +70,40 @@ export class ReportsController {
       hasta: to,
       warehouseId: warehouseId || undefined,
     });
+  }
+
+  /** Las líneas que dejan ventas fuera de la ganancia del balance. */
+  @Get('balance/sin-costo')
+  @ApiOperation({ summary: 'Líneas de venta sin costo registrado' })
+  getLineasSinCosto(
+    @TenantId() tenantId: string,
+    @Query('from') from: string,
+    @Query('to') to: string,
+    @Query('warehouseId') warehouseId?: string,
+  ) {
+    const dia = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dia.test(from ?? '') || !dia.test(to ?? '') || from > to) {
+      throw new BadRequestException('Rango de fechas inválido (AAAA-MM-DD).');
+    }
+    return this.balance.lineasSinCosto(tenantId, {
+      desde: from,
+      hasta: to,
+      warehouseId: warehouseId || undefined,
+    });
+  }
+
+  @Post('balance/sin-costo/cargar')
+  @Roles(Role.ADMIN)
+  @UseGuards(RolesGuard)
+  @ApiOperation({
+    summary: 'Cargar a líneas sin costo el costo actual del producto',
+  })
+  cargarCostoActual(
+    @TenantId() tenantId: string,
+    @UserId() userId: string,
+    @Body() dto: CargarCostoDto,
+  ) {
+    return this.balance.cargarCostoActual(tenantId, dto.saleItemIds, userId);
   }
 
   @Get('dashboard')

@@ -12,6 +12,7 @@ import {
   ArrayMinSize,
   ValidateNested,
   IsIn,
+  Matches,
 } from 'class-validator';
 import { ApiPropertyOptional, ApiProperty } from '@nestjs/swagger';
 import { PaymentMethod } from '../../common/enums/payment-method.enum.js';
@@ -119,4 +120,13 @@ export class CorregirAbonoDto {
   @IsString()
   @MaxLength(300)
   notes?: string | null;
+}
+
+/** La nueva fecha de pago de una factura a crédito. */
+export class CambiarVencimientoDto {
+  @ApiProperty({ example: '2027-03-15', description: 'AAAA-MM-DD' })
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
+    message: 'La fecha de pago va como AAAA-MM-DD',
+  })
+  dueDate: string;
 }

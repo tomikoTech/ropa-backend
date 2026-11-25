@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
+import { AuditLog } from '../audit/entities/audit-log.entity.js';
 import { DataSource } from 'typeorm';
 import {
   armarBalance,
@@ -39,6 +40,114 @@ export interface BalanceConNombres extends Balance {
 @Injectable()
 export class BalanceService {
   constructor(private readonly dataSource: DataSource) {}
+
+  /**
+   * Cuáles son las ventas «sin costo» del aviso, línea por línea.
+   *
+   * El balance decía «1 venta del periodo no tiene el costo registrado» y no
+   * había forma de saber cuál (Andrés, AMAWAD, 2026-11-25). Es la misma regla
+   * que `ventas()`: una línea con `unit_cost = 0` deja la venta entera fuera
+   * de la ganancia. `costoActual` es el que tiene hoy el producto, el que se
+   * le puede cargar.
+   */
+  async lineasSinCosto(tenantId: string, rango: RangoDelBalance) {
+    const filas = await this.dataSource.query<
+      {
+        sale_id: string;
+        invoice_number: string | null;
+        fecha: string;
+        sale_item_id: string | null;
+        product_id: string | null;
+        referencia: string | null;
+        producto: string | null;
+        sku: string | null;
+        cantidad: number | null;
+        costo_actual: string | null;
+      }[]
+    >(
+      `SELECT s.id AS sale_id, s.invoice_number, s.created_at AS fecha,
+              i.id AS sale_item_id,
+              p.id AS product_id,
+              COALESCE(p.sku_prefix, i.product_code) AS referencia,
+              COALESCE(p.name, i.product_name) AS producto,
+              COALESCE(i.variant_sku, v.sku) AS sku,
+              i.quantity AS cantidad,
+              p.cost_price AS costo_actual
+         FROM sales s
+         LEFT JOIN sale_items i ON i.sale_id = s.id
+         LEFT JOIN product_variants v ON v.id = i.variant_id
+         LEFT JOIN products p ON p.id = v.product_id
+        WHERE s.tenant_id = $1
+          AND s.status::text <> 'CANCELLED'
+          AND s.created_at >= $2::date
+          AND s.created_at < ($3::date + INTERVAL '1 day')
+          AND ($4::uuid IS NULL OR s.warehouse_id = $4::uuid)
+          AND (i.id IS NULL OR COALESCE(i.unit_cost, 0) = 0)
+        ORDER BY s.created_at DESC, referencia`,
+      [tenantId, rango.desde, rango.hasta, rango.warehouseId ?? null],
+    );
+    return filas.map((f) => ({
+      saleId: f.sale_id,
+      invoiceNumber: f.invoice_number,
+      fecha: f.fecha,
+      saleItemId: f.sale_item_id,
+      productId: f.product_id,
+      referencia: f.referencia ?? '',
+      producto: f.producto ?? '',
+      sku: f.sku ?? '',
+      cantidad: Number(f.cantidad ?? 0),
+      costoActual: Number(f.costo_actual ?? 0),
+    }));
+  }
+
+  /**
+   * Le pone a esas líneas el costo que hoy tiene el producto.
+   *
+   * Solo toca líneas en cero —nunca reescribe un costo que sí se registró— y
+   * solo si el producto tiene costo. Queda en la bitácora con cada línea.
+   */
+  async cargarCostoActual(
+    tenantId: string,
+    saleItemIds: string[],
+    userId?: string,
+  ) {
+    if (!saleItemIds.length)
+      throw new BadRequestException('No hay líneas para cargar');
+    return this.dataSource.transaction(async (manager) => {
+      // Con UPDATE … RETURNING, TypeORM devuelve [filas, cuántas]: no las filas.
+      const [cargadas] = await manager.query<
+        [{ id: string; sale_id: string; unit_cost: string }[], number]
+      >(
+        `UPDATE sale_items i
+            SET unit_cost = p.cost_price
+           FROM sales s, product_variants v, products p
+          WHERE i.id = ANY($2::uuid[])
+            AND s.id = i.sale_id AND s.tenant_id = $1
+            AND v.id = i.variant_id AND p.id = v.product_id
+            AND COALESCE(i.unit_cost, 0) = 0
+            AND COALESCE(p.cost_price, 0) > 0
+        RETURNING i.id, i.sale_id, i.unit_cost`,
+        [tenantId, saleItemIds],
+      );
+      if (cargadas.length) {
+        await manager.getRepository(AuditLog).save(
+          manager.getRepository(AuditLog).create({
+            userId: userId ?? undefined,
+            action: 'CARGAR_COSTO_DE_VENTA',
+            entityType: 'SaleItem',
+            entityId: cargadas[0].id,
+            oldValues: { unitCost: 0 },
+            newValues: { lineas: cargadas },
+            tenantId,
+          }),
+        );
+      }
+      return {
+        cargadas: cargadas.length,
+        sinCostoEnElProducto: saleItemIds.length - cargadas.length,
+      };
+    });
+  }
 
   /** `decimal` de Postgres (texto) a centavos enteros. */
   private centavos(valor: string | number | null | undefined): number {

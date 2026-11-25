@@ -295,7 +295,7 @@ export class PosService {
         // Cuáles de esas bodegas son la vitrina. Se leen una sola vez para
         // toda la factura: son pocas y no cambian a mitad de una venta.
         const vitrinas = await this.vitrinasDelTenant(manager, tenantId);
-      const privadas = await this.privadasDelTenant(manager, tenantId);
+        const privadas = await this.privadasDelTenant(manager, tenantId);
 
         // Separados / apartados (F6): si el tenant lo tiene habilitado, el stock
         // reservado para OTROS clientes no está disponible para esta venta. Los
@@ -635,9 +635,15 @@ export class PosService {
           // Snapshot del costo (F9): del bulto si vino de uno, si no el costo
           // actual del producto. Queda congelado en la línea para que la
           // utilidad de esta venta no cambie cuando cambie el costo mañana.
-          const unitCost = soldUnit
-            ? Number(soldUnit.cost) || 0
-            : Number(data.variant.product.costPrice) || 0;
+          //
+          // Un bulto sin costo cae al del producto. Una caja ingresada antes
+          // de ponerle costo al producto se quedaba en cero, y la venta salía
+          // «sin costo» aunque el producto ya lo tuviera (AMAWAD, FE-000143:
+          // caja de MAYLU62 ingresada a las 2:38, costo puesto a las 2:40).
+          const unitCost =
+            (soldUnit ? Number(soldUnit.cost) : 0) ||
+            Number(data.variant.product.costPrice) ||
+            0;
 
           // Qué se entregó de verdad. Una caja no tiene talla: trae un
           // surtido, y hasta ahora en esa columna se copiaba la talla de la
@@ -3157,6 +3163,53 @@ export class PosService {
    * así que corregir esos dos campos basta para que el saldo del banco cuadre
    * con sus movimientos. La regla vive en `corregir-abono.ts`.
    */
+  /**
+   * Cambia la fecha de pago de una factura a crédito.
+   *
+   * El plazo salía solo (90 días en AMAWAD) y no había cómo moverlo cuando se
+   * pactaba otro con el cliente (Andrés, 2026-11-25). Se guarda como texto:
+   * un día no es un instante (ver `diaDeCalendario`). No puede quedar antes
+   * del día de la factura, y una ya pagada no tiene fecha que mover.
+   */
+  async cambiarVencimiento(
+    id: string,
+    dueDate: string,
+    tenantId: string,
+    userId?: string,
+  ): Promise<AccountsReceivable> {
+    return this.dataSource.transaction(async (manager) => {
+      const repo = manager.getRepository(AccountsReceivable);
+      const cuenta = await repo.findOne({ where: { id, tenantId } });
+      if (!cuenta)
+        throw new NotFoundException('Cuenta por cobrar no encontrada');
+      if (cuenta.isFullyPaid)
+        throw new BadRequestException(
+          'Esa factura ya está pagada: no tiene fecha de pago que mover',
+        );
+      const dia = diaDeCalendario(dueDate);
+      const creada = diaDeCalendario(cuenta.createdAt);
+      if (dia < creada)
+        throw new BadRequestException(
+          `La fecha de pago no puede ser anterior a la factura (${creada})`,
+        );
+      const antes = String(cuenta.dueDate).slice(0, 10);
+      if (antes === dia) return cuenta;
+      await repo.update({ id, tenantId }, { dueDate: dia });
+      await manager.getRepository(AuditLog).save(
+        manager.getRepository(AuditLog).create({
+          userId: userId ?? undefined,
+          action: 'CAMBIAR_VENCIMIENTO',
+          entityType: 'AccountsReceivable',
+          entityId: id,
+          oldValues: { dueDate: antes },
+          newValues: { dueDate: dia },
+          tenantId,
+        }),
+      );
+      return (await repo.findOne({ where: { id, tenantId } }))!;
+    });
+  }
+
   async corregirAbono(
     paymentId: string,
     dto: CorregirAbonoDto,
