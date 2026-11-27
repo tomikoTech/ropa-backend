@@ -31,6 +31,7 @@ import { retryOnUniqueViolation } from '../common/utils/db-errors.util.js';
 import { StockLedgerService } from '../inventory/ledger/stock-ledger.service.js';
 import { StockUnitStatus } from '../inventory/entities/stock-unit.entity.js';
 import { diaDeCalendario } from '../common/utils/dia-de-calendario.util.js';
+import { AuditLog } from '../audit/entities/audit-log.entity.js';
 import {
   pendienteTotal,
   repartirAbono,
@@ -1163,6 +1164,56 @@ export class PurchasesService {
     });
     if (!ap) throw new NotFoundException('Cuenta por pagar no encontrada');
     return ap;
+  }
+
+  /**
+   * Correr la fecha de pago de una factura del proveedor, sin tocar la compra.
+   *
+   * Antes la única manera era editar la orden de compra entera, y ese
+   * formulario exige productos: una compra cargada por cajas no tiene
+   * renglones sueltos y no dejaba guardar. Aquí solo se mueve el día, queda en
+   * la auditoría y, si el vencimiento era el asumido, se quita esa nota.
+   */
+  async cambiarVencimiento(
+    id: string,
+    dueDate: string,
+    tenantId: string,
+    userId?: string,
+  ): Promise<AccountsPayable> {
+    await this.dataSource.transaction(async (manager) => {
+      const repo = manager.getRepository(AccountsPayable);
+      const cuenta = await repo.findOne({ where: { id, tenantId } });
+      if (!cuenta)
+        throw new NotFoundException('Cuenta por pagar no encontrada');
+      if (cuenta.isPaid)
+        throw new BadRequestException(
+          'Esa factura ya está pagada: no tiene fecha de pago que mover',
+        );
+      const dia = diaDeCalendario(dueDate);
+      const creada = diaDeCalendario(cuenta.createdAt);
+      if (dia < creada)
+        throw new BadRequestException(
+          `La fecha de pago no puede ser anterior a la factura (${creada})`,
+        );
+      const antes = String(cuenta.dueDate).slice(0, 10);
+      if (antes === dia) return;
+      cuenta.dueDate = dia;
+      if (cuenta.notes === PLAZO_ASUMIDO)
+        cuenta.notes = null as unknown as string;
+      await repo.save(cuenta);
+      await manager.getRepository(AuditLog).save(
+        manager.getRepository(AuditLog).create({
+          userId: userId ?? undefined,
+          action: 'CAMBIAR_VENCIMIENTO',
+          entityType: 'AccountsPayable',
+          entityId: id,
+          oldValues: { dueDate: antes },
+          newValues: { dueDate: dia },
+          tenantId,
+        }),
+      );
+    });
+    return this.findOneAccountPayable(id, tenantId);
   }
 
   /**

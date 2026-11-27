@@ -126,6 +126,59 @@ describe('Fecha de pago y ventas sin costo (e2e)', () => {
       .expect(400);
   });
 
+  it('corre la fecha de pago de una factura del proveedor sin editar la compra', async () => {
+    const prov = await request(app.getHttpServer())
+      .post('/api/suppliers')
+      .set(h())
+      .send({
+        name: `E2E VC Prov ${ts}`,
+        nit: `904${ts.toString().slice(-6)}-1`,
+      })
+      .expect(201);
+    // Sin plazo: nace con el vencimiento asumido y su nota.
+    const compra = await request(app.getHttpServer())
+      .post('/api/purchases')
+      .set(h())
+      .send({
+        supplierId: prov.body.id,
+        warehouseId,
+        items: [{ variantId, quantityOrdered: 3, unitCost: 10_000 }],
+      })
+      .expect(201);
+    const apId = compra.body.accountsPayable[0].id as string;
+
+    const r = await request(app.getHttpServer())
+      .patch(`/api/purchases/accounts-payable/${apId}/vencimiento`)
+      .set(h())
+      .send({ dueDate: '2027-04-30' })
+      .expect(200);
+    expect(String(r.body.dueDate).slice(0, 10)).toBe('2027-04-30');
+    expect(r.body.notes ?? null).toBeNull();
+    expect(r.body.purchaseOrder.supplier.id).toBe(prov.body.id);
+
+    const antes = await request(app.getHttpServer())
+      .patch(`/api/purchases/accounts-payable/${apId}/vencimiento`)
+      .set(h())
+      .send({ dueDate: '2020-01-01' })
+      .expect(400);
+    expect(antes.body.message).toMatch(/anterior a la factura/);
+
+    // Pagada, ya no hay fecha que mover.
+    await request(app.getHttpServer())
+      .post(`/api/purchases/accounts-payable/${apId}/pay`)
+      .set(h())
+      .send({})
+      .expect((x) => {
+        if (x.status !== 200 && x.status !== 201) throw new Error(x.text);
+      });
+    const pagada = await request(app.getHttpServer())
+      .patch(`/api/purchases/accounts-payable/${apId}/vencimiento`)
+      .set(h())
+      .send({ dueDate: '2027-05-30' })
+      .expect(400);
+    expect(pagada.body.message).toMatch(/ya está pagada/);
+  });
+
   it('dice qué línea no tiene costo y le carga el costo actual del producto', async () => {
     const lista = async () =>
       (

@@ -25,7 +25,10 @@ import {
   PaySupplierDto,
   PayAccountsPayableDto,
 } from './dto/pay-supplier.dto.js';
-import { ReverseArPaymentDto } from '../pos/dto/record-ar-payment.dto.js';
+import {
+  ReverseArPaymentDto,
+  CambiarVencimientoDto,
+} from '../pos/dto/record-ar-payment.dto.js';
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
 import { TenantId } from '../common/decorators/tenant-id.decorator.js';
 import { Roles } from '../common/decorators/roles.decorator.js';
@@ -266,6 +269,25 @@ export class PurchasesController {
     @TenantId() tenantId: string,
   ) {
     return this.purchasesService.findOneAccountPayable(id, tenantId);
+  }
+
+  @Patch('accounts-payable/:id/vencimiento')
+  @Roles(Role.ADMIN)
+  @ApiOperation({
+    summary: 'Cambiar la fecha de pago de una factura del proveedor',
+  })
+  cambiarVencimiento(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CambiarVencimientoDto,
+    @CurrentUser() user: { id: string },
+    @TenantId() tenantId: string,
+  ) {
+    return this.purchasesService.cambiarVencimiento(
+      id,
+      dto.dueDate,
+      tenantId,
+      user.id,
+    );
   }
 
   @Post('accounts-payable/:id/payment')
