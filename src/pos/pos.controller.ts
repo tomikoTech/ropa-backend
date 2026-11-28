@@ -9,6 +9,7 @@ import {
   Res,
   ParseUUIDPipe,
   ForbiddenException,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -32,6 +33,7 @@ import {
   ReverseArPaymentDto,
   RecibirReciboDto,
 } from './dto/record-ar-payment.dto.js';
+import { AdminORolConPermisoGuard } from '../common/guards/admin-o-rol-con-permiso.guard.js';
 import { Roles } from '../common/decorators/roles.decorator.js';
 import { SendInvoiceDto } from './dto/send-invoice.dto.js';
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
@@ -257,6 +259,7 @@ export class PosController {
 
   @Patch('accounts-receivable/:id/vencimiento')
   @Roles(Role.ADMIN)
+  @UseGuards(AdminORolConPermisoGuard)
   @ApiOperation({
     summary: 'Cambiar la fecha de pago de una factura a crédito',
   })

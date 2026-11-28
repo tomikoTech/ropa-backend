@@ -14,6 +14,7 @@ import { ReportsService } from './reports.service.js';
 import { BalanceService } from './balance.service.js';
 import { TenantId } from '../common/decorators/tenant-id.decorator.js';
 import { Roles } from '../common/decorators/roles.decorator.js';
+import { AdminORolConPermisoGuard } from '../common/guards/admin-o-rol-con-permiso.guard.js';
 import { RolesGuard } from '../common/guards/roles.guard.js';
 import { Role } from '../common/enums/role.enum.js';
 import ExcelJS from 'exceljs';
@@ -94,7 +95,7 @@ export class ReportsController {
 
   @Post('balance/sin-costo/cargar')
   @Roles(Role.ADMIN)
-  @UseGuards(RolesGuard)
+  @UseGuards(AdminORolConPermisoGuard)
   @ApiOperation({
     summary: 'Cargar a líneas sin costo el costo actual del producto',
   })

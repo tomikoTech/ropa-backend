@@ -179,6 +179,61 @@ describe('Fecha de pago y ventas sin costo (e2e)', () => {
     expect(pagada.body.message).toMatch(/ya está pagada/);
   });
 
+  it('el encargado con rol «Administrador» también puede; el colaborador sin rol, no', async () => {
+    // Así entran los encargados de AMAWAD: COLABORADOR con el rol de acceso
+    // «Administrador». El botón no les salía y el servidor los habría frenado.
+    const rol = await request(app.getHttpServer())
+      .post('/api/access/roles')
+      .set(h())
+      .send({ name: `Administrador VC ${ts}`, templateKey: 'administrador' })
+      .expect(201);
+    const crear = async (sufijo: string) => {
+      const email = `vc-${sufijo}-${ts}@e2e.co`;
+      const password = 'Clave-e2e-123';
+      const u = await request(app.getHttpServer())
+        .post('/api/users')
+        .set(h())
+        .send({
+          email,
+          password,
+          firstName: 'E2E',
+          lastName: sufijo,
+          role: 'COLABORADOR',
+        })
+        .expect(201);
+      return { id: u.body.id as string, email, password };
+    };
+    const login = async (email: string, password: string) =>
+      (
+        await request(app.getHttpServer())
+          .post('/api/auth/login')
+          .send({ email, password })
+          .expect(201)
+      ).body.accessToken as string;
+
+    const encargado = await crear('encargado');
+    await request(app.getHttpServer())
+      .patch(`/api/access/users/${encargado.id}`)
+      .set(h())
+      .send({ accessRoleId: rol.body.id })
+      .expect(200);
+    const tEncargado = await login(encargado.email, encargado.password);
+    const r = await request(app.getHttpServer())
+      .patch(`/api/pos/accounts-receivable/${arId}/vencimiento`)
+      .set({ Authorization: `Bearer ${tEncargado}` })
+      .send({ dueDate: '2027-03-20' })
+      .expect(200);
+    expect(String(r.body.dueDate).slice(0, 10)).toBe('2027-03-20');
+
+    const suelto = await crear('suelto');
+    const tSuelto = await login(suelto.email, suelto.password);
+    await request(app.getHttpServer())
+      .patch(`/api/pos/accounts-receivable/${arId}/vencimiento`)
+      .set({ Authorization: `Bearer ${tSuelto}` })
+      .send({ dueDate: '2027-03-25' })
+      .expect(403);
+  });
+
   it('dice qué línea no tiene costo y le carga el costo actual del producto', async () => {
     const lista = async () =>
       (

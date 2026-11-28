@@ -8,6 +8,7 @@ import {
   Query,
   Res,
   ParseUUIDPipe,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -31,6 +32,7 @@ import {
 } from '../pos/dto/record-ar-payment.dto.js';
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
 import { TenantId } from '../common/decorators/tenant-id.decorator.js';
+import { AdminORolConPermisoGuard } from '../common/guards/admin-o-rol-con-permiso.guard.js';
 import { Roles } from '../common/decorators/roles.decorator.js';
 import { Role } from '../common/enums/role.enum.js';
 import { PurchaseOrderStatus } from '../common/enums/purchase-order-status.enum.js';
@@ -273,6 +275,7 @@ export class PurchasesController {
 
   @Patch('accounts-payable/:id/vencimiento')
   @Roles(Role.ADMIN)
+  @UseGuards(AdminORolConPermisoGuard)
   @ApiOperation({
     summary: 'Cambiar la fecha de pago de una factura del proveedor',
   })
